@@ -1,0 +1,130 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "使用者權限資料",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["engineer", "manager", "employee"] },
+        "displayName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "VersionLog": {
+      "title": "VersionLog",
+      "description": "系統更新日誌",
+      "type": "object",
+      "properties": {
+        "version": { "type": "string" },
+        "content": { "type": "string" },
+        "date": { "type": "string" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["version", "content", "date"]
+    },
+    "Vendor": {
+      "title": "Vendor",
+      "description": "廠商/客戶資料",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "廠商名稱" },
+        "socialAccounts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "platform": { "type": "string", "description": "平台 (IG/FB/TikTok等)" },
+              "username": { "type": "string", "description": "帳號" },
+              "password": { "type": "string", "description": "密碼" }
+            }
+          }
+        },
+        "postingHabits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "daysOfWeek": { "type": "array", "items": { "type": "integer" } },
+              "time": { "type": "string" },
+              "contentTypes": { "type": "array", "items": { "type": "string" } },
+              "platforms": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "cooperationItems": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["short_video", "graphic_post"] },
+          "description": "合作項目"
+        },
+        "createdBy": { "type": "string", "description": "建立者UID" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "createdBy"]
+    },
+    "Post": {
+      "title": "Post",
+      "description": "社群貼文/影片資料",
+      "type": "object",
+      "properties": {
+        "vendorId": { "type": "string", "description": "所屬廠商ID" },
+        "assetId": { "type": "string", "description": "所屬素材ID" },
+        "title": { "type": "string", "description": "文案標題" },
+        "content": { "type": "string", "description": "文案內容" },
+        "status": { "type": "string", "enum": ["draft", "scheduled", "published"], "description": "發布狀態" },
+        "scheduledAt": { "type": "string", "format": "date-time", "description": "預計發布時間" },
+        "type": { "type": "string", "description": "貼文類型 (專業/生活等)" },
+        "contentType": { "type": "string", "enum": ["video", "post"], "description": "內容類型 (短影音/圖文)" },
+        "postUrl": { "type": "string", "description": "貼文位置連結" },
+        "clientConfirmed": { "type": "boolean", "description": "客戶確認" },
+        "internalConfirmed": { "type": "boolean", "description": "內部檢核" },
+        "platforms": { "type": "array", "items": { "type": "string" }, "description": "發布平台" },
+        "createdBy": { "type": "string", "description": "建立者UID" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["vendorId", "title", "status", "createdBy"]
+    },
+    "Asset": {
+      "title": "Asset",
+      "description": "素材資料庫",
+      "type": "object",
+      "properties": {
+        "vendorId": { "type": "string", "description": "所屬廠商ID" },
+        "title": { "type": "string", "description": "素材標題" },
+        "url": { "type": "string", "description": "素材連結 (選填)" },
+        "type": { "type": "string", "enum": ["video", "post"], "description": "素材類型" },
+        "category": { "type": "string", "description": "素材分類" },
+        "status": { "type": "string", "enum": ["available", "used"], "description": "使用狀態" },
+        "usedInPostId": { "type": "string", "description": "使用的貼文ID" },
+        "approved": { "type": "boolean", "description": "是否已通過審核" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string", "description": "建立者UID" }
+      },
+      "required": ["vendorId", "title", "type", "status", "approved", "createdBy"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "UserProfile",
+      "description": "使用者資料"
+    },
+    "/version_logs/{logId}": {
+      "schema": "VersionLog",
+      "description": "更新日誌"
+    },
+    "/vendors/{vendorId}": {
+      "schema": "Vendor",
+      "description": "廠商資料集合"
+    },
+    "/posts/{postId}": {
+      "schema": "Post",
+      "description": "貼文管理集合"
+    },
+    "/assets/{assetId}": {
+      "schema": "Asset",
+      "description": "素材資料庫"
+    }
+  }
+}
