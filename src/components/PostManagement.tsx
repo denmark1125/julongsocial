@@ -201,22 +201,38 @@ export default function PostManagement() {
       // Trigger Make Webhook if status is scheduled or published
       if (newStatus === 'scheduled' || newStatus === 'published') {
         const vendor = vendors.find(v => v.id === post.vendorId);
+        const webhookData = {
+          action: 'status_change',
+          postId: post.id,
+          status: newStatus,
+          title: post.title,
+          content: post.content,
+          scheduledAt: post.scheduledAt,
+          vendorName: vendor?.name,
+          platforms: post.platforms,
+          type: post.type,
+          contentType: post.contentType
+        };
+
+        // Try calling the proxy first, then fallback to direct call if configured
         fetch('/api/webhook/make', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'status_change',
-            postId: post.id,
-            status: newStatus,
-            title: post.title,
-            content: post.content,
-            scheduledAt: post.scheduledAt,
-            vendorName: vendor?.name,
-            platforms: post.platforms,
-            type: post.type,
-            contentType: post.contentType
-          })
-        }).catch(err => console.error('Webhook trigger failed', err));
+          body: JSON.stringify(webhookData)
+        }).then(res => {
+          if (!res.ok) throw new Error('Proxy failed');
+        }).catch(err => {
+          console.warn('Webhook proxy failed, checking for direct URL...', err);
+          // Fallback to direct URL if set in environment (VITE_ prefix for client-side)
+          const directUrl = (import.meta as any).env?.VITE_MAKE_WEBHOOK_URL;
+          if (directUrl) {
+            fetch(directUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(webhookData)
+            }).catch(e => console.error('Direct webhook call failed', e));
+          }
+        });
       }
     } catch (error) {
       toast.error('更新失敗');
