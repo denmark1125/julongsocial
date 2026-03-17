@@ -4,6 +4,7 @@ import path from "path";
 import cookieParser from "cookie-parser";
 import session from "express-session";
 import dotenv from "dotenv";
+import fetch from "node-fetch";
 
 dotenv.config();
 

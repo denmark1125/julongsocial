@@ -25,10 +25,13 @@ import {
   Square,
   ExternalLink,
   Video as VideoIcon,
-  Download
+  Download,
+  Trash2,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { format, isPast, isToday, addDays, parseISO, getDay, setHours, setMinutes, startOfDay, isSameDay } from 'date-fns';
+import { format, isPast, isToday, addDays, parseISO, getDay, setHours, setMinutes, startOfDay, isSameDay, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths, addMonths } from 'date-fns';
 import toast from 'react-hot-toast';
 
 import { clsx, type ClassValue } from 'clsx';
@@ -46,6 +49,9 @@ export default function PostManagement() {
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedVendorId, setSelectedVendorId] = useState<string>('all');
+  const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
+  const [openStatusId, setOpenStatusId] = useState<string | null>(null);
+  const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
   
   const [formData, setFormData] = useState<Partial<Post>>({
     vendorId: '',
@@ -155,17 +161,17 @@ export default function PostManagement() {
 
       if (editingPost) {
         // If changing asset, update old and new asset status
-        if (editingPost.assetId && editingPost.assetId !== formData.assetId) {
+        if (editingPost.assetId && editingPost.assetId !== formData.assetId && editingPost.assetId !== 'to_be_added') {
           await updateDoc(doc(db, 'assets', editingPost.assetId), { status: 'available', usedInPostId: null });
         }
-        if (formData.assetId && editingPost.assetId !== formData.assetId) {
+        if (formData.assetId && formData.assetId !== 'to_be_added' && editingPost.assetId !== formData.assetId) {
           await updateDoc(doc(db, 'assets', formData.assetId), { status: 'used', usedInPostId: editingPost.id });
         }
         await updateDoc(doc(db, 'posts', editingPost.id!), data);
         toast.success('貼文已更新');
       } else {
         const docRef = await addDoc(collection(db, 'posts'), data);
-        if (formData.assetId) {
+        if (formData.assetId && formData.assetId !== 'to_be_added') {
           await updateDoc(doc(db, 'assets', formData.assetId), { status: 'used', usedInPostId: docRef.id });
         }
         toast.success('貼文已建立');
@@ -185,7 +191,7 @@ export default function PostManagement() {
       }
       
       // Check if the linked asset is approved
-      if (post.assetId) {
+      if (post.assetId && post.assetId !== 'to_be_added') {
         const asset = assets.find(a => a.id === post.assetId);
         if (asset && !asset.approved) {
           toast.error('素材尚未通過審核，無法發布');
@@ -215,7 +221,8 @@ export default function PostManagement() {
         };
 
         // Try calling the proxy first, then fallback to direct call if configured
-        fetch('/api/webhook/make', {
+        const fetchFn = globalThis.fetch || window.fetch;
+        fetchFn('/api/webhook/make', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(webhookData)
@@ -226,7 +233,7 @@ export default function PostManagement() {
           // Fallback to direct URL if set in environment (VITE_ prefix for client-side)
           const directUrl = (import.meta as any).env?.VITE_MAKE_WEBHOOK_URL;
           if (directUrl) {
-            fetch(directUrl, {
+            fetchFn(directUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(webhookData)
@@ -276,14 +283,21 @@ export default function PostManagement() {
     const matchesSearch = post.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       vendors.find(v => v.id === post.vendorId)?.name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesVendor = selectedVendorId === 'all' || post.vendorId === selectedVendorId;
-    return matchesSearch && matchesVendor;
+    const matchesMonth = format(parseISO(post.scheduledAt), 'yyyy-MM') === selectedMonth;
+    return matchesSearch && matchesVendor && matchesMonth;
   });
 
-  const getStatusBadge = (status: PostStatus) => {
+  const months = Array.from({ length: 12 }, (_, i) => {
+    const date = subMonths(new Date(), 6 - i);
+    return format(date, 'yyyy-MM');
+  });
+
+  const getStatusBadge = (status: PostStatus, onClick?: () => void) => {
+    const baseClasses = "px-3 py-1 rounded-full text-[10px] font-bold flex items-center w-fit cursor-pointer transition-all hover:shadow-sm active:scale-95 border";
     switch (status) {
-      case 'published': return <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold flex items-center w-fit"><CheckCircle2 size={12} className="mr-1" /> 已發布</span>;
-      case 'scheduled': return <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold flex items-center w-fit"><Clock size={12} className="mr-1" /> 已排程</span>;
-      case 'draft': return <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full text-xs font-bold flex items-center w-fit"><FileEdit size={12} className="mr-1" /> 草稿</span>;
+      case 'published': return <span onClick={onClick} className={cn(baseClasses, "bg-green-100 text-green-700 border-green-200")}><CheckCircle2 size={12} className="mr-1" /> 已發布 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
+      case 'scheduled': return <span onClick={onClick} className={cn(baseClasses, "bg-blue-100 text-blue-700 border-blue-200")}><Clock size={12} className="mr-1" /> 已排程 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
+      case 'draft': return <span onClick={onClick} className={cn(baseClasses, "bg-gray-100 text-gray-700 border-gray-200")}><FileEdit size={12} className="mr-1" /> 草稿 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
     }
   };
 
@@ -331,6 +345,47 @@ export default function PostManagement() {
         </div>
       </div>
 
+      {/* Month Selector */}
+      <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-black/5 shadow-sm">
+        <div className="flex items-center space-x-4">
+          <button 
+            onClick={() => {
+              const prev = subMonths(parseISO(`${selectedMonth}-01`), 1);
+              setSelectedMonth(format(prev, 'yyyy-MM'));
+            }}
+            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+          >
+            <ChevronLeft size={20} />
+          </button>
+          <div className="text-lg font-bold serif">
+            {format(parseISO(`${selectedMonth}-01`), 'yyyy年 MM月')}
+          </div>
+          <button 
+            onClick={() => {
+              const next = addMonths(parseISO(`${selectedMonth}-01`), 1);
+              setSelectedMonth(format(next, 'yyyy-MM'));
+            }}
+            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+          >
+            <ChevronRight size={20} />
+          </button>
+        </div>
+        <div className="hidden md:flex space-x-1 overflow-x-auto max-w-md scrollbar-hide">
+          {months.map(m => (
+            <button
+              key={m}
+              onClick={() => setSelectedMonth(m)}
+              className={cn(
+                "px-3 py-1 rounded-lg text-xs font-bold transition-all whitespace-nowrap",
+                selectedMonth === m ? "bg-[#5A5A40] text-white" : "text-gray-400 hover:bg-gray-100"
+              )}
+            >
+              {format(parseISO(`${m}-01`), 'MM月')}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Vendor Filter Bar */}
       <div className="flex items-center space-x-2 overflow-x-auto pb-2 scrollbar-hide">
         <button
@@ -361,7 +416,8 @@ export default function PostManagement() {
       </div>
 
       <div className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Desktop Table View */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-[#F5F5F0] border-b border-black/5">
@@ -371,7 +427,6 @@ export default function PostManagement() {
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">發布時間</th>
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">貼文位置</th>
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">文案標題 / 內容</th>
-                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">類型</th>
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">客戶確認</th>
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">內部檢核</th>
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">操作</th>
@@ -380,7 +435,6 @@ export default function PostManagement() {
             <tbody className="divide-y divide-black/5">
               {filteredPosts.map((post) => {
                 const vendor = vendors.find(v => v.id === post.vendorId);
-                const isLate = post.status !== 'scheduled' && post.status !== 'published' && !isPast(addDays(parseISO(post.scheduledAt), -2));
                 
                 return (
                   <tr key={post.id} className="hover:bg-gray-50 transition-colors">
@@ -401,19 +455,31 @@ export default function PostManagement() {
                       </span>
                     </td>
                     <td className="p-4">
-                      <div className="relative group/status">
-                        {getStatusBadge(post.status)}
-                        <div className="absolute top-full left-0 mt-1 bg-white shadow-xl rounded-lg border border-black/5 hidden group-hover/status:block z-20">
-                          {(['draft', 'scheduled', 'published'] as PostStatus[]).map(s => (
-                            <button 
-                              key={s}
-                              onClick={() => toggleStatus(post, s)}
-                              className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-50 first:rounded-t-lg last:rounded-b-lg"
-                            >
-                              {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : '已發布'}
-                            </button>
-                          ))}
-                        </div>
+                      <div className="relative">
+                        {getStatusBadge(post.status, () => setOpenStatusId(openStatusId === post.id ? null : post.id!))}
+                        {openStatusId === post.id && (
+                          <>
+                            <div className="fixed inset-0 z-10" onClick={() => setOpenStatusId(null)} />
+                            <div className="absolute top-full left-0 mt-1 bg-white shadow-2xl rounded-2xl border border-black/5 py-2 z-20 min-w-[120px] animate-in fade-in slide-in-from-top-2 duration-200">
+                              <div className="px-3 py-1 text-[9px] font-bold text-gray-400 uppercase tracking-widest border-b border-black/5 mb-1">變更狀態</div>
+                              {(['draft', 'scheduled', 'published'] as PostStatus[]).map(s => (
+                                <button 
+                                  key={s}
+                                  onClick={() => {
+                                    toggleStatus(post, s);
+                                    setOpenStatusId(null);
+                                  }}
+                                  className={cn(
+                                    "block w-full text-left px-4 py-2.5 text-xs hover:bg-[#F5F5F0] transition-colors",
+                                    post.status === s ? "font-bold text-[#5A5A40] bg-[#F5F5F0]" : "text-gray-600"
+                                  )}
+                                >
+                                  {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : '已發布'}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
                       </div>
                     </td>
                     <td className="p-4">
@@ -438,9 +504,6 @@ export default function PostManagement() {
                       <div className="font-bold text-sm truncate">{post.title}</div>
                       <div className="text-xs text-gray-500 line-clamp-2 mt-1">{post.content}</div>
                     </td>
-                    <td className="p-4">
-                      <span className="bg-[#5A5A40]/10 text-[#5A5A40] px-2 py-1 rounded text-xs font-medium">{post.type}</span>
-                    </td>
                     <td className="p-4 text-center">
                       <button onClick={() => toggleConfirmation(post, 'clientConfirmed')}>
                         {post.clientConfirmed ? <CheckSquare className="mx-auto text-green-500" size={20} /> : <Square className="mx-auto text-gray-300" size={20} />}
@@ -452,27 +515,24 @@ export default function PostManagement() {
                       </button>
                     </td>
                     <td className="p-4">
-                      <div className="flex space-x-2">
+                      <div className="flex space-x-1">
                         <button 
                           onClick={() => {
                             setEditingPost(post);
                             setFormData(post);
                             setIsModalOpen(true);
                           }}
-                          className="p-1.5 text-blue-500 hover:bg-blue-50 rounded"
+                          className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="編輯"
                         >
                           <FileEdit size={16} />
                         </button>
                         <button 
-                          onClick={async () => {
-                            if (confirm('確定刪除？')) {
-                              await deleteDoc(doc(db, 'posts', post.id!));
-                              toast.success('已刪除');
-                            }
-                          }}
-                          className="p-1.5 text-red-500 hover:bg-red-50 rounded"
+                          onClick={() => setDeletingPostId(post.id!)}
+                          className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                          title="刪除"
                         >
-                          <MoreVertical size={16} />
+                          <Trash2 size={16} />
                         </button>
                       </div>
                     </td>
@@ -482,7 +542,166 @@ export default function PostManagement() {
             </tbody>
           </table>
         </div>
+
+        {/* Mobile Card View */}
+        <div className="md:hidden divide-y divide-black/5">
+          {filteredPosts.length === 0 ? (
+            <div className="p-8 text-center text-gray-400 italic">本月尚無貼文</div>
+          ) : (
+            filteredPosts.map((post) => {
+              const vendor = vendors.find(v => v.id === post.vendorId);
+              return (
+                <div key={post.id} className="p-4 space-y-3">
+                  <div className="flex justify-between items-start">
+                    <div className="space-y-1">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-xs font-bold text-gray-400">{vendor?.name}</span>
+                        <div className="flex gap-1">
+                          {post.platforms.map(p => (
+                            <span key={p} className="bg-gray-100 text-[9px] px-1 py-0.5 rounded font-bold">{p}</span>
+                          ))}
+                        </div>
+                      </div>
+                      <h4 className="font-bold text-sm">{post.title}</h4>
+                    </div>
+                    <div className="flex space-x-1">
+                      <button 
+                        onClick={() => {
+                          setEditingPost(post);
+                          setFormData(post);
+                          setIsModalOpen(true);
+                        }}
+                        className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg"
+                      >
+                        <FileEdit size={16} />
+                      </button>
+                      <button 
+                        onClick={() => setDeletingPostId(post.id!)}
+                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs pt-2 border-t border-black/5">
+                    <div className="flex items-center space-x-3">
+                      <div className="flex items-center text-gray-500">
+                        <CalendarIcon size={12} className="mr-1" />
+                        {format(parseISO(post.scheduledAt), 'MM/dd HH:mm')}
+                      </div>
+                      <div className="relative">
+                        {getStatusBadge(post.status, () => setOpenStatusId(openStatusId === post.id ? null : post.id!))}
+                        {openStatusId === post.id && (
+                          <>
+                            <div className="fixed inset-0 z-10" onClick={() => setOpenStatusId(null)} />
+                            <div className="absolute bottom-full left-0 mb-1 bg-white shadow-2xl rounded-2xl border border-black/5 py-2 z-20 min-w-[120px] animate-in fade-in slide-in-from-bottom-2 duration-200">
+                              <div className="px-3 py-1 text-[9px] font-bold text-gray-400 uppercase tracking-widest border-b border-black/5 mb-1">變更狀態</div>
+                              {(['draft', 'scheduled', 'published'] as PostStatus[]).map(s => (
+                                <button 
+                                  key={s}
+                                  onClick={() => {
+                                    toggleStatus(post, s);
+                                    setOpenStatusId(null);
+                                  }}
+                                  className={cn(
+                                    "block w-full text-left px-4 py-2.5 text-xs hover:bg-[#F5F5F0] transition-colors",
+                                    post.status === s ? "font-bold text-[#5A5A40] bg-[#F5F5F0]" : "text-gray-600"
+                                  )}
+                                >
+                                  {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : '已發布'}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-1">
+                        <span className="text-[9px] text-gray-400">客:</span>
+                        <button onClick={() => toggleConfirmation(post, 'clientConfirmed')}>
+                          {post.clientConfirmed ? <CheckSquare className="text-green-500" size={14} /> : <Square className="text-gray-300" size={14} />}
+                        </button>
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        <span className="text-[9px] text-gray-400">內:</span>
+                        <button onClick={() => toggleConfirmation(post, 'internalConfirmed')}>
+                          {post.internalConfirmed ? <CheckSquare className="text-green-500" size={14} /> : <Square className="text-gray-300" size={14} />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-black/5">
+                    <div className="flex space-x-4">
+                      <button 
+                        onClick={() => toggleConfirmation(post, 'clientConfirmed')}
+                        className="flex items-center space-x-1"
+                      >
+                        {post.clientConfirmed ? <CheckSquare className="text-green-500" size={16} /> : <Square className="text-gray-300" size={16} />}
+                        <span className="text-[10px] text-gray-500">業主</span>
+                      </button>
+                      <button 
+                        onClick={() => toggleConfirmation(post, 'internalConfirmed')}
+                        className="flex items-center space-x-1"
+                      >
+                        {post.internalConfirmed ? <CheckSquare className="text-green-500" size={16} /> : <Square className="text-gray-300" size={16} />}
+                        <span className="text-[10px] text-gray-500">內部</span>
+                      </button>
+                    </div>
+                    {post.postUrl && (
+                      <a 
+                        href={post.postUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="text-blue-500 font-bold text-[10px] flex items-center"
+                      >
+                        <ExternalLink size={12} className="mr-1" /> 連結
+                      </a>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deletingPostId && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-[32px] w-full max-w-sm p-8 shadow-2xl animate-in fade-in zoom-in duration-200">
+            <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Trash2 className="text-red-500" size={32} />
+            </div>
+            <h3 className="text-xl font-bold text-center mb-2 serif">確定要刪除嗎？</h3>
+            <p className="text-gray-500 text-center text-sm mb-8">此動作將永久刪除這則貼文，且無法復原。</p>
+            <div className="flex space-x-3">
+              <button 
+                onClick={() => setDeletingPostId(null)}
+                className="flex-1 py-3 rounded-2xl font-bold text-gray-500 hover:bg-gray-100 transition-all"
+              >
+                取消
+              </button>
+              <button 
+                onClick={async () => {
+                  try {
+                    await deleteDoc(doc(db, 'posts', deletingPostId));
+                    toast.success('已刪除貼文');
+                    setDeletingPostId(null);
+                  } catch (error) {
+                    toast.error('刪除失敗');
+                  }
+                }}
+                className="flex-1 bg-red-500 text-white py-3 rounded-2xl font-bold shadow-lg hover:bg-red-600 transition-all"
+              >
+                確認刪除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -502,7 +721,20 @@ export default function PostManagement() {
                     <select 
                       required
                       value={formData.vendorId}
-                      onChange={(e) => setFormData({ ...formData, vendorId: e.target.value })}
+                      onChange={(e) => {
+                        const vendorId = e.target.value;
+                        const selectedVendor = vendors.find(v => v.id === vendorId);
+                        let defaultContentType = formData.contentType || 'post';
+                        
+                        if (selectedVendor?.postingHabits && selectedVendor.postingHabits.length > 0) {
+                          const habitTypes = Array.from(new Set(selectedVendor.postingHabits.flatMap(h => h.contentTypes || [])));
+                          if (habitTypes.length === 1) {
+                            defaultContentType = habitTypes[0] as 'post' | 'video';
+                          }
+                        }
+                        
+                        setFormData({ ...formData, vendorId, contentType: defaultContentType });
+                      }}
                       className="w-full p-2 bg-[#F5F5F0] rounded-xl border-none"
                     >
                       <option value="">請選擇廠商</option>
@@ -546,6 +778,10 @@ export default function PostManagement() {
                       value={formData.assetId || ''}
                       onChange={(e) => {
                         const aid = e.target.value;
+                        if (aid === 'to_be_added') {
+                          setFormData({ ...formData, assetId: aid });
+                          return;
+                        }
                         const asset = assets.find(a => a.id === aid);
                         setFormData({ 
                           ...formData, 
@@ -557,6 +793,7 @@ export default function PostManagement() {
                       className="w-full p-2 bg-[#F5F5F0] rounded-xl border-none"
                     >
                       <option value="">選擇現有素材...</option>
+                      <option value="to_be_added" className="text-blue-600 font-bold">✨ 待補上 (稍後上傳)</option>
                       {assets
                         .filter(a => 
                           a.vendorId === formData.vendorId && 
