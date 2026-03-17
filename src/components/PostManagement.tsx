@@ -301,8 +301,53 @@ export default function PostManagement() {
     }
   };
 
+  // Statistics calculation
+  const vendorStats = vendors.map(vendor => {
+    const vendorPosts = posts.filter(p => 
+      p.vendorId === vendor.id && 
+      format(parseISO(p.scheduledAt), 'yyyy-MM') === selectedMonth
+    );
+    return {
+      id: vendor.id,
+      name: vendor.name,
+      count: vendorPosts.length,
+      target: 8, // User mentioned about 8 per month (2 per week)
+      percentage: Math.min(Math.round((vendorPosts.length / 8) * 100), 100)
+    };
+  });
+
   return (
     <div className="space-y-6">
+      {/* Statistics Section */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {vendorStats.map(stat => (
+          <div key={stat.id} className="bg-white p-4 rounded-3xl border border-black/5 shadow-sm">
+            <div className="flex justify-between items-start mb-2">
+              <div className="font-bold text-sm truncate pr-2">{stat.name}</div>
+              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">本月進度</div>
+            </div>
+            <div className="flex items-end justify-between mb-1">
+              <div className="text-2xl font-bold serif">{stat.count} <span className="text-xs text-gray-400 font-sans">/ {stat.target}</span></div>
+              <div className={cn(
+                "text-[10px] font-bold px-2 py-0.5 rounded-full",
+                stat.count >= stat.target ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
+              )}>
+                {stat.percentage}%
+              </div>
+            </div>
+            <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <div 
+                className={cn(
+                  "h-full transition-all duration-500",
+                  stat.count >= stat.target ? "bg-green-500" : "bg-[#5A5A40]"
+                )}
+                style={{ width: `${stat.percentage}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="relative flex-1 w-full max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />

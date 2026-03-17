@@ -20,7 +20,8 @@ import {
   subMonths,
   getDay,
   parseISO,
-  subDays
+  subDays,
+  addDays
 } from 'date-fns';
 import { ChevronLeft, ChevronRight, Clock, Plus, Download } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -54,16 +55,32 @@ export default function CalendarView() {
   }, []);
 
   const handleDragStart = (e: React.DragEvent, type: 'post' | 'habit', id: string, data?: any) => {
+    e.stopPropagation();
     e.dataTransfer.setData('type', type);
     e.dataTransfer.setData('id', id);
     if (data) e.dataTransfer.setData('data', JSON.stringify(data));
+    
+    // Add visual feedback
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.style.opacity = '0.4';
+    }
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.style.opacity = '1';
+    }
   };
 
   const handleDrop = async (e: React.DragEvent, date: Date) => {
     e.preventDefault();
+    e.stopPropagation();
+    
     const type = e.dataTransfer.getData('type');
     const id = e.dataTransfer.getData('id');
     const dataStr = e.dataTransfer.getData('data');
+
+    if (!type || !id) return;
 
     if (type === 'post') {
       try {
@@ -72,10 +89,18 @@ export default function CalendarView() {
           const oldDate = parseISO(post.scheduledAt);
           const newDate = new Date(date);
           newDate.setHours(oldDate.getHours(), oldDate.getMinutes());
-          await updateDoc(doc(db, 'posts', id), { scheduledAt: newDate.toISOString() });
-          toast.success('已移動貼文');
+          
+          // Only update if the date actually changed to avoid unnecessary writes
+          if (!isSameDay(oldDate, newDate)) {
+            await updateDoc(doc(db, 'posts', id), { 
+              scheduledAt: format(newDate, "yyyy-MM-dd'T'HH:mm"),
+              // Ensure we don't accidentally create a new one by being explicit
+            });
+            toast.success('已移動貼文');
+          }
         }
       } catch (error) {
+        console.error('Move error:', error);
         toast.error('移動失敗');
       }
     } else if (type === 'habit') {
@@ -91,7 +116,7 @@ export default function CalendarView() {
           title: `[預約] ${habit.vendorName} - ${habit.contentTypes.join('/')}`,
           content: '',
           status: 'draft',
-          scheduledAt: newDate.toISOString(),
+          scheduledAt: format(newDate, "yyyy-MM-dd'T'HH:mm"),
           type: 'social',
           contentType: habit.contentTypes[0] === 'video' ? 'video' : 'post',
           clientConfirmed: false,
@@ -216,10 +241,14 @@ export default function CalendarView() {
                 {/* Posting Habits Reminders */}
                 {dayHabits.map((habit, hIdx) => {
                   // Smarter fulfillment: check if there's a post for this vendor/type 
-                  // on this day OR the day before (as requested by user example)
+                  // on this day OR the day before OR the day after (to handle "moving" reminders)
                   const isFulfilled = posts.some(p => 
                     p.vendorId === habit.vendorId && 
-                    (isSameDay(parseISO(p.scheduledAt), day) || isSameDay(parseISO(p.scheduledAt), subDays(day, 1)))
+                    (
+                      isSameDay(parseISO(p.scheduledAt), day) || 
+                      isSameDay(parseISO(p.scheduledAt), subDays(day, 1)) ||
+                      isSameDay(parseISO(p.scheduledAt), addDays(day, 1))
+                    )
                   );
                   
                   if (isFulfilled) return null;
@@ -229,7 +258,8 @@ export default function CalendarView() {
                       key={`habit-${hIdx}`} 
                       draggable
                       onDragStart={(e) => handleDragStart(e, 'habit', `habit-${hIdx}`, habit)}
-                      className="text-[9px] p-1 rounded bg-orange-50 text-orange-700 border border-orange-100 flex items-center opacity-70 cursor-grab active:cursor-grabbing"
+                      onDragEnd={handleDragEnd}
+                      className="text-[9px] p-1 rounded bg-orange-50 text-orange-700 border border-orange-100 flex items-center opacity-70 cursor-grab active:cursor-grabbing hover:opacity-100 transition-opacity"
                     >
                       <span className="font-bold mr-1">{habit.time}</span>
                       <span className="truncate">🔔 {habit.vendorName}: {habit.contentTypes.map(t => t === 'post' ? '貼' : '影').join('/')}</span>
@@ -245,8 +275,9 @@ export default function CalendarView() {
                       key={post.id} 
                       draggable
                       onDragStart={(e) => handleDragStart(e, 'post', post.id!)}
+                      onDragEnd={handleDragEnd}
                       className={clsx(
-                        "text-[9px] p-1 rounded border flex flex-col leading-tight mb-1 cursor-grab active:cursor-grabbing",
+                        "text-[9px] p-1 rounded border flex flex-col leading-tight mb-1 cursor-grab active:cursor-grabbing hover:shadow-sm transition-all",
                         post.status === 'published' ? "bg-green-50 text-green-700 border-green-100" : 
                         post.status === 'scheduled' ? "bg-blue-50 text-blue-700 border-blue-100" : "bg-gray-50 text-gray-600 border-gray-200"
                       )}
