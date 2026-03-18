@@ -37,6 +37,8 @@ export interface Vendor {
   socialAccounts: SocialAccount[];
   postingHabits?: PostingHabit[];
   cooperationItems: CooperationItem[];
+  monthlyTargetPosts?: number;
+  monthlyTargetVideos?: number;
   createdBy: string;
   createdAt: string;
 }
@@ -75,6 +77,14 @@ export interface Asset {
   approved: boolean;
   createdAt: string;
   createdBy: string;
+}
+
+export interface DismissedHabit {
+  id?: string;
+  vendorId: string;
+  habitTime: string;
+  date: string; // YYYY-MM-DD
+  createdAt: string;
 }
 
 export enum OperationType {

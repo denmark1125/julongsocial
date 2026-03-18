@@ -240,12 +240,23 @@ export default function AssetDatabase() {
       {/* Asset Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredAssets.map((asset) => (
-          <div key={asset.id} className="bg-white rounded-[32px] overflow-hidden border border-black/5 shadow-sm hover:shadow-md transition-all group">
-            <div className="aspect-video bg-[#F5F5F0] relative flex items-center justify-center overflow-hidden">
+          <div 
+            key={asset.id} 
+            className={cn(
+              "bg-white rounded-[32px] overflow-hidden border border-black/5 shadow-sm transition-all group",
+              asset.status === 'used' 
+                ? "opacity-50 scale-[0.96] grayscale-[0.5] hover:opacity-80" 
+                : "hover:shadow-md hover:scale-[1.01]"
+            )}
+          >
+            <div className={cn(
+              "bg-[#F5F5F0] relative flex items-center justify-center overflow-hidden transition-all",
+              asset.status === 'used' ? "aspect-[21/9]" : "aspect-video"
+            )}>
               {asset.type === 'video' ? (
-                <Video size={48} className="text-[#5A5A40] opacity-20" />
+                <Video size={asset.status === 'used' ? 32 : 48} className="text-[#5A5A40] opacity-20" />
               ) : (
-                <FileText size={48} className="text-[#5A5A40] opacity-20" />
+                <FileText size={asset.status === 'used' ? 32 : 48} className="text-[#5A5A40] opacity-20" />
               )}
               {asset.url && (
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -253,31 +264,40 @@ export default function AssetDatabase() {
                     href={asset.url} 
                     target="_blank" 
                     rel="noopener noreferrer"
-                    className="bg-white text-[#5A5A40] p-3 rounded-full hover:scale-110 transition-transform"
+                    className={cn(
+                      "bg-white text-[#5A5A40] rounded-full hover:scale-110 transition-transform",
+                      asset.status === 'used' ? "p-2" : "p-3"
+                    )}
                   >
-                    <ExternalLink size={24} />
+                    <ExternalLink size={asset.status === 'used' ? 18 : 24} />
                   </a>
                 </div>
               )}
               <div className="absolute top-4 left-4">
-                <span className="px-3 py-1 rounded-full text-[10px] font-bold bg-[#5A5A40] text-white uppercase tracking-wider">
+                <span className={cn(
+                  "px-3 py-1 rounded-full text-[10px] font-bold text-white uppercase tracking-wider",
+                  asset.status === 'used' ? "bg-gray-400" : "bg-[#5A5A40]"
+                )}>
                   {asset.category || '未分類'}
                 </span>
               </div>
               <div className="absolute top-4 right-4">
                 <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                  asset.status === 'available' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                  asset.status === 'available' ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'
                 }`}>
                   {asset.status === 'available' ? '可使用' : '已使用'}
                 </span>
               </div>
             </div>
-            <div className="p-6 space-y-4">
+            <div className={cn("p-6 space-y-4", asset.status === 'used' && "py-3")}>
               <div>
                 <p className="text-[10px] font-bold text-[#5A5A40] uppercase tracking-widest mb-1">
                   {getVendorName(asset.vendorId)}
                 </p>
-                <h4 className="font-bold text-lg leading-tight line-clamp-2">{asset.title}</h4>
+                <h4 className={cn(
+                  "font-bold leading-tight line-clamp-2",
+                  asset.status === 'used' ? "text-sm text-gray-500" : "text-lg"
+                )}>{asset.title}</h4>
               </div>
               <div className="flex items-center justify-between pt-4 border-t border-black/5">
                 <div className="flex items-center space-x-2">
@@ -296,7 +316,7 @@ export default function AssetDatabase() {
                   onClick={() => handleDelete(asset.id!)}
                   className="text-gray-400 hover:text-red-500 transition-colors"
                 >
-                  <Trash2 size={18} />
+                  <Trash2 size={asset.status === 'used' ? 14 : 18} />
                 </button>
               </div>
             </div>

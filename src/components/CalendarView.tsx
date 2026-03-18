@@ -9,7 +9,7 @@ import {
   addDoc
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Post, Vendor, Asset } from '../types';
+import { Post, Vendor, Asset, DismissedHabit } from '../types';
 import { 
   format, 
   startOfMonth, 
@@ -23,7 +23,7 @@ import {
   subDays,
   addDays
 } from 'date-fns';
-import { ChevronLeft, ChevronRight, Clock, Plus, Download } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Plus, Download, X } from 'lucide-react';
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
@@ -33,6 +33,7 @@ export default function CalendarView() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
 
   useEffect(() => {
     const vUnsubscribe = onSnapshot(collection(db, 'vendors'), (snapshot) => {
@@ -47,10 +48,15 @@ export default function CalendarView() {
       setAssets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
     });
 
+    const dUnsubscribe = onSnapshot(collection(db, 'dismissedHabits'), (snapshot) => {
+      setDismissedHabits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DismissedHabit)));
+    });
+
     return () => {
       vUnsubscribe();
       pUnsubscribe();
       aUnsubscribe();
+      dUnsubscribe();
     };
   }, []);
 
@@ -129,6 +135,20 @@ export default function CalendarView() {
       } catch (error) {
         toast.error('建立失敗');
       }
+    }
+  };
+
+  const dismissHabit = async (vendorId: string, habitTime: string, date: Date) => {
+    try {
+      await addDoc(collection(db, 'dismissedHabits'), {
+        vendorId,
+        habitTime,
+        date: format(date, 'yyyy-MM-dd'),
+        createdAt: new Date().toISOString()
+      });
+      toast.success('已刪除預定排程');
+    } catch (error) {
+      toast.error('刪除失敗');
     }
   };
 
@@ -240,6 +260,15 @@ export default function CalendarView() {
               <div className="space-y-1">
                 {/* Posting Habits Reminders */}
                 {dayHabits.map((habit, hIdx) => {
+                  // Check if this specific habit occurrence was dismissed
+                  const isDismissed = dismissedHabits.some(d => 
+                    d.vendorId === habit.vendorId && 
+                    d.habitTime === habit.time && 
+                    d.date === format(day, 'yyyy-MM-dd')
+                  );
+
+                  if (isDismissed) return null;
+
                   // Smarter fulfillment: check if there's a post for this vendor/type 
                   // on this day OR the day before OR the day after (to handle "moving" reminders)
                   const isFulfilled = posts.some(p => 
@@ -259,10 +288,19 @@ export default function CalendarView() {
                       draggable
                       onDragStart={(e) => handleDragStart(e, 'habit', `habit-${hIdx}`, habit)}
                       onDragEnd={handleDragEnd}
-                      className="text-[9px] p-1 rounded bg-orange-50 text-orange-700 border border-orange-100 flex items-center opacity-70 cursor-grab active:cursor-grabbing hover:opacity-100 transition-opacity"
+                      className="group relative text-[9px] p-1 rounded bg-orange-50 text-orange-700 border border-orange-100 flex items-center opacity-70 cursor-grab active:cursor-grabbing hover:opacity-100 transition-opacity"
                     >
                       <span className="font-bold mr-1">{habit.time}</span>
-                      <span className="truncate">🔔 {habit.vendorName}: {habit.contentTypes.map(t => t === 'post' ? '貼' : '影').join('/')}</span>
+                      <span className="truncate flex-1">🔔 {habit.vendorName}: {habit.contentTypes.map(t => t === 'post' ? '貼' : '影').join('/')}</span>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          dismissHabit(habit.vendorId, habit.time, day);
+                        }}
+                        className="hidden group-hover:flex ml-1 p-0.5 hover:bg-orange-200 rounded-full transition-colors"
+                      >
+                        <X size={8} />
+                      </button>
                     </div>
                   );
                 })}

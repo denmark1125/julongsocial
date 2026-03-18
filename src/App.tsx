@@ -15,6 +15,7 @@ import CalendarView from './components/CalendarView';
 import AssetDatabase from './components/AssetDatabase';
 import UserManagement from './components/UserManagement';
 import VersionLogView from './components/VersionLog';
+import Logo from './components/Logo';
 import { Toaster } from 'react-hot-toast';
 import { LogIn } from 'lucide-react';
 import { UserProfile, UserRole } from './types';
@@ -76,13 +77,11 @@ export default function App() {
     return (
       <div className="h-screen flex items-center justify-center bg-[#F5F5F0] p-4">
         <div className="bg-white p-12 rounded-[40px] shadow-2xl max-w-md w-full text-center space-y-8 border border-black/5">
-          <div className="space-y-2">
-            <h1 className="text-4xl font-bold serif text-[#5A5A40]">聚浪社群</h1>
-            <p className="text-gray-500">貼文排程與廠商管理系統</p>
-          </div>
-          <div className="py-4">
-            <div className="w-24 h-24 bg-[#F5F5F0] rounded-3xl mx-auto flex items-center justify-center text-[#5A5A40]">
-              <LogIn size={48} />
+          <div className="flex flex-col items-center space-y-4">
+            <Logo className="w-24 h-24" showText={false} />
+            <div className="space-y-1">
+              <h1 className="text-4xl font-black serif text-[#1a1a1a]">聚浪</h1>
+              <p className="text-gray-500 font-bold tracking-widest uppercase text-sm">Julong 社群排程系統</p>
             </div>
           </div>
           <button 

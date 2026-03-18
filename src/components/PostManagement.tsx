@@ -303,16 +303,31 @@ export default function PostManagement() {
 
   // Statistics calculation
   const vendorStats = vendors.map(vendor => {
-    const vendorPosts = posts.filter(p => 
+    const vendorMonthPosts = posts.filter(p => 
       p.vendorId === vendor.id && 
       format(parseISO(p.scheduledAt), 'yyyy-MM') === selectedMonth
     );
+    
+    const postCount = vendorMonthPosts.filter(p => p.contentType === 'post').length;
+    const videoCount = vendorMonthPosts.filter(p => p.contentType === 'video').length;
+    
+    const targetPosts = vendor.monthlyTargetPosts || 0;
+    const targetVideos = vendor.monthlyTargetVideos || 0;
+    const totalTarget = targetPosts + targetVideos || 8; // Fallback to 8 if no target set
+    
+    const totalCount = vendorMonthPosts.length;
+    const percentage = Math.min(Math.round((totalCount / totalTarget) * 100), 100);
+    
     return {
       id: vendor.id,
       name: vendor.name,
-      count: vendorPosts.length,
-      target: 8, // User mentioned about 8 per month (2 per week)
-      percentage: Math.min(Math.round((vendorPosts.length / 8) * 100), 100)
+      count: totalCount,
+      postCount,
+      videoCount,
+      target: totalTarget,
+      targetPosts,
+      targetVideos,
+      percentage
     };
   });
 
@@ -333,6 +348,32 @@ export default function PostManagement() {
                 stat.count >= stat.target ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
               )}>
                 {stat.percentage}%
+              </div>
+            </div>
+            <div className="flex gap-2 mb-2">
+              <div className="flex-1">
+                <div className="flex justify-between text-[8px] font-bold text-blue-400 mb-0.5">
+                  <span>圖文</span>
+                  <span>{stat.postCount}/{stat.targetPosts}</span>
+                </div>
+                <div className="w-full h-1 bg-blue-50 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-blue-400 transition-all duration-500"
+                    style={{ width: `${stat.targetPosts > 0 ? Math.min((stat.postCount / stat.targetPosts) * 100, 100) : 0}%` }}
+                  />
+                </div>
+              </div>
+              <div className="flex-1">
+                <div className="flex justify-between text-[8px] font-bold text-orange-400 mb-0.5">
+                  <span>影音</span>
+                  <span>{stat.videoCount}/{stat.targetVideos}</span>
+                </div>
+                <div className="w-full h-1 bg-orange-50 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-orange-400 transition-all duration-500"
+                    style={{ width: `${stat.targetVideos > 0 ? Math.min((stat.videoCount / stat.targetVideos) * 100, 100) : 0}%` }}
+                  />
+                </div>
               </div>
             </div>
             <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">

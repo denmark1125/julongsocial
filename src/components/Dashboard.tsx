@@ -7,7 +7,7 @@ import {
   limit 
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Post, Vendor, Asset } from '../types';
+import { Post, Vendor, Asset, DismissedHabit } from '../types';
 import { 
   format, 
   isPast, 
@@ -18,7 +18,8 @@ import {
   startOfWeek,
   endOfWeek,
   isSameDay,
-  getDay
+  getDay,
+  subDays
 } from 'date-fns';
 import { 
   AlertTriangle, 
@@ -48,6 +49,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
   const [posts, setPosts] = useState<Post[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
 
   useEffect(() => {
     const vUnsubscribe = onSnapshot(collection(db, 'vendors'), (snapshot) => {
@@ -62,10 +64,15 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
       setAssets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
     });
 
+    const dUnsubscribe = onSnapshot(collection(db, 'dismissedHabits'), (snapshot) => {
+      setDismissedHabits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DismissedHabit)));
+    });
+
     return () => {
       vUnsubscribe();
       pUnsubscribe();
       aUnsubscribe();
+      dUnsubscribe();
     };
   }, []);
 
@@ -102,26 +109,41 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
   for (let i = 0; i < 7; i++) {
     const checkDate = addDays(today, i);
     const dayOfWeek = getDay(checkDate);
+    const dateStr = format(checkDate, 'yyyy-MM-dd');
     
     vendors.forEach(vendor => {
       const habits = vendor.postingHabits || [];
-      const habitForDay = habits.find(h => h.daysOfWeek.includes(dayOfWeek));
+      const dayHabits = habits.filter(h => h.daysOfWeek.includes(dayOfWeek));
       
-      if (habitForDay) {
-        const hasPost = posts.some(p => 
+      dayHabits.forEach(habit => {
+        // Check if dismissed
+        const isDismissed = dismissedHabits.some(d => 
+          d.vendorId === vendor.id && 
+          d.habitTime === habit.time && 
+          d.date === dateStr
+        );
+
+        if (isDismissed) return;
+
+        // Check if fulfilled (post on day +/- 1)
+        const isFulfilled = posts.some(p => 
           p.vendorId === vendor.id && 
-          isSameDay(parseISO(p.scheduledAt), checkDate)
+          (
+            isSameDay(parseISO(p.scheduledAt), checkDate) || 
+            isSameDay(parseISO(p.scheduledAt), subDays(checkDate, 1)) ||
+            isSameDay(parseISO(p.scheduledAt), addDays(checkDate, 1))
+          )
         );
         
-        if (!hasPost) {
+        if (!isFulfilled) {
           missingSchedules.push({
             vendorId: vendor.id,
             vendorName: vendor.name,
             date: checkDate,
-            habit: habitForDay
+            habit: habit
           });
         }
-      }
+      });
     });
   }
 

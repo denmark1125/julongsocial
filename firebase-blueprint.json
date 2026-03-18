@@ -59,6 +59,8 @@
           "items": { "type": "string", "enum": ["short_video", "graphic_post"] },
           "description": "合作項目"
         },
+        "monthlyTargetPosts": { "type": "integer", "description": "每月預計圖文發布數" },
+        "monthlyTargetVideos": { "type": "integer", "description": "每月預計影音發布數" },
         "createdBy": { "type": "string", "description": "建立者UID" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
@@ -103,6 +105,18 @@
         "createdBy": { "type": "string", "description": "建立者UID" }
       },
       "required": ["vendorId", "title", "type", "status", "approved", "createdBy"]
+    },
+    "DismissedHabit": {
+      "title": "DismissedHabit",
+      "description": "已刪除/隱藏的預定排程提醒",
+      "type": "object",
+      "properties": {
+        "vendorId": { "type": "string" },
+        "habitTime": { "type": "string" },
+        "date": { "type": "string", "description": "YYYY-MM-DD" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["vendorId", "habitTime", "date"]
     }
   },
   "firestore": {
@@ -125,6 +139,10 @@
     "/assets/{assetId}": {
       "schema": "Asset",
       "description": "素材資料庫"
+    },
+    "/dismissedHabits/{id}": {
+      "schema": "DismissedHabit",
+      "description": "已刪除的預定排程提醒"
     }
   }
 }

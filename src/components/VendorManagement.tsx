@@ -28,7 +28,9 @@ export default function VendorManagement() {
     name: '',
     socialAccounts: [{ platform: 'IG', username: '', password: '' }],
     postingHabits: [] as any[],
-    cooperationItems: [] as string[]
+    cooperationItems: [] as string[],
+    monthlyTargetPosts: 8,
+    monthlyTargetVideos: 0
   });
 
   useEffect(() => {
@@ -127,7 +129,9 @@ export default function VendorManagement() {
         name: '', 
         socialAccounts: [{ platform: 'IG', username: '', password: '' }], 
         postingHabits: [],
-        cooperationItems: []
+        cooperationItems: [],
+        monthlyTargetPosts: 8,
+        monthlyTargetVideos: 0
       });
     } catch (error) {
       toast.error('儲存失敗');
@@ -181,7 +185,9 @@ export default function VendorManagement() {
                       name: vendor.name, 
                       socialAccounts: vendor.socialAccounts,
                       postingHabits: vendor.postingHabits || [],
-                      cooperationItems: vendor.cooperationItems || []
+                      cooperationItems: vendor.cooperationItems || [],
+                      monthlyTargetPosts: vendor.monthlyTargetPosts || 0,
+                      monthlyTargetVideos: vendor.monthlyTargetVideos || 0
                     });
                     setIsModalOpen(true);
                   }}
@@ -208,6 +214,18 @@ export default function VendorManagement() {
                   ))}
                 </div>
               )}
+
+              <div className="flex gap-4 mb-2">
+                <div className="bg-blue-50 p-2 rounded-xl flex-1 border border-blue-100">
+                  <div className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">圖文目標</div>
+                  <div className="text-sm font-bold text-blue-700">{vendor.monthlyTargetPosts || 0} <span className="text-[10px] font-normal">/ 月</span></div>
+                </div>
+                <div className="bg-orange-50 p-2 rounded-xl flex-1 border border-orange-100">
+                  <div className="text-[10px] text-orange-400 font-bold uppercase tracking-wider">影音目標</div>
+                  <div className="text-sm font-bold text-orange-700">{vendor.monthlyTargetVideos || 0} <span className="text-[10px] font-normal">/ 月</span></div>
+                </div>
+              </div>
+
               <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">社群帳號</div>
               {vendor.socialAccounts.map((acc, idx) => (
                 <div key={idx} className="flex items-center justify-between p-3 bg-[#F5F5F0] rounded-xl text-sm">
@@ -294,6 +312,31 @@ export default function VendorManagement() {
                         <span className="text-sm text-gray-700">{item.label}</span>
                       </label>
                     ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">每月預計圖文發布數</label>
+                    <input 
+                      type="number" 
+                      min="0"
+                      value={formData.monthlyTargetPosts}
+                      onChange={(e) => setFormData({ ...formData, monthlyTargetPosts: parseInt(e.target.value) || 0 })}
+                      className="w-full p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-[#5A5A40]"
+                      placeholder="例如: 8"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">每月預計影音發布數</label>
+                    <input 
+                      type="number" 
+                      min="0"
+                      value={formData.monthlyTargetVideos}
+                      onChange={(e) => setFormData({ ...formData, monthlyTargetVideos: parseInt(e.target.value) || 0 })}
+                      className="w-full p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-[#5A5A40]"
+                      placeholder="例如: 4"
+                    />
                   </div>
                 </div>
 

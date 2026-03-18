@@ -19,6 +19,9 @@ service cloud.firestore {
     // Collection: assets
     // Fields: vendorId (string), title (string), url (string), type (string: video|post), category (string), status (string: available|used), 
     //         usedInPostId (string), createdAt (string), createdBy (string)
+    //
+    // Collection: dismissedHabits
+    // Fields: vendorId (string), habitTime (string), date (string: YYYY-MM-DD), createdAt (timestamp)
     // ===============================================================
 
     // ===============================================================
@@ -59,7 +62,9 @@ service cloud.firestore {
       return data.keys().hasAll(['name', 'createdBy']) &&
              isValidString(data.name, 100) &&
              data.createdBy is string &&
-             (!('cooperationItems' in data) || data.cooperationItems is list);
+             (!('cooperationItems' in data) || data.cooperationItems is list) &&
+             (!('monthlyTargetPosts' in data) || data.monthlyTargetPosts is int) &&
+             (!('monthlyTargetVideos' in data) || data.monthlyTargetVideos is int);
     }
 
     function isValidPost(data) {
@@ -84,6 +89,13 @@ service cloud.firestore {
              data.createdBy is string &&
              (!('url' in data) || data.url is string) &&
              (!('category' in data) || data.category is string);
+    }
+
+    function isValidDismissedHabit(data) {
+      return data.keys().hasAll(['vendorId', 'habitTime', 'date']) &&
+             data.vendorId is string &&
+             data.habitTime is string &&
+             data.date is string;
     }
 
     match /users/{uid} {
@@ -116,6 +128,12 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidAsset(request.resource.data);
       allow update: if isAuthenticated() && isValidAsset(request.resource.data);
+      allow delete: if isManager();
+    }
+
+    match /dismissedHabits/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidDismissedHabit(request.resource.data);
       allow delete: if isManager();
     }
   }
