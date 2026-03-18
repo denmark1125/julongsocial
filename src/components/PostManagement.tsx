@@ -49,6 +49,7 @@ export default function PostManagement() {
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedVendorId, setSelectedVendorId] = useState<string>('all');
+  const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [openStatusId, setOpenStatusId] = useState<string | null>(null);
   const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
@@ -283,8 +284,9 @@ export default function PostManagement() {
     const matchesSearch = post.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       vendors.find(v => v.id === post.vendorId)?.name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesVendor = selectedVendorId === 'all' || post.vendorId === selectedVendorId;
+    const matchesStatus = selectedStatus === 'all' || post.status === selectedStatus;
     const matchesMonth = format(parseISO(post.scheduledAt), 'yyyy-MM') === selectedMonth;
-    return matchesSearch && matchesVendor && matchesMonth;
+    return matchesSearch && matchesVendor && matchesStatus && matchesMonth;
   });
 
   const months = Array.from({ length: 12 }, (_, i) => {
@@ -470,6 +472,42 @@ export default function PostManagement() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Status Filter Bar */}
+      <div className="flex items-center space-x-2 overflow-x-auto pb-2 scrollbar-hide">
+        {[
+          { id: 'all', label: '全部狀態' },
+          { id: 'draft', label: '草稿' },
+          { id: 'scheduled', label: '已排程' },
+          { id: 'published', label: '已發布' }
+        ].map(status => (
+          <button
+            key={status.id}
+            onClick={() => setSelectedStatus(status.id)}
+            className={cn(
+              "px-4 py-1.5 rounded-full text-xs font-bold transition-all whitespace-nowrap border flex items-center",
+              selectedStatus === status.id 
+                ? "bg-[#5A5A40] text-white border-[#5A5A40]" 
+                : "bg-white text-gray-500 border-black/5 hover:border-gray-300"
+            )}
+          >
+            {status.id === 'draft' && <FileEdit size={12} className="mr-1.5" />}
+            {status.id === 'scheduled' && <Clock size={12} className="mr-1.5" />}
+            {status.id === 'published' && <CheckCircle2 size={12} className="mr-1.5" />}
+            {status.label}
+            <span className="ml-1.5 opacity-50 text-[10px]">
+              ({posts.filter(p => {
+                const matchesSearch = p.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                  vendors.find(v => v.id === p.vendorId)?.name.toLowerCase().includes(searchTerm.toLowerCase());
+                const matchesVendor = selectedVendorId === 'all' || p.vendorId === selectedVendorId;
+                const matchesMonth = format(parseISO(p.scheduledAt), 'yyyy-MM') === selectedMonth;
+                const matchesStatus = status.id === 'all' || p.status === status.id;
+                return matchesSearch && matchesVendor && matchesMonth && matchesStatus;
+              }).length})
+            </span>
+          </button>
+        ))}
       </div>
 
       {/* Vendor Filter Bar */}

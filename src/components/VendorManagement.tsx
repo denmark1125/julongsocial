@@ -11,7 +11,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Vendor, SocialAccount, OperationType } from '../types';
-import { Plus, Trash2, Edit2, ExternalLink, Shield, X } from 'lucide-react';
+import { Plus, Trash2, Edit2, ExternalLink, Shield, X, Eye, EyeOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -24,6 +24,8 @@ export default function VendorManagement() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
+  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
+  const [visibleFormPasswords, setVisibleFormPasswords] = useState<Record<number, boolean>>({});
   const [formData, setFormData] = useState({
     name: '',
     socialAccounts: [{ platform: 'IG', username: '', password: '' }],
@@ -227,18 +229,31 @@ export default function VendorManagement() {
               </div>
 
               <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">社群帳號</div>
-              {vendor.socialAccounts.map((acc, idx) => (
-                <div key={idx} className="flex items-center justify-between p-3 bg-[#F5F5F0] rounded-xl text-sm">
-                  <div className="flex items-center">
-                    <span className="bg-[#5A5A40] text-white text-[10px] px-2 py-0.5 rounded-full mr-2 font-bold">{acc.platform}</span>
-                    <span className="font-medium">{acc.username}</span>
+              {vendor.socialAccounts.map((acc, idx) => {
+                const passwordKey = `${vendor.id}-${idx}`;
+                const isVisible = visiblePasswords[passwordKey];
+                
+                return (
+                  <div key={idx} className="flex items-center justify-between p-3 bg-[#F5F5F0] rounded-xl text-sm">
+                    <div className="flex items-center">
+                      <span className="bg-[#5A5A40] text-white text-[10px] px-2 py-0.5 rounded-full mr-2 font-bold">{acc.platform}</span>
+                      <span className="font-medium">{acc.username}</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <div className="flex items-center text-gray-400">
+                        <Shield size={14} className="mr-1" />
+                        <span className="font-mono">{isVisible ? acc.password : '••••••'}</span>
+                      </div>
+                      <button 
+                        onClick={() => setVisiblePasswords(prev => ({ ...prev, [passwordKey]: !isVisible }))}
+                        className="text-gray-400 hover:text-[#5A5A40] transition-colors"
+                      >
+                        {isVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center text-gray-400">
-                    <Shield size={14} className="mr-1" />
-                    <span>••••••</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
 
               {vendor.postingHabits && vendor.postingHabits.length > 0 && (
                 <>
@@ -386,14 +401,21 @@ export default function VendorManagement() {
                           className="w-full p-2 bg-white rounded-lg border-none text-sm"
                         />
                       </div>
-                      <div>
+                      <div className="relative">
                         <input 
-                          type="password" 
+                          type={visibleFormPasswords[idx] ? "text" : "password"} 
                           placeholder="密碼"
                           value={acc.password}
                           onChange={(e) => handleAccountChange(idx, 'password', e.target.value)}
-                          className="w-full p-2 bg-white rounded-lg border-none text-sm"
+                          className="w-full p-2 pr-8 bg-white rounded-lg border-none text-sm"
                         />
+                        <button
+                          type="button"
+                          onClick={() => setVisibleFormPasswords(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#5A5A40]"
+                        >
+                          {visibleFormPasswords[idx] ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
                       </div>
                     </div>
                   ))}

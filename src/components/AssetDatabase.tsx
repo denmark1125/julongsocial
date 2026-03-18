@@ -22,8 +22,13 @@ import {
   Clock,
   FileText,
   LayoutGrid,
-  Box
+  Box,
+  Download,
+  BarChart3,
+  Calendar
 } from 'lucide-react';
+import { toJpeg } from 'html-to-image';
+import download from 'downloadjs';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import toast from 'react-hot-toast';
@@ -51,10 +56,14 @@ export default function AssetDatabase() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [isAdding, setIsAdding] = useState(false);
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterVendor, setFilterVendor] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [activeTab, setActiveTab] = useState<AssetType>('video');
+
+  const summaryRef = React.useRef<HTMLDivElement>(null);
 
   const [newAsset, setNewAsset] = useState({
     title: '',
@@ -141,6 +150,31 @@ export default function AssetDatabase() {
   const videoInventory = assets.filter(a => a.type === 'video' && a.status === 'available').length;
   const postInventory = assets.filter(a => a.type === 'post' && a.status === 'available').length;
 
+  const vendorStocks = vendors.map(vendor => {
+    const availableVideos = assets.filter(a => a.vendorId === vendor.id && a.type === 'video' && a.status === 'available').length;
+    const availablePosts = assets.filter(a => a.vendorId === vendor.id && a.type === 'post' && a.status === 'available').length;
+    return {
+      name: vendor.name,
+      videos: availableVideos,
+      posts: availablePosts
+    };
+  }).sort((a, b) => (b.videos + b.posts) - (a.videos + a.posts));
+
+  const handleExportJPG = async () => {
+    if (!summaryRef.current) return;
+    setIsExporting(true);
+    try {
+      const dataUrl = await toJpeg(summaryRef.current, { quality: 0.95, backgroundColor: '#F5F5F0' });
+      download(dataUrl, `素材庫存報表_${new Date().toLocaleDateString()}.jpg`);
+      toast.success('報表已匯出');
+    } catch (err) {
+      console.error('Export failed', err);
+      toast.error('匯出失敗');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-end">
@@ -149,6 +183,13 @@ export default function AssetDatabase() {
           <p className="text-sm text-gray-500">管理各廠商的影片與貼文素材素材與庫存</p>
         </div>
         <div className="flex space-x-4">
+          <button 
+            onClick={() => setIsSummaryOpen(true)}
+            className="bg-white text-[#5A5A40] px-4 py-2 rounded-2xl border border-black/5 shadow-sm font-bold flex items-center space-x-2 hover:bg-gray-50 transition-colors"
+          >
+            <BarChart3 size={18} />
+            <span>庫存總覽</span>
+          </button>
           <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm flex items-center space-x-3">
             <div className="bg-blue-50 p-2 rounded-lg text-blue-600">
               <Video size={18} />
@@ -411,6 +452,117 @@ export default function AssetDatabase() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Stock Summary Modal */}
+      {isSummaryOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-[40px] w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="p-8 border-b border-black/5 flex justify-between items-center bg-white sticky top-0 z-10">
+              <div className="flex items-center space-x-3">
+                <div className="bg-[#5A5A40] p-2 rounded-xl text-white">
+                  <BarChart3 size={20} />
+                </div>
+                <h3 className="text-2xl font-bold serif text-[#5A5A40]">個別 IP 素材庫存總覽</h3>
+              </div>
+              <button onClick={() => setIsSummaryOpen(false)} className="p-2 hover:bg-gray-100 rounded-full">
+                <Plus size={24} className="rotate-45" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-8 bg-[#F5F5F0]/30">
+              <div ref={summaryRef} className="bg-white p-10 rounded-[32px] shadow-sm border border-black/5 space-y-8">
+                <div className="flex justify-between items-end border-b border-black/5 pb-6">
+                  <div>
+                    <h1 className="text-3xl font-black serif text-[#1a1a1a] mb-1">聚浪 Julong Agency</h1>
+                    <p className="text-gray-500 font-bold tracking-widest uppercase text-sm">素材庫存即時報表</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">導出日期</p>
+                    <p className="text-lg font-bold serif flex items-center justify-end">
+                      <Calendar size={16} className="mr-2 text-[#5A5A40]" />
+                      {new Date().toLocaleDateString()}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="bg-blue-100 p-2 rounded-lg text-blue-600">
+                        <Video size={20} />
+                      </div>
+                      <span className="font-bold text-blue-900">總可用影片</span>
+                    </div>
+                    <span className="text-2xl font-black text-blue-900">{videoInventory}</span>
+                  </div>
+                  <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100 flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="bg-purple-100 p-2 rounded-lg text-purple-600">
+                        <FileText size={20} />
+                      </div>
+                      <span className="font-bold text-purple-900">總可用貼文</span>
+                    </div>
+                    <span className="text-2xl font-black text-purple-900">{postInventory}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="grid grid-cols-12 px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                    <div className="col-span-6">廠商名稱 (IP)</div>
+                    <div className="col-span-3 text-center">可用影片</div>
+                    <div className="col-span-3 text-center">可用貼文</div>
+                  </div>
+                  {vendorStocks.map((stock, idx) => (
+                    <div key={idx} className="grid grid-cols-12 items-center px-4 py-4 bg-[#F5F5F0]/50 rounded-2xl border border-black/5">
+                      <div className="col-span-6 font-bold text-gray-800">{stock.name}</div>
+                      <div className="col-span-3 text-center">
+                        <span className={cn(
+                          "px-3 py-1 rounded-full text-xs font-bold",
+                          stock.videos < 2 ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"
+                        )}>
+                          {stock.videos}
+                        </span>
+                      </div>
+                      <div className="col-span-3 text-center">
+                        <span className="px-3 py-1 rounded-full bg-purple-100 text-purple-700 text-xs font-bold">
+                          {stock.posts}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-6 border-t border-black/5 text-center">
+                  <p className="text-[10px] text-gray-400 italic">此報表由 Julong 社群排程系統自動生成</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-8 bg-white border-t border-black/5 flex space-x-4">
+              <button 
+                onClick={() => setIsSummaryOpen(false)}
+                className="flex-1 py-4 rounded-2xl font-bold text-gray-500 hover:bg-gray-100 transition-all"
+              >
+                關閉
+              </button>
+              <button 
+                onClick={handleExportJPG}
+                disabled={isExporting}
+                className="flex-1 bg-[#5A5A40] text-white py-4 rounded-2xl font-bold shadow-xl hover:bg-[#4a4a35] transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
+              >
+                {isExporting ? (
+                  <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div>
+                ) : (
+                  <>
+                    <Download size={20} />
+                    <span>匯出 JPG 報表</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

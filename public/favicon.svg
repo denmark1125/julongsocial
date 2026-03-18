@@ -1,0 +1,19 @@
+<svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path 
+    d="M20 20C20 20 60 10 80 40C100 70 60 90 40 80C20 70 10 40 20 20Z" 
+    fill="#3B82F6" 
+    opacity="0.9"
+  />
+  <path 
+    d="M30 40C30 40 70 30 85 55C100 80 70 95 50 85C30 75 25 55 30 40Z" 
+    fill="#60A5FA" 
+    opacity="0.8"
+  />
+  <path 
+    d="M45 25C55 25 65 35 65 50C65 65 55 75 45 75" 
+    stroke="white" 
+    stroke-width="8" 
+    stroke-linecap="round"
+    opacity="0.6"
+  />
+</svg>

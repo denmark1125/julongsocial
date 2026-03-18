@@ -23,16 +23,11 @@ import {
 } from 'date-fns';
 import { 
   AlertTriangle, 
-  TrendingUp, 
-  CheckCircle2, 
   Clock, 
-  Users,
   ArrowRight,
-  Calendar as CalendarIcon,
   ListTodo,
   BellRing,
   Plus,
-  Video,
   AlertCircle
 } from 'lucide-react';
 
@@ -44,6 +39,13 @@ import toast from 'react-hot-toast';
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+import { 
+  PartnerIcon, 
+  GrowthIcon, 
+  SuccessIcon, 
+  InventoryIcon 
+} from './CustomIcons';
 
 export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
   const [posts, setPosts] = useState<Post[]>([]);
@@ -77,10 +79,10 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
   }, []);
 
   const stats = [
-    { label: '合作廠商', value: vendors.length, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
-    { label: '本月貼文', value: posts.length, icon: TrendingUp, color: 'text-purple-600', bg: 'bg-purple-50' },
-    { label: '已發布', value: posts.filter(p => p.status === 'published').length, icon: CheckCircle2, color: 'text-green-600', bg: 'bg-green-50' },
-    { label: '素材庫存', value: assets.filter(a => a.status === 'available').length, icon: Video, color: 'text-orange-600', bg: 'bg-orange-50' },
+    { label: '合作廠商', value: vendors.length, icon: PartnerIcon, color: 'text-[#5A5A40]', bg: 'bg-[#5A5A40]/10' },
+    { label: '本月貼文', value: posts.length, icon: GrowthIcon, color: 'text-[#8B7355]', bg: 'bg-[#8B7355]/10' },
+    { label: '已發布', value: posts.filter(p => p.status === 'published').length, icon: SuccessIcon, color: 'text-[#8A8A6A]', bg: 'bg-[#8A8A6A]/10' },
+    { label: '素材庫存', value: assets.filter(a => a.status === 'available').length, icon: InventoryIcon, color: 'text-[#A67C52]', bg: 'bg-[#A67C52]/10' },
   ];
 
   // Low Video Stock Alert (fewer than 2 videos)
@@ -302,10 +304,10 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
           <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm space-y-6">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold serif flex items-center">
-                <BellRing className="text-orange-500 mr-2" size={20} />
+                <BellRing className="text-[#A67C52] mr-2" size={20} />
                 缺漏排程提醒
               </h3>
-              <span className="bg-orange-100 text-orange-600 text-xs font-bold px-2 py-1 rounded-full">
+              <span className="bg-[#A67C52]/10 text-[#A67C52] text-xs font-bold px-2 py-1 rounded-full">
                 {missingSchedules.length}
               </span>
             </div>
@@ -335,20 +337,20 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
           <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm space-y-6">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-bold serif flex items-center">
-                <AlertTriangle className="text-red-500 mr-2" size={20} />
+                <AlertTriangle className="text-[#8B4513] mr-2" size={20} />
                 緊急審核
               </h3>
-              <span className="bg-red-100 text-red-600 text-xs font-bold px-2 py-1 rounded-full">
+              <span className="bg-[#8B4513]/10 text-[#8B4513] text-xs font-bold px-2 py-1 rounded-full">
                 {approvalReminders.length}
               </span>
             </div>
             <div className="space-y-3">
               {approvalReminders.slice(0, 3).map(post => (
-                <div key={post.id} className="p-4 border border-red-100 rounded-2xl bg-red-50/30 space-y-2">
+                <div key={post.id} className="p-4 border border-[#8B4513]/10 rounded-2xl bg-[#8B4513]/5 space-y-2">
                   <p className="text-xs font-bold truncate">{post.title}</p>
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] text-gray-400">{format(parseISO(post.scheduledAt), 'MM/dd HH:mm')}</span>
-                    <button onClick={() => setActiveTab('posts')} className="text-xs text-red-500 font-bold">
+                    <button onClick={() => setActiveTab('posts')} className="text-xs text-[#8B4513] font-bold">
                       處理
                     </button>
                   </div>
