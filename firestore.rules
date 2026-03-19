@@ -100,7 +100,7 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.auth.uid == uid;
+      allow create: if (isAuthenticated() && request.auth.uid == uid) || isManager();
       allow update: if isManager();
       allow delete: if isAdmin();
     }

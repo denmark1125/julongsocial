@@ -10,7 +10,7 @@ import {
   updateDoc
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType } from '../types';
+import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post } from '../types';
 import { 
   Video, 
   Plus, 
@@ -54,6 +54,7 @@ const handleFirestoreError = (error: unknown, operationType: OperationType, path
 
 export default function AssetDatabase() {
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
@@ -80,6 +81,10 @@ export default function AssetDatabase() {
       setVendors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Vendor)));
     });
 
+    const pUnsubscribe = onSnapshot(collection(db, 'posts'), (snapshot) => {
+      setPosts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Post)));
+    });
+
     const q = query(collection(db, 'assets'), orderBy('createdAt', 'desc'));
     const aUnsubscribe = onSnapshot(q, (snapshot) => {
       setAssets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
@@ -89,6 +94,7 @@ export default function AssetDatabase() {
 
     return () => {
       vUnsubscribe();
+      pUnsubscribe();
       aUnsubscribe();
     };
   }, []);
@@ -150,15 +156,42 @@ export default function AssetDatabase() {
   const videoInventory = assets.filter(a => a.type === 'video' && a.status === 'available').length;
   const postInventory = assets.filter(a => a.type === 'post' && a.status === 'available').length;
 
+  const scheduledVideoInventory = assets.filter(a => {
+    if (a.type !== 'video' || a.status !== 'used' || !a.usedInPostId) return false;
+    const post = posts.find(p => p.id === a.usedInPostId);
+    return post && (post.status === 'draft' || post.status === 'scheduled');
+  }).length;
+
+  const scheduledPostInventory = assets.filter(a => {
+    if (a.type !== 'post' || a.status !== 'used' || !a.usedInPostId) return false;
+    const post = posts.find(p => p.id === a.usedInPostId);
+    return post && (post.status === 'draft' || post.status === 'scheduled');
+  }).length;
+
   const vendorStocks = vendors.map(vendor => {
     const availableVideos = assets.filter(a => a.vendorId === vendor.id && a.type === 'video' && a.status === 'available').length;
     const availablePosts = assets.filter(a => a.vendorId === vendor.id && a.type === 'post' && a.status === 'available').length;
+    
+    const scheduledVideos = assets.filter(a => {
+      if (a.vendorId !== vendor.id || a.type !== 'video' || a.status !== 'used' || !a.usedInPostId) return false;
+      const post = posts.find(p => p.id === a.usedInPostId);
+      return post && (post.status === 'draft' || post.status === 'scheduled');
+    }).length;
+
+    const scheduledPosts = assets.filter(a => {
+      if (a.vendorId !== vendor.id || a.type !== 'post' || a.status !== 'used' || !a.usedInPostId) return false;
+      const post = posts.find(p => p.id === a.usedInPostId);
+      return post && (post.status === 'draft' || post.status === 'scheduled');
+    }).length;
+
     return {
       name: vendor.name,
       videos: availableVideos,
-      posts: availablePosts
+      posts: availablePosts,
+      scheduledVideos,
+      scheduledPosts
     };
-  }).sort((a, b) => (b.videos + b.posts) - (a.videos + a.posts));
+  }).sort((a, b) => (b.videos + b.posts + b.scheduledVideos + b.scheduledPosts) - (a.videos + a.posts + a.scheduledVideos + a.scheduledPosts));
 
   const handleExportJPG = async () => {
     if (!summaryRef.current) return;
@@ -206,6 +239,24 @@ export default function AssetDatabase() {
             <div>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">可用貼文</p>
               <p className="text-lg font-bold leading-none">{postInventory} <span className="text-xs font-normal text-gray-400">篇</span></p>
+            </div>
+          </div>
+          <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm flex items-center space-x-3">
+            <div className="bg-orange-50 p-2 rounded-lg text-orange-600">
+              <Clock size={18} />
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">已排程影片</p>
+              <p className="text-lg font-bold leading-none">{scheduledVideoInventory} <span className="text-xs font-normal text-gray-400">隻</span></p>
+            </div>
+          </div>
+          <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm flex items-center space-x-3">
+            <div className="bg-amber-50 p-2 rounded-lg text-amber-600">
+              <Clock size={18} />
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">已排程貼文</p>
+              <p className="text-lg font-bold leading-none">{scheduledPostInventory} <span className="text-xs font-normal text-gray-400">篇</span></p>
             </div>
           </div>
         </div>
@@ -488,48 +539,82 @@ export default function AssetDatabase() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div className="bg-blue-100 p-2 rounded-lg text-blue-600">
-                        <Video size={20} />
-                      </div>
-                      <span className="font-bold text-blue-900">總可用影片</span>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-blue-50/50 p-5 rounded-3xl border border-blue-100 flex flex-col justify-between h-32 shadow-sm">
+                    <div className="bg-blue-100 p-2.5 rounded-xl text-blue-600 w-fit">
+                      <Video size={20} />
                     </div>
-                    <span className="text-2xl font-black text-blue-900">{videoInventory}</span>
+                    <div>
+                      <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1">總可用影片</p>
+                      <p className="text-3xl font-black text-blue-900 leading-none">{videoInventory} <span className="text-xs font-normal opacity-40">隻</span></p>
+                    </div>
                   </div>
-                  <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100 flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div className="bg-purple-100 p-2 rounded-lg text-purple-600">
-                        <FileText size={20} />
-                      </div>
-                      <span className="font-bold text-purple-900">總可用貼文</span>
+                  <div className="bg-purple-50/50 p-5 rounded-3xl border border-purple-100 flex flex-col justify-between h-32 shadow-sm">
+                    <div className="bg-purple-100 p-2.5 rounded-xl text-purple-600 w-fit">
+                      <FileText size={20} />
                     </div>
-                    <span className="text-2xl font-black text-purple-900">{postInventory}</span>
+                    <div>
+                      <p className="text-[10px] font-bold text-purple-400 uppercase tracking-widest mb-1">總可用貼文</p>
+                      <p className="text-3xl font-black text-purple-900 leading-none">{postInventory} <span className="text-xs font-normal opacity-40">篇</span></p>
+                    </div>
+                  </div>
+                  <div className="bg-orange-50/50 p-5 rounded-3xl border border-orange-100 flex flex-col justify-between h-32 shadow-sm">
+                    <div className="bg-orange-100 p-2.5 rounded-xl text-orange-600 w-fit">
+                      <Clock size={20} />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-orange-400 uppercase tracking-widest mb-1">總排程影片</p>
+                      <p className="text-3xl font-black text-orange-900 leading-none">{scheduledVideoInventory} <span className="text-xs font-normal opacity-40">隻</span></p>
+                    </div>
+                  </div>
+                  <div className="bg-amber-50/50 p-5 rounded-3xl border border-amber-100 flex flex-col justify-between h-32 shadow-sm">
+                    <div className="bg-amber-100 p-2.5 rounded-xl text-amber-600 w-fit">
+                      <Clock size={20} />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-amber-400 uppercase tracking-widest mb-1">總排程貼文</p>
+                      <p className="text-3xl font-black text-amber-900 leading-none">{scheduledPostInventory} <span className="text-xs font-normal opacity-40">篇</span></p>
+                    </div>
                   </div>
                 </div>
 
                 <div className="space-y-3">
                   <div className="grid grid-cols-12 px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                    <div className="col-span-6">廠商名稱 (IP)</div>
-                    <div className="col-span-3 text-center">可用影片</div>
-                    <div className="col-span-3 text-center">可用貼文</div>
+                    <div className="col-span-3">廠商名稱 (IP)</div>
+                    <div className="col-span-2 text-center">可用影片</div>
+                    <div className="col-span-2 text-center">可用貼文</div>
+                    <div className="col-span-2 text-center">排程影片</div>
+                    <div className="col-span-2 text-center">排程貼文</div>
+                    <div className="col-span-1 text-right">總計</div>
                   </div>
                   {vendorStocks.map((stock, idx) => (
                     <div key={idx} className="grid grid-cols-12 items-center px-4 py-4 bg-[#F5F5F0]/50 rounded-2xl border border-black/5">
-                      <div className="col-span-6 font-bold text-gray-800">{stock.name}</div>
-                      <div className="col-span-3 text-center">
+                      <div className="col-span-3 font-bold text-gray-800 truncate pr-2">{stock.name}</div>
+                      <div className="col-span-2 text-center">
                         <span className={cn(
-                          "px-3 py-1 rounded-full text-xs font-bold",
+                          "px-2 py-1 rounded-full text-[11px] font-bold",
                           stock.videos < 2 ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"
                         )}>
                           {stock.videos}
                         </span>
                       </div>
-                      <div className="col-span-3 text-center">
-                        <span className="px-3 py-1 rounded-full bg-purple-100 text-purple-700 text-xs font-bold">
+                      <div className="col-span-2 text-center">
+                        <span className="px-2 py-1 rounded-full bg-purple-100 text-purple-700 text-[11px] font-bold">
                           {stock.posts}
                         </span>
+                      </div>
+                      <div className="col-span-2 text-center">
+                        <span className="px-2 py-1 rounded-full bg-orange-100 text-orange-700 text-[11px] font-bold">
+                          {stock.scheduledVideos}
+                        </span>
+                      </div>
+                      <div className="col-span-2 text-center">
+                        <span className="px-2 py-1 rounded-full bg-amber-100 text-amber-700 text-[11px] font-bold">
+                          {stock.scheduledPosts}
+                        </span>
+                      </div>
+                      <div className="col-span-1 text-right font-black text-gray-900 text-sm">
+                        {stock.videos + stock.posts + stock.scheduledVideos + stock.scheduledPosts}
                       </div>
                     </div>
                   ))}

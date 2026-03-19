@@ -2,7 +2,8 @@ export type UserRole = 'engineer' | 'manager' | 'employee';
 
 export interface UserProfile {
   uid: string;
-  email: string;
+  username: string;
+  email?: string;
   role: UserRole;
   displayName?: string;
   createdAt: string;
