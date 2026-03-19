@@ -225,9 +225,9 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                   <input 
                     type="password"
                     required
-                    minLength={4}
+                    minLength={6}
                     className="w-full pl-12 pr-5 py-3 bg-[#F5F5F0] rounded-2xl border-none focus:ring-2 focus:ring-[#5A5A40]"
-                    placeholder="至少 4 位數"
+                    placeholder="至少 6 位數"
                     value={newUser.password}
                     onChange={(e) => setNewUser({...newUser, password: e.target.value})}
                   />

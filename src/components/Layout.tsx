@@ -16,7 +16,8 @@ import {
   AlertTriangle,
   AlertCircle,
   BellRing,
-  Clock
+  Clock,
+  Lock
 } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
@@ -27,6 +28,7 @@ import { UserProfile, Post, Vendor, Asset, DismissedHabit } from '../types';
 import { format, parseISO, isBefore, addDays, isAfter, getDay, isSameDay, subDays } from 'date-fns';
 import Logo from './Logo';
 import { motion, AnimatePresence } from 'motion/react';
+import ChangePasswordModal from './ChangePasswordModal';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -48,6 +50,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
   const [assets, setAssets] = useState<Asset[]>([]);
   const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
   const [lastReadNoti, setLastReadNoti] = useState<string>(localStorage.getItem('lastReadNoti') || new Date(0).toISOString());
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   useEffect(() => {
     const vUnsubscribe = onSnapshot(collection(db, 'vendors'), (snapshot) => {
@@ -226,24 +229,41 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
         </nav>
 
         <div className="p-4 border-t border-black/5">
-          <div className={cn("flex items-center", isSidebarOpen ? "px-2" : "justify-center")}>
-            {isSidebarOpen && (
-              <div className="flex-1 min-w-0 mr-3">
-                <p className="text-sm font-medium truncate">{user.email}</p>
-                <p className="text-[10px] font-bold text-[#5A5A40] uppercase tracking-wider">
-                  {userProfile?.role === 'engineer' ? '工程師' : userProfile?.role === 'manager' ? '主管' : '員工'}
-                </p>
+          <div className={cn("flex flex-col", isSidebarOpen ? "px-2" : "items-center")}>
+            <div className={cn("flex items-center w-full mb-2", isSidebarOpen ? "justify-between" : "justify-center")}>
+              {isSidebarOpen && (
+                <div className="flex-1 min-w-0 mr-2">
+                  <p className="text-sm font-medium truncate">{userProfile?.displayName || user.email}</p>
+                  <p className="text-[10px] font-bold text-[#5A5A40] uppercase tracking-wider">
+                    {userProfile?.role === 'engineer' ? '工程師' : userProfile?.role === 'manager' ? '主管' : '員工'}
+                  </p>
+                </div>
+              )}
+              <div className="flex items-center gap-1">
+                <button 
+                  onClick={() => setIsChangePasswordOpen(true)}
+                  className="p-2 text-gray-500 hover:text-[#5A5A40] hover:bg-[#F5F5F0] rounded-lg transition-colors"
+                  title="修改密碼"
+                >
+                  <Lock size={18} />
+                </button>
+                <button 
+                  onClick={() => signOut(auth)}
+                  className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                  title="登出"
+                >
+                  <LogOut size={18} />
+                </button>
               </div>
-            )}
-            <button 
-              onClick={() => signOut(auth)}
-              className="p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-              title="登出"
-            >
-              <LogOut size={20} />
-            </button>
+            </div>
           </div>
         </div>
+
+        <ChangePasswordModal 
+          isOpen={isChangePasswordOpen} 
+          onClose={() => setIsChangePasswordOpen(false)} 
+          userEmail={user.email}
+        />
       </aside>
 
       {/* Main Content */}

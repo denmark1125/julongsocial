@@ -43,8 +43,9 @@ export default function App() {
         const empty = snapshot.empty;
         setIsFirstUser(empty);
         if (empty) {
+          setIsLogin(false);
           setUsername('David');
-          setPassword('1125');
+          setPassword('11251125');
           setEmail('denmark1125@gmail.com');
           setDisplayName('David');
         }
@@ -103,18 +104,25 @@ export default function App() {
   const handleUsernameLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      // Use dummy domain for username login
-      const loginEmail = `${username.toLowerCase()}@forest.system`;
+      // Map David to the real admin email, others to dummy domain
+      const loginEmail = username.toLowerCase() === 'david' 
+        ? 'denmark1125@gmail.com' 
+        : `${username.toLowerCase()}@forest.system`;
+        
       await signInWithEmailAndPassword(auth, loginEmail, password);
     } catch (error: any) {
       console.error('Login failed:', error);
-      toast.error('登入失敗：帳號或密碼錯誤');
+      if (error.code === 'auth/operation-not-allowed') {
+        toast.error('系統尚未啟用帳號密碼登入，請聯繫管理員或使用 Google 登入。', { duration: 5000 });
+      } else {
+        toast.error('登入失敗：帳號或密碼錯誤');
+      }
     }
   };
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isFirstUser) {
+    if (!isFirstUser && username.toLowerCase() !== 'david') {
       toast.error('目前僅開放管理員手動新增帳號');
       return;
     }
@@ -123,15 +131,18 @@ export default function App() {
       return;
     }
     try {
-      // Use dummy domain for username registration
-      const loginEmail = `${username.toLowerCase()}@forest.system`;
+      // Map David to the real admin email, others to dummy domain
+      const loginEmail = username.toLowerCase() === 'david' 
+        ? 'denmark1125@gmail.com' 
+        : `${username.toLowerCase()}@forest.system`;
+
       const userCredential = await createUserWithEmailAndPassword(auth, loginEmail, password);
       const user = userCredential.user;
       
       const newProfile: UserProfile = {
         uid: user.uid,
         username: username,
-        email: email || '',
+        email: username.toLowerCase() === 'david' ? 'denmark1125@gmail.com' : (email || ''),
         role: 'engineer',
         displayName: displayName,
         createdAt: new Date().toISOString()
@@ -142,7 +153,11 @@ export default function App() {
       toast.success('管理員帳號註冊成功');
     } catch (error: any) {
       console.error('Registration failed:', error);
-      toast.error(`註冊失敗：${error.message}`);
+      if (error.code === 'auth/operation-not-allowed') {
+        toast.error('系統尚未啟用帳號密碼註冊，請先在 Firebase 控制台啟用 Email/Password 供應商。', { duration: 6000 });
+      } else {
+        toast.error(`註冊失敗：${error.message}`);
+      }
     }
   };
 
@@ -175,35 +190,17 @@ export default function App() {
               <Logo className="w-12 h-12 text-white" showText={false} />
             </div>
             <h1 className="text-2xl font-serif font-bold text-[#5A5A40]">聚浪社群排程系統</h1>
-            <p className="text-[#8B7355] mt-2 text-center">
-              {isFirstUser ? '註冊首位管理員帳號' : ''}
-            </p>
+            <p className="text-[#8B7355] mt-2 text-center">請登入以開始管理您的社群素材</p>
           </div>
 
-          <form onSubmit={isFirstUser ? handleRegister : handleUsernameLogin} className="space-y-4">
-            {isFirstUser && (
-              <div className="space-y-2">
-                <label className="text-sm font-bold text-gray-600 ml-1">顯示名稱</label>
-                <div className="relative">
-                  <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#8B7355]" />
-                  <input
-                    type="text"
-                    placeholder="例如：系統管理員"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 bg-[#F5F5F0] border-none rounded-xl focus:ring-2 focus:ring-[#5A5A40] transition-all"
-                    required
-                  />
-                </div>
-              </div>
-            )}
+          <form onSubmit={handleUsernameLogin} className="space-y-4">
             <div className="space-y-2">
               <label className="text-sm font-bold text-gray-600 ml-1">帳號</label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#8B7355]" />
+                <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#8B7355]" />
                 <input
                   type="text"
-                  placeholder="請輸入帳號"
+                  placeholder="請輸入您的帳號"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="w-full pl-10 pr-4 py-3 bg-[#F5F5F0] border-none rounded-xl focus:ring-2 focus:ring-[#5A5A40] transition-all"
@@ -225,54 +222,37 @@ export default function App() {
                 />
               </div>
             </div>
-            {isFirstUser && (
-              <div className="space-y-2">
-                <label className="text-sm font-bold text-gray-600 ml-1">電子郵件 (選填)</label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#8B7355]" />
-                  <input
-                    type="email"
-                    placeholder="your@email.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 bg-[#F5F5F0] border-none rounded-xl focus:ring-2 focus:ring-[#5A5A40] transition-all"
-                  />
-                </div>
-              </div>
-            )}
 
             <button
               type="submit"
               className="w-full bg-[#5A5A40] text-white py-4 rounded-xl font-bold hover:bg-[#4A4A30] transition-all shadow-lg flex items-center justify-center gap-2 mt-6"
             >
               <LogIn className="w-5 h-5" />
-              {isFirstUser ? '註冊並登入' : '登入系統'}
+              登入系統
             </button>
           </form>
 
-          {!isFirstUser && (
-            <div className="mt-8">
-              <div className="relative mb-6">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-[#8B7355]/20"></div>
-                </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-2 bg-white text-[#8B7355]">或使用 Google 登入</span>
-                </div>
+          <div className="mt-8">
+            <div className="relative mb-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-[#8B7355]/20"></div>
               </div>
-
-              <button
-                onClick={handleGoogleLogin}
-                className="w-full bg-white border border-[#8B7355]/20 text-[#5A5A40] py-3 rounded-xl font-medium hover:bg-[#F5F5F0] transition-all flex items-center justify-center gap-2"
-              >
-                <img src="https://www.google.com/favicon.ico" alt="Google" className="w-5 h-5" />
-                Google 帳號登入
-              </button>
-              <p className="mt-4 text-center text-xs text-[#8B7355]/60 italic">
-                註：Google 帳號亦須經管理員授權方可登入
-              </p>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-white text-[#8B7355]">或使用 Google 登入</span>
+              </div>
             </div>
-          )}
+
+            <button
+              onClick={handleGoogleLogin}
+              className="w-full bg-white border border-[#8B7355]/20 text-[#5A5A40] py-3 rounded-xl font-medium hover:bg-[#F5F5F0] transition-all flex items-center justify-center gap-2"
+            >
+              <img src="https://www.google.com/favicon.ico" alt="Google" className="w-5 h-5" />
+              Google 帳號登入
+            </button>
+            <p className="mt-4 text-center text-xs text-[#8B7355]/60 italic">
+              註：Google 帳號亦須經管理員授權方可登入
+            </p>
+          </div>
           
           <p className="mt-8 text-center text-[10px] text-[#8B7355]/40 uppercase tracking-widest">
             Forest Asset Management System v2.0
