@@ -5,18 +5,50 @@ import cookieParser from "cookie-parser";
 import session from "express-session";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
-import admin from "firebase-admin";
-import { getAuth } from "firebase-admin/auth";
+import * as admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import firebaseConfig from "./firebase-applet-config.json";
 
 dotenv.config();
+
+// Initialize Firebase Admin
+try {
+  if (admin.apps.length === 0) {
+    console.log("Initializing Firebase Admin for project:", firebaseConfig.projectId);
+    admin.initializeApp({
+      projectId: firebaseConfig.projectId,
+    });
+  }
+} catch (e) {
+  console.error("Firebase Admin Initialization Error:", e);
+}
+
+const adminAuth = admin.auth();
+const adminDb = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
+console.log("Using Firestore database:", firebaseConfig.firestoreDatabaseId);
 
 const app = express();
 const PORT = 3000;
 
 app.use(express.json());
 app.use(cookieParser());
+
+// Health Check
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// Debug Endpoint (Admin Only - but for now let's keep it simple)
+app.get("/api/debug", (req, res) => {
+  res.json({
+    nodeEnv: process.env.NODE_ENV,
+    port: PORT,
+    firebaseProjectId: firebaseConfig.projectId,
+    firebaseDatabaseId: firebaseConfig.firestoreDatabaseId,
+    appsInitialized: admin.apps.length
+  });
+});
+
 app.use(
   session({
     secret: "social-media-manager-secret",
@@ -39,17 +71,6 @@ app.post("/api/admin/reset-password", async (req, res) => {
   }
 
   try {
-    // Initialize Admin if not already done
-    if (!admin.apps.length) {
-      console.log("Initializing Firebase Admin for project:", firebaseConfig.projectId);
-      admin.initializeApp({
-        projectId: firebaseConfig.projectId,
-      });
-    }
-    const adminAuth = getAuth();
-    const adminDb = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
-    console.log("Using Firestore database:", firebaseConfig.firestoreDatabaseId);
-
     // Verify the admin's ID token
     const decodedToken = await adminAuth.verifyIdToken(idToken);
     const adminUid = decodedToken.uid;
@@ -122,14 +143,14 @@ async function setupServer() {
     });
   }
 
-  if (process.env.NODE_ENV !== "production") {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-    });
-  }
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 }
 
-setupServer();
+setupServer().catch(err => {
+  console.error("Failed to start server:", err);
+});
 
 // Global Error Handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
