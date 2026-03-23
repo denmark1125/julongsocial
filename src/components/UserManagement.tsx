@@ -86,7 +86,15 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
         })
       });
 
-      const data = await response.json();
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        console.error('Server returned non-JSON response:', text);
+        throw new Error('伺服器發生錯誤，請稍後再試');
+      }
+
       if (data.success) {
         toast.success('密碼重設成功');
         setResettingUid(null);

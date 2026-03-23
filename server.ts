@@ -6,16 +6,11 @@ import session from "express-session";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
 import admin from "firebase-admin";
+import { getAuth } from "firebase-admin/auth";
+import { getFirestore } from "firebase-admin/firestore";
 import firebaseConfig from "./firebase-applet-config.json";
 
 dotenv.config();
-
-// Initialize Firebase Admin
-if (!admin.apps.length) {
-  admin.initializeApp({
-    projectId: firebaseConfig.projectId,
-  });
-}
 
 const app = express();
 const PORT = 3000;
@@ -44,15 +39,23 @@ app.post("/api/admin/reset-password", async (req, res) => {
   }
 
   try {
+    // Initialize Admin if not already done
+    if (!admin.apps.length) {
+      console.log("Initializing Firebase Admin for project:", firebaseConfig.projectId);
+      admin.initializeApp({
+        projectId: firebaseConfig.projectId,
+      });
+    }
+    const adminAuth = getAuth();
+    const adminDb = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
+    console.log("Using Firestore database:", firebaseConfig.firestoreDatabaseId);
+
     // Verify the admin's ID token
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const decodedToken = await adminAuth.verifyIdToken(idToken);
     const adminUid = decodedToken.uid;
 
-    // Get the correct Firestore instance using the databaseId from config
-    const db = admin.firestore(firebaseConfig.firestoreDatabaseId);
-
     // Check if the user is an admin in Firestore
-    const adminDoc = await db.collection("users").doc(adminUid).get();
+    const adminDoc = await adminDb.collection("users").doc(adminUid).get();
     const adminData = adminDoc.data();
 
     if (!adminData || (adminData.role !== "engineer" && adminData.role !== "manager")) {
@@ -65,14 +68,21 @@ app.post("/api/admin/reset-password", async (req, res) => {
 
     // Update the target user's password
     // Note: newPassword already includes the suffix from the client
-    await admin.auth().updateUser(targetUid, {
+    await adminAuth.updateUser(targetUid, {
       password: newPassword,
     });
 
     res.json({ success: true, message: "Password updated successfully" });
   } catch (error: any) {
-    console.error("Password reset error:", error);
-    res.status(500).json({ error: error.message });
+    console.error("Password reset error details:", {
+      message: error.message,
+      code: error.code,
+      stack: error.stack
+    });
+    res.status(500).json({ 
+      error: error.message || "Unknown error occurred",
+      code: error.code || "INTERNAL_ERROR"
+    });
   }
 });
 
@@ -120,5 +130,11 @@ async function setupServer() {
 }
 
 setupServer();
+
+// Global Error Handler
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error("Global error handler:", err);
+  res.status(500).json({ error: err.message || "Internal Server Error" });
+});
 
 export default app;
