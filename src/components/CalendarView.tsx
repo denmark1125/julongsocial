@@ -190,7 +190,7 @@ export default function CalendarView() {
 
   return (
     <div className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
-      <div className="p-6 flex items-center justify-between border-b border-black/5">
+      <div className="p-4 sm:p-6 flex flex-col sm:flex-row items-center justify-between border-b border-black/5 gap-4">
         <div className="flex items-center space-x-4">
           <h3 className="text-xl font-bold serif">{format(currentDate, 'yyyy年 MM月')}</h3>
           <button 

@@ -163,62 +163,62 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-4 md:space-y-8">
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
         {stats.map((stat, i) => (
-          <div key={i} className="bg-white p-6 rounded-[32px] shadow-sm border border-black/5 flex items-center space-x-4">
-            <div className={`${stat.bg} p-4 rounded-2xl`}>
-              <stat.icon className={stat.color} size={24} />
+          <div key={i} className="bg-white p-4 md:p-6 rounded-2xl md:rounded-[32px] shadow-sm border border-black/5 flex flex-col md:flex-row items-center md:items-center space-y-2 md:space-y-0 md:space-x-4 text-center md:text-left">
+            <div className={`${stat.bg} p-3 md:p-4 rounded-xl md:rounded-2xl`}>
+              <stat.icon className={cn(stat.color, "w-5 h-5 md:w-6 md:h-6")} />
             </div>
             <div>
-              <p className="text-sm text-gray-500 font-medium">{stat.label}</p>
-              <p className="text-2xl font-bold">{stat.value}</p>
+              <p className="text-[10px] md:text-sm text-gray-500 font-medium">{stat.label}</p>
+              <p className="text-lg md:text-2xl font-bold">{stat.value}</p>
             </div>
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-8">
         {/* Main Column - To-Do & Activity */}
-        <div className="lg:col-span-8 space-y-8">
+        <div className="lg:col-span-8 space-y-4 md:space-y-8">
           {/* Weekly To-Do */}
-          <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm space-y-6">
+          <div className="bg-white p-5 md:p-8 rounded-3xl md:rounded-[40px] border border-black/5 shadow-sm space-y-4 md:space-y-6">
             <div className="flex items-center justify-between">
-              <h3 className="text-xl font-bold serif flex items-center">
-                <ListTodo className="text-[#5A5A40] mr-2" size={24} />
+              <h3 className="text-lg md:text-xl font-bold serif flex items-center">
+                <ListTodo className="text-[#5A5A40] mr-2 w-5 h-5 md:w-6 md:h-6" />
                 本週工作清單
               </h3>
-              <span className="text-xs text-gray-400 font-medium">
+              <span className="text-[10px] md:text-xs text-gray-400 font-medium">
                 {format(weekStart, 'MM/dd')} - {format(weekEnd, 'MM/dd')}
               </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
               {[
                 { label: '待主管審核', count: todoList.needsInternal.length, color: 'bg-purple-500', list: todoList.needsInternal },
                 { label: '待客戶審核', count: todoList.needsClient.length, color: 'bg-blue-500', list: todoList.needsClient },
                 { label: '待排程發布', count: todoList.readyToSchedule.length, color: 'bg-green-500', list: todoList.readyToSchedule }
               ].map((group, idx) => (
-                <div key={idx} className="bg-[#F5F5F0] p-5 rounded-3xl space-y-4">
+                <div key={idx} className="bg-[#F5F5F0] p-4 md:p-5 rounded-2xl md:rounded-3xl space-y-3 md:space-y-4">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center">
-                      <span className={`w-2 h-2 ${group.color} rounded-full mr-2`}></span>
+                    <p className="text-[10px] md:text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center">
+                      <span className={`w-1.5 h-1.5 md:w-2 md:h-2 ${group.color} rounded-full mr-1.5 md:mr-2`}></span>
                       {group.label}
                     </p>
-                    <span className="text-xs font-bold text-gray-400">{group.count}</span>
+                    <span className="text-[10px] md:text-xs font-bold text-gray-400">{group.count}</span>
                   </div>
                   <div className="space-y-2">
                     {group.list.slice(0, 3).map(p => (
-                      <div key={p.id} className="bg-white p-3 rounded-xl text-[10px] shadow-sm border border-black/5">
-                        <p className="font-bold truncate mb-1">{p.title}</p>
+                      <div key={p.id} className="bg-white p-2.5 md:p-3 rounded-xl text-[10px] shadow-sm border border-black/5">
+                        <p className="font-bold truncate mb-0.5 md:mb-1">{p.title}</p>
                         <p className="text-gray-400 flex items-center">
-                          <Clock size={10} className="mr-1" />
+                          <Clock size={8} md:size={10} className="mr-1" />
                           {format(parseISO(p.scheduledAt), 'MM/dd HH:mm')}
                         </p>
                       </div>
                     ))}
-                    {group.count === 0 && <p className="text-[10px] text-gray-400 italic text-center py-4">無待辦事項</p>}
+                    {group.count === 0 && <p className="text-[10px] text-gray-400 italic text-center py-2 md:py-4">無待辦事項</p>}
                     {group.count > 3 && <p className="text-[10px] text-center text-[#5A5A40] font-bold">還有 {group.count - 3} 項...</p>}
                   </div>
                 </div>
@@ -227,31 +227,31 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
           </div>
 
           {/* Recent Activity */}
-          <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm space-y-6">
+          <div className="bg-white p-5 md:p-8 rounded-3xl md:rounded-[40px] border border-black/5 shadow-sm space-y-4 md:space-y-6">
             <div className="flex items-center justify-between">
-              <h3 className="text-xl font-bold serif">近期排程概覽</h3>
-              <button onClick={() => setActiveTab('posts')} className="text-sm text-[#5A5A40] font-bold hover:underline flex items-center">
-                查看全部 <ArrowRight size={14} className="ml-1" />
+              <h3 className="text-lg md:text-xl font-bold serif">近期排程概覽</h3>
+              <button onClick={() => setActiveTab('posts')} className="text-xs md:text-sm text-[#5A5A40] font-bold hover:underline flex items-center">
+                查看全部 <ArrowRight size={12} md:size={14} className="ml-1" />
               </button>
             </div>
-            <div className="space-y-4">
+            <div className="space-y-2 md:space-y-4">
               {posts.slice(0, 5).map(post => {
                 const vendor = vendors.find(v => v.id === post.vendorId);
                 return (
-                  <div key={post.id} className="flex items-center justify-between p-4 rounded-3xl hover:bg-[#F5F5F0] transition-colors group">
-                    <div className="flex items-center space-x-4">
-                      <div className="w-14 h-14 bg-[#F5F5F0] group-hover:bg-white rounded-2xl flex flex-col items-center justify-center text-[#5A5A40] transition-colors">
-                        <span className="text-[10px] font-bold uppercase">{format(parseISO(post.scheduledAt), 'MMM')}</span>
-                        <span className="text-xl font-bold leading-none">{format(parseISO(post.scheduledAt), 'dd')}</span>
+                  <div key={post.id} className="flex items-center justify-between p-3 md:p-4 rounded-2xl md:rounded-3xl hover:bg-[#F5F5F0] transition-colors group">
+                    <div className="flex items-center space-x-3 md:space-x-4">
+                      <div className="w-12 h-12 md:w-14 md:h-14 bg-[#F5F5F0] group-hover:bg-white rounded-xl md:rounded-2xl flex flex-col items-center justify-center text-[#5A5A40] transition-colors">
+                        <span className="text-[8px] md:text-[10px] font-bold uppercase">{format(parseISO(post.scheduledAt), 'MMM')}</span>
+                        <span className="text-lg md:text-xl font-bold leading-none">{format(parseISO(post.scheduledAt), 'dd')}</span>
                       </div>
-                      <div>
-                        <p className="font-bold text-sm truncate max-w-[200px]">{post.title}</p>
-                        <p className="text-xs text-gray-400">{vendor?.name} • {post.platforms.join(', ')}</p>
+                      <div className="max-w-[140px] md:max-w-[200px]">
+                        <p className="font-bold text-xs md:text-sm truncate">{post.title}</p>
+                        <p className="text-[10px] md:text-xs text-gray-400 truncate">{vendor?.name} • {post.platforms.join(', ')}</p>
                       </div>
                     </div>
-                    <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-2 md:space-x-4">
                       <span className={cn(
-                        "text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider",
+                        "text-[8px] md:text-[10px] px-2 md:px-3 py-0.5 md:py-1 rounded-full font-bold uppercase tracking-wider",
                         post.status === 'published' ? "bg-green-100 text-green-700" : 
                         post.status === 'scheduled' ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"
                       )}>
@@ -266,34 +266,34 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
         </div>
 
         {/* Sidebar Column - Alerts & Stock */}
-        <div className="lg:col-span-4 space-y-8">
+        <div className="lg:col-span-4 space-y-4 md:space-y-8">
           {/* Video Stock Alert */}
-          <div className="bg-[#5A5A40] p-8 rounded-[40px] text-white space-y-6 shadow-xl">
+          <div className="bg-[#5A5A40] p-5 md:p-8 rounded-3xl md:rounded-[40px] text-white space-y-4 md:space-y-6 shadow-xl">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold serif flex items-center">
-                <AlertCircle className="mr-2" size={20} />
+              <h3 className="text-base md:text-lg font-bold serif flex items-center">
+                <AlertCircle className="mr-2" size={18} md:size={20} />
                 影片素材警示
               </h3>
-              <span className="bg-white/20 px-2 py-1 rounded-lg text-xs font-bold">
+              <span className="bg-white/20 px-2 py-1 rounded-lg text-[10px] md:text-xs font-bold">
                 低於 2 部
               </span>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-2 md:space-y-3">
               {lowStockVendors.length > 0 ? lowStockVendors.map(v => (
-                <div key={v.id} className="bg-white/10 p-4 rounded-2xl flex justify-between items-center backdrop-blur-sm">
+                <div key={v.id} className="bg-white/10 p-3 md:p-4 rounded-xl md:rounded-2xl flex justify-between items-center backdrop-blur-sm">
                   <div>
-                    <p className="font-bold text-sm">{v.name}</p>
-                    <p className="text-xs text-white/60">目前庫存：{v.stock} 部</p>
+                    <p className="font-bold text-xs md:text-sm">{v.name}</p>
+                    <p className="text-[10px] md:text-xs text-white/60">目前庫存：{v.stock} 部</p>
                   </div>
                   <button 
                     onClick={() => setActiveTab('videos')}
-                    className="bg-white text-[#5A5A40] p-2 rounded-xl hover:scale-105 transition-transform"
+                    className="bg-white text-[#5A5A40] p-1.5 md:p-2 rounded-lg md:rounded-xl hover:scale-105 transition-transform"
                   >
-                    <Plus size={16} />
+                    <Plus size={14} md:size={16} />
                   </button>
                 </div>
               )) : (
-                <div className="text-center py-4 text-white/60 italic text-sm">
+                <div className="text-center py-4 text-white/60 italic text-xs md:text-sm">
                   目前庫存充足
                 </div>
               )}
@@ -301,32 +301,32 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
           </div>
 
           {/* Missing Schedules */}
-          <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm space-y-6">
+          <div className="bg-white p-5 md:p-8 rounded-3xl md:rounded-[40px] border border-black/5 shadow-sm space-y-4 md:space-y-6">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold serif flex items-center">
-                <BellRing className="text-[#A67C52] mr-2" size={20} />
+              <h3 className="text-base md:text-lg font-bold serif flex items-center">
+                <BellRing className="text-[#A67C52] mr-2" size={18} md:size={20} />
                 缺漏排程提醒
               </h3>
-              <span className="bg-[#A67C52]/10 text-[#A67C52] text-xs font-bold px-2 py-1 rounded-full">
+              <span className="bg-[#A67C52]/10 text-[#A67C52] text-[10px] md:text-xs font-bold px-2 py-0.5 md:py-1 rounded-full">
                 {missingSchedules.length}
               </span>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-2 md:space-y-3">
               {missingSchedules.slice(0, 5).map((miss, idx) => (
-                <div key={idx} className="p-4 bg-[#F5F5F0] rounded-2xl flex justify-between items-center">
+                <div key={idx} className="p-3 md:p-4 bg-[#F5F5F0] rounded-xl md:rounded-2xl flex justify-between items-center">
                   <div>
-                    <p className="text-xs font-bold text-gray-700">{miss.vendorName}</p>
-                    <p className="text-[10px] text-gray-400">
+                    <p className="text-[10px] md:text-xs font-bold text-gray-700">{miss.vendorName}</p>
+                    <p className="text-[8px] md:text-[10px] text-gray-400">
                       {format(miss.date, 'MM/dd (eee)')} {miss.habit.time}
                     </p>
                   </div>
                   <button onClick={() => setActiveTab('posts')} className="text-[#5A5A40] hover:scale-110 transition-transform">
-                    <Plus size={16} />
+                    <Plus size={14} md:size={16} />
                   </button>
                 </div>
               ))}
               {missingSchedules.length === 0 && (
-                <div className="text-center py-8 text-gray-400 italic text-sm">
+                <div className="text-center py-6 md:py-8 text-gray-400 italic text-xs md:text-sm">
                   排程已全數完成
                 </div>
               )}
@@ -334,23 +334,23 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
           </div>
 
           {/* Urgent Approvals */}
-          <div className="bg-white p-8 rounded-[40px] border border-black/5 shadow-sm space-y-6">
+          <div className="bg-white p-5 md:p-8 rounded-3xl md:rounded-[40px] border border-black/5 shadow-sm space-y-4 md:space-y-6">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold serif flex items-center">
-                <AlertTriangle className="text-[#8B4513] mr-2" size={20} />
+              <h3 className="text-base md:text-lg font-bold serif flex items-center">
+                <AlertTriangle className="text-[#8B4513] mr-2" size={18} md:size={20} />
                 緊急審核
               </h3>
-              <span className="bg-[#8B4513]/10 text-[#8B4513] text-xs font-bold px-2 py-1 rounded-full">
+              <span className="bg-[#8B4513]/10 text-[#8B4513] text-[10px] md:text-xs font-bold px-2 py-0.5 md:py-1 rounded-full">
                 {approvalReminders.length}
               </span>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-2 md:space-y-3">
               {approvalReminders.slice(0, 3).map(post => (
-                <div key={post.id} className="p-4 border border-[#8B4513]/10 rounded-2xl bg-[#8B4513]/5 space-y-2">
-                  <p className="text-xs font-bold truncate">{post.title}</p>
+                <div key={post.id} className="p-3 md:p-4 border border-[#8B4513]/10 rounded-xl md:rounded-2xl bg-[#8B4513]/5 space-y-1 md:space-y-2">
+                  <p className="text-[10px] md:text-xs font-bold truncate">{post.title}</p>
                   <div className="flex justify-between items-center">
-                    <span className="text-[10px] text-gray-400">{format(parseISO(post.scheduledAt), 'MM/dd HH:mm')}</span>
-                    <button onClick={() => setActiveTab('posts')} className="text-xs text-[#8B4513] font-bold">
+                    <span className="text-[8px] md:text-[10px] text-gray-400">{format(parseISO(post.scheduledAt), 'MM/dd HH:mm')}</span>
+                    <button onClick={() => setActiveTab('posts')} className="text-[10px] md:text-xs text-[#8B4513] font-bold">
                       處理
                     </button>
                   </div>

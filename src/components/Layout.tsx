@@ -44,6 +44,7 @@ interface LayoutProps {
 
 export default function Layout({ children, activeTab, setActiveTab, user, userProfile }: LayoutProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isNotiOpen, setIsNotiOpen] = useState(false);
   const [posts, setPosts] = useState<Post[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -193,10 +194,10 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
   );
 
   return (
-    <div className="flex h-screen bg-[#F5F5F0] text-[#1a1a1a] font-sans">
-      {/* Sidebar */}
+    <div className="flex h-screen bg-[#F5F5F0] text-[#1a1a1a] font-sans overflow-hidden">
+      {/* Sidebar - Desktop */}
       <aside className={cn(
-        "bg-white border-r border-black/5 transition-all duration-300 flex flex-col",
+        "hidden md:flex bg-white border-r border-black/5 transition-all duration-300 flex-col",
         isSidebarOpen ? "w-64" : "w-20"
       )}>
         <div className="p-6 flex items-center justify-between">
@@ -210,7 +211,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
           </button>
         </div>
 
-        <nav className="flex-1 px-4 space-y-2">
+        <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
           {filteredMenu.map((item) => (
             <button
               key={item.id}
@@ -266,13 +267,96 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
         />
       </aside>
 
+      {/* Mobile Sidebar Overlay */}
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden"
+            />
+            <motion.aside 
+              initial={{ x: -280 }}
+              animate={{ x: 0 }}
+              exit={{ x: -280 }}
+              className="fixed inset-y-0 left-0 w-72 bg-white z-50 md:hidden flex flex-col shadow-2xl"
+            >
+              <div className="p-6 flex items-center justify-between border-b border-black/5">
+                <Logo className="w-8 h-8" />
+                <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 hover:bg-black/5 rounded-lg">
+                  <X size={24} />
+                </button>
+              </div>
+              
+              <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
+                {filteredMenu.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setActiveTab(item.id);
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className={cn(
+                      "w-full flex items-center p-4 rounded-2xl transition-all",
+                      activeTab === item.id 
+                        ? "bg-[#5A5A40] text-white shadow-lg" 
+                        : "hover:bg-black/5 text-gray-600"
+                    )}
+                  >
+                    <item.icon size={22} className="mr-4" />
+                    <span className="font-bold">{item.label}</span>
+                  </button>
+                ))}
+              </nav>
+
+              <div className="p-6 border-t border-black/5 bg-[#F5F5F0]/30">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1 min-w-0 mr-4">
+                    <p className="font-bold truncate">{userProfile?.displayName || user.email}</p>
+                    <p className="text-xs font-bold text-[#5A5A40] uppercase tracking-wider">
+                      {userProfile?.role === 'engineer' ? '工程師' : userProfile?.role === 'manager' ? '主管' : '員工'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => setIsChangePasswordOpen(true)}
+                      className="p-3 bg-white text-gray-500 rounded-xl shadow-sm"
+                    >
+                      <Lock size={20} />
+                    </button>
+                    <button 
+                      onClick={() => signOut(auth)}
+                      className="p-3 bg-white text-red-500 rounded-xl shadow-sm"
+                    >
+                      <LogOut size={20} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
-        <header className="bg-white/80 backdrop-blur-md border-bottom border-black/5 p-6 sticky top-0 z-10 flex justify-between items-center">
-          <h2 className="text-2xl font-semibold serif">
-            {menuItems.find(i => i.id === activeTab)?.label}
-          </h2>
-          <div className="flex items-center space-x-4">
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+        <header className="bg-white/80 backdrop-blur-md border-b border-black/5 p-4 md:p-6 sticky top-0 z-30 flex justify-between items-center shrink-0">
+          <div className="flex items-center">
+            <button 
+              onClick={() => setIsMobileMenuOpen(true)} 
+              className="p-2 mr-3 hover:bg-black/5 rounded-lg md:hidden"
+            >
+              <Menu size={24} />
+            </button>
+            <h2 className="text-xl md:text-2xl font-semibold serif truncate">
+              {menuItems.find(i => i.id === activeTab)?.label}
+            </h2>
+          </div>
+          
+          <div className="flex items-center space-x-2 md:space-x-4">
             <div className="relative">
               <button 
                 onClick={markAsRead}
@@ -290,12 +374,13 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
               <AnimatePresence>
                 {isNotiOpen && (
                   <>
-                    <div className="fixed inset-0 z-20" onClick={() => setIsNotiOpen(false)} />
+                    <div className="fixed inset-0 z-40" onClick={() => setIsNotiOpen(false)} />
                     <motion.div 
                       initial={{ opacity: 0, y: 10, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute right-0 mt-2 w-80 bg-white rounded-3xl shadow-2xl border border-black/5 z-30 overflow-hidden"
+                      className="absolute right-0 mt-2 w-[calc(100vw-2rem)] md:w-80 bg-white rounded-3xl shadow-2xl border border-black/5 z-50 overflow-hidden"
+                      style={{ maxWidth: '320px' }}
                     >
                       <div className="p-4 border-b border-black/5 bg-[#F5F5F0]/50 flex justify-between items-center">
                         <h3 className="font-bold text-sm">通知中心</h3>
@@ -303,7 +388,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
                           {notifications.length} 則提醒
                         </span>
                       </div>
-                      <div className="max-h-[400px] overflow-y-auto">
+                      <div className="max-h-[60vh] md:max-h-[400px] overflow-y-auto">
                         {notifications.length > 0 ? notifications.map((noti) => (
                           <button
                             key={noti.id}
@@ -352,9 +437,31 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
           </div>
         </header>
 
-        <div className="p-8">
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8">
           {children}
         </div>
+
+        {/* Bottom Navigation - Mobile */}
+        <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-black/5 px-4 py-2 flex justify-around items-center md:hidden z-40 pb-safe">
+          {filteredMenu.slice(0, 5).map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={cn(
+                "flex flex-col items-center p-2 rounded-xl transition-all min-w-[64px]",
+                activeTab === item.id ? "text-[#5A5A40]" : "text-gray-400"
+              )}
+            >
+              <div className={cn(
+                "p-1 rounded-lg transition-all",
+                activeTab === item.id ? "bg-[#5A5A40]/10" : ""
+              )}>
+                <item.icon size={20} />
+              </div>
+              <span className="text-[10px] font-bold mt-1">{item.label}</span>
+            </button>
+          ))}
+        </nav>
       </main>
     </div>
   );

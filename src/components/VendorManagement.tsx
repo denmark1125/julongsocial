@@ -155,8 +155,11 @@ export default function VendorManagement() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <p className="text-gray-500">管理您的 IP 帳號與客戶廠商資料</p>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="space-y-1">
+          <h2 className="text-2xl font-bold serif text-[#5A5A40]">廠商管理</h2>
+          <p className="text-sm text-gray-500">管理您的 IP 帳號與客戶廠商資料</p>
+        </div>
         <button 
           onClick={() => {
             setEditingVendor(null);
@@ -164,17 +167,19 @@ export default function VendorManagement() {
               name: '', 
               socialAccounts: [{ platform: 'IG', username: '', password: '' }], 
               postingHabits: [],
-              cooperationItems: []
+              cooperationItems: [],
+              monthlyTargetPosts: 8,
+              monthlyTargetVideos: 0
             });
             setIsModalOpen(true);
           }}
-          className="bg-[#5A5A40] text-white px-4 py-2 rounded-xl flex items-center shadow-lg hover:bg-[#4a4a35] transition-all"
+          className="w-full sm:w-auto bg-[#5A5A40] text-white px-6 py-3 rounded-xl flex items-center justify-center shadow-lg hover:bg-[#4a4a35] transition-all"
         >
           <Plus size={20} className="mr-2" /> 建立廠商資料
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
         {vendors.map((vendor) => (
           <div key={vendor.id} className="bg-white p-6 rounded-2xl shadow-sm border border-black/5 hover:shadow-md transition-all group">
             <div className="flex justify-between items-start mb-4">
@@ -282,17 +287,17 @@ export default function VendorManagement() {
       </div>
 
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl w-full max-w-3xl max-h-[90vh] overflow-auto shadow-2xl">
-            <div className="p-8">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-2 sm:p-4">
+          <div className="bg-white rounded-2xl sm:rounded-3xl w-full max-w-3xl max-h-[95vh] overflow-auto shadow-2xl">
+            <div className="p-5 sm:p-8">
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-2xl font-bold serif">{editingVendor ? '編輯廠商' : '建立新廠商'}</h3>
+                <h3 className="text-xl sm:text-2xl font-bold serif">{editingVendor ? '編輯廠商' : '建立新廠商'}</h3>
                 <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-full">
-                  <X size={24} />
+                  <X className="w-5 h-5 sm:w-6 sm:h-6" />
                 </button>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-8">
+              <form onSubmit={handleSubmit} className="space-y-6 sm:space-y-8">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">廠商名稱</label>
                   <input 

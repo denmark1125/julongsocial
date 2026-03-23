@@ -391,23 +391,17 @@ export default function PostManagement() {
         ))}
       </div>
 
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div className="relative flex-1 w-full max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-          <input 
-            type="text" 
-            placeholder="搜尋文案標題或廠商..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-white rounded-xl border border-black/5 focus:ring-2 focus:ring-[#5A5A40] outline-none"
-          />
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="space-y-1">
+          <h2 className="text-2xl font-bold serif text-[#5A5A40]">貼文管理</h2>
+          <p className="text-sm text-gray-500">追蹤所有貼文的發布狀態與成效</p>
         </div>
-        <div className="flex space-x-2">
+        <div className="flex gap-2 w-full sm:w-auto">
           <button 
             onClick={exportToExcel}
-            className="bg-white text-gray-600 px-4 py-2 rounded-xl flex items-center shadow-sm border border-black/5 hover:bg-gray-50 transition-all whitespace-nowrap"
+            className="flex-1 sm:flex-none flex items-center justify-center px-4 py-2 bg-white text-gray-600 rounded-xl shadow-sm border border-black/5 hover:bg-gray-50 transition-all text-sm"
           >
-            <Download size={20} className="mr-2" /> 匯出 Excel
+            <Download size={18} className="mr-2" /> 匯出 Excel
           </button>
           <button 
             onClick={() => {
@@ -426,16 +420,16 @@ export default function PostManagement() {
               });
               setIsModalOpen(true);
             }}
-            className="bg-[#5A5A40] text-white px-6 py-2 rounded-xl flex items-center shadow-lg hover:bg-[#4a4a35] transition-all whitespace-nowrap"
+            className="flex-1 sm:flex-none flex items-center justify-center px-6 py-2 bg-[#5A5A40] text-white rounded-xl shadow-lg hover:bg-[#4a4a35] transition-all text-sm"
           >
-            <Plus size={20} className="mr-2" /> 新增貼文
+            <Plus size={18} className="mr-2" /> 新增貼文
           </button>
         </div>
       </div>
 
       {/* Month Selector */}
-      <div className="flex items-center justify-between bg-white p-4 rounded-2xl border border-black/5 shadow-sm">
-        <div className="flex items-center space-x-4">
+      <div className="flex flex-col sm:flex-row items-center justify-between bg-white p-4 rounded-2xl border border-black/5 shadow-sm gap-4">
+        <div className="flex items-center space-x-4 w-full sm:w-auto justify-between sm:justify-start">
           <button 
             onClick={() => {
               const prev = subMonths(parseISO(`${selectedMonth}-01`), 1);
@@ -458,7 +452,7 @@ export default function PostManagement() {
             <ChevronRight size={20} />
           </button>
         </div>
-        <div className="hidden md:flex space-x-1 overflow-x-auto max-w-md scrollbar-hide">
+        <div className="flex space-x-1 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0 scrollbar-hide">
           {months.map(m => (
             <button
               key={m}

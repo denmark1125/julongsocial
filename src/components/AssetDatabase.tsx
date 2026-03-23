@@ -61,7 +61,7 @@ export default function AssetDatabase() {
   const [isExporting, setIsExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterVendor, setFilterVendor] = useState('all');
-  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('available');
   const [activeTab, setActiveTab] = useState<AssetType>('video');
 
   const summaryRef = React.useRef<HTMLDivElement>(null);
@@ -210,12 +210,12 @@ export default function AssetDatabase() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-end">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="space-y-1">
           <h2 className="text-2xl font-bold serif text-[#5A5A40]">素材資料庫</h2>
-          <p className="text-sm text-gray-500">管理各廠商的影片與貼文素材素材與庫存</p>
+          <p className="text-sm text-gray-500">管理各廠商的影片與貼文素材庫存</p>
         </div>
-        <div className="flex space-x-4">
+        <div className="flex flex-wrap gap-4 w-full sm:w-auto">
           <button 
             onClick={() => setIsSummaryOpen(true)}
             className="bg-white text-[#5A5A40] px-4 py-2 rounded-2xl border border-black/5 shadow-sm font-bold flex items-center space-x-2 hover:bg-gray-50 transition-colors"
@@ -223,6 +223,15 @@ export default function AssetDatabase() {
             <BarChart3 size={18} />
             <span>庫存總覽</span>
           </button>
+          <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm flex items-center space-x-3">
+            <div className="bg-amber-50 p-2 rounded-lg text-amber-600">
+              <Clock size={18} />
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">待審核</p>
+              <p className="text-lg font-bold leading-none">{assets.filter(a => !a.approved).length} <span className="text-xs font-normal text-gray-400">件</span></p>
+            </div>
+          </div>
           <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm flex items-center space-x-3">
             <div className="bg-blue-50 p-2 rounded-lg text-blue-600">
               <Video size={18} />
@@ -284,54 +293,138 @@ export default function AssetDatabase() {
         </button>
       </div>
 
-      <div className="flex justify-between items-center">
-        <div className="flex-1 max-w-md relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-          <input 
-            type="text"
-            placeholder={`搜尋${activeTab === 'video' ? '影片' : '貼文'}標題...`}
-            className="w-full pl-10 pr-4 py-2 bg-white rounded-xl border border-black/5 focus:ring-2 focus:ring-[#5A5A40] shadow-sm"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-        <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-2">
-            <Filter size={18} className="text-gray-400" />
-            <select 
-              className="bg-white rounded-xl border border-black/5 py-2 px-4 text-sm focus:ring-2 focus:ring-[#5A5A40] shadow-sm"
-              value={filterVendor}
-              onChange={(e) => setFilterVendor(e.target.value)}
-            >
-              <option value="all">所有廠商</option>
-              {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-            </select>
-            <select 
-              className="bg-white rounded-xl border border-black/5 py-2 px-4 text-sm focus:ring-2 focus:ring-[#5A5A40] shadow-sm"
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-            >
-              <option value="all">所有狀態</option>
-              <option value="available">可使用</option>
-              <option value="used">已使用</option>
-            </select>
+      <div className="flex flex-col lg:flex-row gap-8">
+        {/* Left Sidebar: Vendor Stock Overview */}
+        <div className="lg:w-72 flex-shrink-0 space-y-4">
+          <div className="bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-black/5 bg-[#F5F5F0]/30">
+              <h3 className="font-bold serif text-[#5A5A40] flex items-center">
+                <Box size={18} className="mr-2" />
+                廠商庫存快檢
+              </h3>
+            </div>
+            <div className="p-2 max-h-[600px] overflow-y-auto no-scrollbar">
+              <button
+                onClick={() => setFilterVendor('all')}
+                className={cn(
+                  "w-full flex items-center justify-between p-4 rounded-2xl transition-all text-left mb-1",
+                  filterVendor === 'all' ? "bg-[#5A5A40] text-white shadow-md" : "hover:bg-gray-50 text-gray-600"
+                )}
+              >
+                <span className="font-bold text-sm">所有廠商</span>
+                <span className={cn(
+                  "text-[10px] px-2 py-0.5 rounded-full font-bold",
+                  filterVendor === 'all' ? "bg-white/20" : "bg-gray-100"
+                )}>
+                  {assets.filter(a => a.type === activeTab && a.status === 'available').length}
+                </span>
+              </button>
+              {vendors.map(vendor => {
+                const count = assets.filter(a => a.vendorId === vendor.id && a.type === activeTab && a.status === 'available').length;
+                const pendingCount = assets.filter(a => a.vendorId === vendor.id && a.type === activeTab && !a.approved).length;
+                
+                return (
+                  <button
+                    key={vendor.id}
+                    onClick={() => setFilterVendor(vendor.id)}
+                    className={cn(
+                      "w-full flex flex-col p-4 rounded-2xl transition-all text-left mb-1 group",
+                      filterVendor === vendor.id ? "bg-[#5A5A40] text-white shadow-md" : "hover:bg-gray-50 text-gray-600"
+                    )}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1">
+                      <span className="font-bold text-sm truncate flex-1 mr-2">{vendor.name}</span>
+                      <span className={cn(
+                        "text-[10px] px-2 py-0.5 rounded-full font-bold",
+                        filterVendor === vendor.id ? "bg-white/20" : "bg-gray-100",
+                        count === 0 && filterVendor !== vendor.id && "text-red-400"
+                      )}>
+                        {count}
+                      </span>
+                    </div>
+                    {pendingCount > 0 && (
+                      <span className={cn(
+                        "text-[9px] font-medium opacity-70",
+                        filterVendor === vendor.id ? "text-white/80" : "text-amber-600"
+                      )}>
+                        • {pendingCount} 件待審核
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          <button 
-            onClick={() => {
-              setNewAsset({ ...newAsset, type: activeTab });
-              setIsAdding(true);
-            }}
-            className="bg-[#5A5A40] text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-[#4a4a35] transition-all flex items-center space-x-2"
-          >
-            <Plus size={20} />
-            <span>上架新{activeTab === 'video' ? '短素材' : '貼文'}</span>
-          </button>
-        </div>
-      </div>
 
-      {/* Asset Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredAssets.map((asset) => (
+          <div className="bg-amber-50 rounded-2xl p-4 border border-amber-100">
+            <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest mb-2 flex items-center">
+              <Clock size={12} className="mr-1" /> 待處理提醒
+            </p>
+            <p className="text-xs text-amber-800 leading-relaxed">
+              目前共有 <span className="font-bold">{assets.filter(a => !a.approved).length}</span> 件素材尚未通過審核，請儘速確認以利排程。
+            </p>
+          </div>
+        </div>
+
+        {/* Right Content: Asset Grid */}
+        <div className="flex-1 space-y-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div className="flex-1 w-full relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+              <input 
+                type="text"
+                placeholder={`搜尋${activeTab === 'video' ? '影片' : '貼文'}標題...`}
+                className="w-full pl-10 pr-4 py-2 bg-white rounded-xl border border-black/5 focus:ring-2 focus:ring-[#5A5A40] shadow-sm"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-2 w-full md:w-auto">
+              <div className="flex items-center bg-white rounded-xl border border-black/5 p-1 shadow-sm">
+                <button
+                  onClick={() => setFilterStatus('available')}
+                  className={cn(
+                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                    filterStatus === 'available' ? "bg-[#5A5A40] text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"
+                  )}
+                >
+                  可使用
+                </button>
+                <button
+                  onClick={() => setFilterStatus('used')}
+                  className={cn(
+                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                    filterStatus === 'used' ? "bg-[#5A5A40] text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"
+                  )}
+                >
+                  已使用
+                </button>
+                <button
+                  onClick={() => setFilterStatus('all')}
+                  className={cn(
+                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                    filterStatus === 'all' ? "bg-[#5A5A40] text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"
+                  )}
+                >
+                  全部
+                </button>
+              </div>
+              <button 
+                onClick={() => {
+                  setNewAsset({ ...newAsset, type: activeTab });
+                  setIsAdding(true);
+                }}
+                className="flex-1 md:flex-none bg-[#5A5A40] text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-[#4a4a35] transition-all flex items-center justify-center space-x-2 whitespace-nowrap"
+              >
+                <Plus size={20} />
+                <span>上架素材</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Asset Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {filteredAssets.map((asset) => (
           <div 
             key={asset.id} 
             className={cn(
@@ -421,6 +514,8 @@ export default function AssetDatabase() {
           </div>
         )}
       </div>
+    </div>
+  </div>
 
       {/* Add Asset Modal */}
       {isAdding && (

@@ -1,0 +1,22 @@
+{
+  "name": "Julong 社群排程系統",
+  "short_name": "Julong",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F5F5F0",
+  "theme_color": "#5A5A40",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
