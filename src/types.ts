@@ -40,6 +40,7 @@ export interface Vendor {
   cooperationItems: CooperationItem[];
   monthlyTargetPosts?: number;
   monthlyTargetVideos?: number;
+  editorName?: string;
   createdBy: string;
   createdAt: string;
 }

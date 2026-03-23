@@ -22,6 +22,7 @@ import { Toaster } from 'react-hot-toast';
 import { LogIn, Mail, Lock, User as UserIcon } from 'lucide-react';
 import { UserProfile, UserRole } from './types';
 import toast from 'react-hot-toast';
+import { PASSWORD_SUFFIX, ADMIN_USERNAME, ADMIN_EMAIL, INITIAL_ADMIN_REAL_EMAIL } from './constants';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -29,32 +30,9 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isLogin, setIsLogin] = useState(true);
-  const [displayName, setDisplayName] = useState('');
-  const [isFirstUser, setIsFirstUser] = useState(false);
 
   useEffect(() => {
-    const checkFirstUser = async () => {
-      try {
-        const q = query(collection(db, 'users'), limit(1));
-        const snapshot = await getDocs(q);
-        const empty = snapshot.empty;
-        setIsFirstUser(empty);
-        if (empty) {
-          setIsLogin(false);
-          setUsername('David');
-          setPassword('11251125');
-          setEmail('denmark1125@gmail.com');
-          setDisplayName('David');
-        }
-      } catch (error) {
-        console.error('Error checking first user:', error);
-      }
-    };
-    checkFirstUser();
-
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
@@ -63,24 +41,22 @@ export default function App() {
             setUserProfile(userDoc.data() as UserProfile);
             setUser(user);
           } else {
-            // Check if this is the very first user trying to register
-            // Or if it's the hardcoded admin email
-            const isInitialAdmin = user.email === 'denmark1125@gmail.com' || isFirstUser;
+            // Check if this is the hardcoded admin email or the internal admin email
+            const isInitialAdmin = user.email === INITIAL_ADMIN_REAL_EMAIL || user.email === ADMIN_EMAIL;
             
             if (isInitialAdmin) {
               const newProfile: UserProfile = {
                 uid: user.uid,
-                username: username || (user.email?.split('@')[0] || 'admin'),
-                email: user.email || email || '',
+                username: 'David',
+                email: 'denmark1125@gmail.com',
                 role: 'engineer',
-                displayName: user.displayName || displayName || '系統管理員',
+                displayName: 'David',
                 createdAt: new Date().toISOString()
               };
               await setDoc(doc(db, 'users', user.uid), newProfile);
               setUserProfile(newProfile);
               setUser(user);
             } else {
-              // Not an authorized user
               await auth.signOut();
               toast.error('您的帳號尚未被授權，請聯繫管理員設定帳號。');
               setUser(null);
@@ -99,64 +75,60 @@ export default function App() {
       setLoading(false);
     });
     return () => unsubscribe();
-  }, [isFirstUser]);
+  }, []);
 
-  const handleUsernameLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUsernameLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!username || !password) {
+      toast.error('請輸入帳號與密碼');
+      return;
+    }
+
+    const loginEmail = username.toLowerCase() === ADMIN_USERNAME.toLowerCase()
+      ? ADMIN_EMAIL
+      : `${username.toLowerCase()}@forest.system`;
+    
+    // Support any password length by adding a suffix internally
+    const securePassword = password + PASSWORD_SUFFIX;
+
     try {
-      // Map David to the real admin email, others to dummy domain
-      const loginEmail = username.toLowerCase() === 'david' 
-        ? 'denmark1125@gmail.com' 
-        : `${username.toLowerCase()}@forest.system`;
-        
-      await signInWithEmailAndPassword(auth, loginEmail, password);
+      await signInWithEmailAndPassword(auth, loginEmail, securePassword);
     } catch (error: any) {
       console.error('Login failed:', error);
-      if (error.code === 'auth/operation-not-allowed') {
-        toast.error('系統尚未啟用帳號密碼登入，請聯繫管理員或使用 Google 登入。', { duration: 5000 });
-      } else {
-        toast.error('登入失敗：帳號或密碼錯誤');
-      }
-    }
-  };
-
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isFirstUser && username.toLowerCase() !== 'david') {
-      toast.error('目前僅開放管理員手動新增帳號');
-      return;
-    }
-    if (!username || !password || !displayName) {
-      toast.error('請填寫必要欄位');
-      return;
-    }
-    try {
-      // Map David to the real admin email, others to dummy domain
-      const loginEmail = username.toLowerCase() === 'david' 
-        ? 'denmark1125@gmail.com' 
-        : `${username.toLowerCase()}@forest.system`;
-
-      const userCredential = await createUserWithEmailAndPassword(auth, loginEmail, password);
-      const user = userCredential.user;
       
-      const newProfile: UserProfile = {
-        uid: user.uid,
-        username: username,
-        email: username.toLowerCase() === 'david' ? 'denmark1125@gmail.com' : (email || ''),
-        role: 'engineer',
-        displayName: displayName,
-        createdAt: new Date().toISOString()
-      };
-      await setDoc(doc(db, 'users', user.uid), newProfile);
-      setUserProfile(newProfile);
-      setUser(user);
-      toast.success('管理員帳號註冊成功');
-    } catch (error: any) {
-      console.error('Registration failed:', error);
+      // Special case for initial David setup
+      if (username.toLowerCase() === ADMIN_USERNAME.toLowerCase() && password === '1125' && (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential')) {
+        try {
+          const userCredential = await createUserWithEmailAndPassword(auth, loginEmail, securePassword);
+          const user = userCredential.user;
+          const newProfile: UserProfile = {
+            uid: user.uid,
+            username: ADMIN_USERNAME,
+            email: ADMIN_EMAIL,
+            role: 'engineer',
+            displayName: ADMIN_USERNAME,
+            createdAt: new Date().toISOString()
+          };
+          await setDoc(doc(db, 'users', user.uid), newProfile);
+          setUserProfile(newProfile);
+          setUser(user);
+          toast.success('管理員帳號初始化成功');
+          return;
+        } catch (createError: any) {
+          if (createError.code === 'auth/email-already-in-use') {
+             toast.error('登入失敗：帳號或密碼錯誤');
+             return;
+          }
+          console.error('Initial setup failed:', createError);
+        }
+      }
+
       if (error.code === 'auth/operation-not-allowed') {
-        toast.error('系統尚未啟用帳號密碼註冊，請先在 Firebase 控制台啟用 Email/Password 供應商。', { duration: 6000 });
+        toast.error('系統尚未啟用帳號密碼登入，請聯繫管理員。', { duration: 5000 });
+      } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+        toast.error('登入失敗：帳號或密碼錯誤');
       } else {
-        toast.error(`註冊失敗：${error.message}`);
+        toast.error(`登入失敗：${error.message}`);
       }
     }
   };
@@ -231,28 +203,6 @@ export default function App() {
               登入系統
             </button>
           </form>
-
-          <div className="mt-8">
-            <div className="relative mb-6">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-[#8B7355]/20"></div>
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-[#8B7355]">或使用 Google 登入</span>
-              </div>
-            </div>
-
-            <button
-              onClick={handleGoogleLogin}
-              className="w-full bg-white border border-[#8B7355]/20 text-[#5A5A40] py-3 rounded-xl font-medium hover:bg-[#F5F5F0] transition-all flex items-center justify-center gap-2"
-            >
-              <img src="https://www.google.com/favicon.ico" alt="Google" className="w-5 h-5" />
-              Google 帳號登入
-            </button>
-            <p className="mt-4 text-center text-xs text-[#8B7355]/60 italic">
-              註：Google 帳號亦須經管理員授權方可登入
-            </p>
-          </div>
           
           <p className="mt-8 text-center text-[10px] text-[#8B7355]/40 uppercase tracking-widest">
             Forest Asset Management System v2.0

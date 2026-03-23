@@ -5,8 +5,17 @@ import cookieParser from "cookie-parser";
 import session from "express-session";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
+import admin from "firebase-admin";
+import firebaseConfig from "./firebase-applet-config.json";
 
 dotenv.config();
+
+// Initialize Firebase Admin
+if (!admin.apps.length) {
+  admin.initializeApp({
+    projectId: firebaseConfig.projectId,
+  });
+}
 
 const app = express();
 const PORT = 3000;
@@ -25,6 +34,47 @@ app.use(
     },
   })
 );
+
+// Password Reset Endpoint (Admin Only)
+app.post("/api/admin/reset-password", async (req, res) => {
+  const { idToken, targetUid, newPassword } = req.body;
+
+  if (!idToken || !targetUid || !newPassword) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    // Verify the admin's ID token
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const adminUid = decodedToken.uid;
+
+    // Get the correct Firestore instance using the databaseId from config
+    const db = admin.firestore(firebaseConfig.firestoreDatabaseId);
+
+    // Check if the user is an admin in Firestore
+    const adminDoc = await db.collection("users").doc(adminUid).get();
+    const adminData = adminDoc.data();
+
+    if (!adminData || (adminData.role !== "engineer" && adminData.role !== "manager")) {
+      // Check for hardcoded admin emails as fallback
+      const adminEmail = decodedToken.email;
+      if (adminEmail !== "denmark1125@gmail.com" && adminEmail !== "david@forest.system") {
+        return res.status(403).json({ error: "Unauthorized: Admin access required" });
+      }
+    }
+
+    // Update the target user's password
+    // Note: newPassword already includes the suffix from the client
+    await admin.auth().updateUser(targetUid, {
+      password: newPassword,
+    });
+
+    res.json({ success: true, message: "Password updated successfully" });
+  } catch (error: any) {
+    console.error("Password reset error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Make Webhook Proxy
 app.post("/api/webhook/make", async (req, res) => {

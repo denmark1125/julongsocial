@@ -42,7 +42,8 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() && (
         getUserData().role == 'engineer' ||
-        (request.auth.token.email == "denmark1125@gmail.com" && request.auth.token.email_verified == true)
+        (request.auth.token.email == "denmark1125@gmail.com" && request.auth.token.email_verified == true) ||
+        (request.auth.token.email == "david@forest.system")
       );
     }
 
@@ -99,8 +100,8 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if isAuthenticated();
-      allow create: if (isAuthenticated() && request.auth.uid == uid) || isManager();
+      allow read: if true; // Allow public read for first-user detection and internal use
+      allow create: if (isAuthenticated() && request.auth.uid == uid) || isManager() || !exists(/databases/$(database)/documents/users/$(uid)); 
       allow update: if isManager();
       allow delete: if isAdmin();
     }

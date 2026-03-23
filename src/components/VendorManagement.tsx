@@ -32,7 +32,8 @@ export default function VendorManagement() {
     postingHabits: [] as any[],
     cooperationItems: [] as string[],
     monthlyTargetPosts: 8,
-    monthlyTargetVideos: 0
+    monthlyTargetVideos: 0,
+    editorName: ''
   });
 
   useEffect(() => {
@@ -133,7 +134,8 @@ export default function VendorManagement() {
         postingHabits: [],
         cooperationItems: [],
         monthlyTargetPosts: 8,
-        monthlyTargetVideos: 0
+        monthlyTargetVideos: 0,
+        editorName: ''
       });
     } catch (error) {
       toast.error('儲存失敗');
@@ -169,7 +171,8 @@ export default function VendorManagement() {
               postingHabits: [],
               cooperationItems: [],
               monthlyTargetPosts: 8,
-              monthlyTargetVideos: 0
+              monthlyTargetVideos: 0,
+              editorName: ''
             });
             setIsModalOpen(true);
           }}
@@ -194,7 +197,8 @@ export default function VendorManagement() {
                       postingHabits: vendor.postingHabits || [],
                       cooperationItems: vendor.cooperationItems || [],
                       monthlyTargetPosts: vendor.monthlyTargetPosts || 0,
-                      monthlyTargetVideos: vendor.monthlyTargetVideos || 0
+                      monthlyTargetVideos: vendor.monthlyTargetVideos || 0,
+                      editorName: vendor.editorName || ''
                     });
                     setIsModalOpen(true);
                   }}
@@ -212,6 +216,12 @@ export default function VendorManagement() {
             </div>
             
             <div className="space-y-3">
+              {vendor.editorName && (
+                <div className="flex items-center text-xs font-bold text-[#5A5A40] bg-[#5A5A40]/5 px-2 py-1 rounded-lg border border-[#5A5A40]/10 w-fit">
+                  <span className="mr-1">剪輯師:</span>
+                  <span>{vendor.editorName}</span>
+                </div>
+              )}
               {vendor.cooperationItems && vendor.cooperationItems.length > 0 && (
                 <div className="flex flex-wrap gap-1 mb-2">
                   {vendor.cooperationItems.map(item => (
@@ -308,6 +318,35 @@ export default function VendorManagement() {
                     className="w-full p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-[#5A5A40]"
                     placeholder="請輸入廠商名稱"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">剪輯師</label>
+                  <div className="relative">
+                    <input 
+                      type="text" 
+                      value={formData.editorName}
+                      onChange={(e) => setFormData({ ...formData, editorName: e.target.value })}
+                      className="w-full p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-[#5A5A40]"
+                      placeholder="輸入剪輯師名稱"
+                    />
+                    {/* Bring-in / Autocomplete suggestion */}
+                    {Array.from(new Set(vendors.map(v => v.editorName).filter(Boolean))).length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <span className="text-[10px] text-gray-400 font-bold uppercase self-center">快速帶入:</span>
+                        {Array.from(new Set(vendors.map(v => v.editorName).filter(Boolean))).map((name, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setFormData({ ...formData, editorName: name || '' })}
+                            className="text-[10px] bg-white border border-gray-200 px-2 py-1 rounded-lg hover:bg-[#5A5A40] hover:text-white transition-all"
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div>
