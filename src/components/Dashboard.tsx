@@ -7,7 +7,7 @@ import {
   limit 
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Post, Vendor, Asset, DismissedHabit } from '../types';
+import { Post, Vendor, Asset, DismissedHabit, BillingRecord, BillingContract } from '../types';
 import { 
   format, 
   isPast, 
@@ -19,7 +19,8 @@ import {
   endOfWeek,
   isSameDay,
   getDay,
-  subDays
+  subDays,
+  isSameMonth
 } from 'date-fns';
 import { 
   AlertTriangle, 
@@ -28,7 +29,8 @@ import {
   ListTodo,
   BellRing,
   Plus,
-  AlertCircle
+  AlertCircle,
+  CreditCard
 } from 'lucide-react';
 
 import { clsx, type ClassValue } from 'clsx';
@@ -52,6 +54,8 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
+  const [billingRecords, setBillingRecords] = useState<BillingRecord[]>([]);
+  const [contracts, setContracts] = useState<BillingContract[]>([]);
 
   useEffect(() => {
     const vUnsubscribe = onSnapshot(collection(db, 'vendors'), (snapshot) => {
@@ -70,11 +74,21 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
       setDismissedHabits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DismissedHabit)));
     });
 
+    const brUnsubscribe = onSnapshot(collection(db, 'billingRecords'), (snapshot) => {
+      setBillingRecords(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BillingRecord)));
+    });
+
+    const cUnsubscribe = onSnapshot(collection(db, 'billingContracts'), (snapshot) => {
+      setContracts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BillingContract)));
+    });
+
     return () => {
       vUnsubscribe();
       pUnsubscribe();
       aUnsubscribe();
       dUnsubscribe();
+      brUnsubscribe();
+      cUnsubscribe();
     };
   }, []);
 
@@ -161,6 +175,19 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
     needsClient: thisWeekPosts.filter(p => p.internalConfirmed && !p.clientConfirmed),
     readyToSchedule: thisWeekPosts.filter(p => p.internalConfirmed && p.clientConfirmed && p.status === 'draft')
   };
+
+  const pendingBills = billingRecords.filter(r => 
+    r.status !== 'paid' && 
+    isSameMonth(parseISO(r.dueDate), new Date())
+  );
+
+  // Expiring Contracts (within 30 days)
+  const expiringContracts = contracts.filter(c => {
+    if (!c.endDate) return false;
+    const end = parseISO(c.endDate);
+    const diff = addDays(new Date(), 30);
+    return isBefore(end, diff) && isAfter(end, subDays(new Date(), 1)) && c.status === 'active';
+  });
 
   return (
     <div className="space-y-4 md:space-y-8">
@@ -358,6 +385,78 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
               ))}
             </div>
           </div>
+
+          {/* Pending Bills */}
+          <div className="bg-white p-5 md:p-8 rounded-3xl md:rounded-[40px] border border-black/5 shadow-sm space-y-4 md:space-y-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base md:text-lg font-bold serif flex items-center">
+                <CreditCard className="text-[#5A5A40] mr-2" size={18} md:size={20} />
+                待核收帳款
+              </h3>
+              <span className="bg-[#5A5A40]/10 text-[#5A5A40] text-[10px] md:text-xs font-bold px-2 py-0.5 md:py-1 rounded-full">
+                {pendingBills.length}
+              </span>
+            </div>
+            <div className="space-y-2 md:space-y-3">
+              {pendingBills.slice(0, 3).map(record => {
+                const vendor = vendors.find(v => v.id === record.vendorId);
+                return (
+                  <div key={record.id} className="p-3 md:p-4 bg-[#F5F5F0] rounded-xl md:rounded-2xl flex justify-between items-center">
+                    <div>
+                      <p className="text-[10px] md:text-xs font-bold text-gray-700">{vendor?.name}</p>
+                      <p className="text-[8px] md:text-[10px] text-gray-400">
+                        出帳日: {format(parseISO(record.dueDate), 'MM/dd')}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs font-bold text-[#5A5A40]">${record.amount.toLocaleString()}</p>
+                      <button onClick={() => setActiveTab('billing')} className="text-[8px] md:text-[10px] text-gray-400 hover:text-[#5A5A40] underline">
+                        查看
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {pendingBills.length === 0 && (
+                <div className="text-center py-6 md:py-8 text-gray-400 italic text-xs md:text-sm">
+                  本月帳款已結清
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Expiring Contracts */}
+          {expiringContracts.length > 0 && (
+            <div className="bg-white p-5 md:p-8 rounded-3xl md:rounded-[40px] border border-black/5 shadow-sm space-y-4 md:space-y-6">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base md:text-lg font-bold serif flex items-center">
+                  <AlertCircle className="text-red-500 mr-2" size={18} md:size={20} />
+                  合約即將到期
+                </h3>
+                <span className="bg-red-100 text-red-700 text-[10px] md:text-xs font-bold px-2 py-0.5 md:py-1 rounded-full">
+                  {expiringContracts.length}
+                </span>
+              </div>
+              <div className="space-y-2 md:space-y-3">
+                {expiringContracts.map(contract => {
+                  const vendor = vendors.find(v => v.id === contract.vendorId);
+                  return (
+                    <div key={contract.id} className="p-3 md:p-4 bg-red-50 rounded-xl md:rounded-2xl flex justify-between items-center">
+                      <div>
+                        <p className="text-[10px] md:text-xs font-bold text-red-700">{vendor?.name}</p>
+                        <p className="text-[8px] md:text-[10px] text-red-400">
+                          到期日: {contract.endDate}
+                        </p>
+                      </div>
+                      <button onClick={() => setActiveTab('billing')} className="text-[8px] md:text-[10px] text-red-700 font-bold underline">
+                        續約
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

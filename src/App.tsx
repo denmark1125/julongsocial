@@ -16,6 +16,7 @@ import PostManagement from './components/PostManagement';
 import CalendarView from './components/CalendarView';
 import AssetDatabase from './components/AssetDatabase';
 import UserManagement from './components/UserManagement';
+import BillingManagement from './components/BillingManagement';
 import VersionLogView from './components/VersionLog';
 import Logo from './components/Logo';
 import { Toaster } from 'react-hot-toast';
@@ -219,6 +220,7 @@ export default function App() {
       case 'posts': return <PostManagement />;
       case 'calendar': return <CalendarView />;
       case 'videos': return <AssetDatabase />;
+      case 'billing': return <BillingManagement />;
       case 'users': return <UserManagement currentUserRole={userProfile?.role || 'employee'} />;
       case 'version': return <VersionLogView />;
       default: return <Dashboard setActiveTab={setActiveTab} />;

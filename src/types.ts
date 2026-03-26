@@ -1,3 +1,35 @@
+export interface BillingService {
+  name: string;
+  price: number;
+  unit: string; // e.g., '月', '次'
+}
+
+export interface BillingContract {
+  id?: string;
+  vendorId: string;
+  services: BillingService[];
+  billingDay: number; // 1-31
+  totalAmount: number;
+  status: 'active' | 'paused' | 'ended';
+  startDate: string; // YYYY-MM-DD
+  endDate?: string; // YYYY-MM-DD
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BillingRecord {
+  id?: string;
+  vendorId: string;
+  contractId: string;
+  billingMonth: string; // YYYY-MM
+  dueDate: string; // YYYY-MM-DD
+  amount: number;
+  status: 'pending' | 'paid' | 'overdue';
+  paidAt?: string;
+  notes?: string;
+  createdAt: string;
+}
+
 export type UserRole = 'engineer' | 'manager' | 'employee';
 
 export interface UserProfile {

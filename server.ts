@@ -11,24 +11,33 @@ import firebaseConfig from "./firebase-applet-config.json";
 
 dotenv.config();
 
-// Initialize Firebase Admin
-try {
-  if (admin.apps.length === 0) {
-    console.log("Initializing Firebase Admin for project:", firebaseConfig.projectId);
-    admin.initializeApp({
-      projectId: firebaseConfig.projectId,
-    });
-  }
-} catch (e) {
-  console.error("Firebase Admin Initialization Error:", e);
-}
+let adminAuth: any;
+let adminDb: any;
 
-const adminAuth = admin.auth();
-const adminDb = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
-console.log("Using Firestore database:", firebaseConfig.firestoreDatabaseId);
+// Initialize Firebase Admin
+function initializeFirebaseAdmin() {
+  try {
+    if (admin.apps.length === 0) {
+      console.log("Initializing Firebase Admin for project:", firebaseConfig.projectId);
+      admin.initializeApp({
+        projectId: firebaseConfig.projectId,
+      });
+    }
+    adminAuth = admin.auth();
+    adminDb = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
+    console.log("Using Firestore database:", firebaseConfig.firestoreDatabaseId);
+  } catch (e) {
+    console.error("Firebase Admin Initialization Error:", e);
+  }
+}
 
 const app = express();
 const PORT = 3000;
+
+// Start listening immediately to satisfy the platform's health check
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server is listening on port ${PORT}`);
+});
 
 app.use(express.json());
 app.use(cookieParser());
@@ -68,6 +77,10 @@ app.post("/api/admin/reset-password", async (req, res) => {
 
   if (!idToken || !targetUid || !newPassword) {
     return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  if (!adminAuth || !adminDb) {
+    return res.status(500).json({ error: "Firebase Admin not initialized" });
   }
 
   try {
@@ -129,27 +142,33 @@ app.post("/api/webhook/make", async (req, res) => {
 
 // Vite middleware for development
 async function setupServer() {
+  console.log("Starting setupServer...");
+  initializeFirebaseAdmin();
+
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
+    console.log("Setting up Vite middleware...");
+    try {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+      console.log("Vite middleware attached.");
+    } catch (err) {
+      console.error("Error setting up Vite middleware:", err);
+    }
   } else {
+    console.log("Serving static files from dist...");
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
 }
 
 setupServer().catch(err => {
-  console.error("Failed to start server:", err);
+  console.error("Failed to setup server middleware:", err);
 });
 
 // Global Error Handler

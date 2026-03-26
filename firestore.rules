@@ -22,6 +22,12 @@ service cloud.firestore {
     //
     // Collection: dismissedHabits
     // Fields: vendorId (string), habitTime (string), date (string: YYYY-MM-DD), createdAt (timestamp)
+    //
+    // Collection: billingContracts
+    // Fields: vendorId (string), services (list), billingDay (int), totalAmount (int), status (string: active|paused|ended)
+    //
+    // Collection: billingRecords
+    // Fields: vendorId (string), contractId (string), billingMonth (string: YYYY-MM), dueDate (string: YYYY-MM-DD), amount (int), status (string: pending|paid|overdue)
     // ===============================================================
 
     // ===============================================================
@@ -99,6 +105,25 @@ service cloud.firestore {
              data.date is string;
     }
 
+    function isValidBillingContract(data) {
+      return data.keys().hasAll(['vendorId', 'services', 'billingDay', 'totalAmount', 'status']) &&
+             data.vendorId is string &&
+             data.services is list &&
+             data.billingDay is int && data.billingDay >= 1 && data.billingDay <= 31 &&
+             data.totalAmount is int &&
+             data.status in ['active', 'paused', 'ended'];
+    }
+
+    function isValidBillingRecord(data) {
+      return data.keys().hasAll(['vendorId', 'contractId', 'billingMonth', 'dueDate', 'amount', 'status']) &&
+             data.vendorId is string &&
+             data.contractId is string &&
+             data.billingMonth is string &&
+             data.dueDate is string &&
+             data.amount is int &&
+             data.status in ['pending', 'paid', 'overdue'];
+    }
+
     match /users/{uid} {
       allow read: if true; // Allow public read for first-user detection and internal use
       allow create: if (isAuthenticated() && request.auth.uid == uid) || isManager() || !exists(/databases/$(database)/documents/users/$(uid)); 
@@ -136,6 +161,20 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidDismissedHabit(request.resource.data);
       allow delete: if isManager();
+    }
+
+    match /billingContracts/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isManager() && isValidBillingContract(request.resource.data);
+      allow update: if isManager() && isValidBillingContract(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /billingRecords/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isManager() && isValidBillingRecord(request.resource.data);
+      allow update: if isManager() && isValidBillingRecord(request.resource.data);
+      allow delete: if isAdmin();
     }
   }
 }

@@ -27,6 +27,7 @@ import {
   Video as VideoIcon,
   Download,
   Trash2,
+  Copy,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
@@ -148,6 +149,18 @@ export default function PostManagement() {
       aUnsubscribe();
     };
   }, []);
+
+  const handleCopyContent = (content: string) => {
+    if (!content) {
+      toast.error('無文案內容可複製');
+      return;
+    }
+    navigator.clipboard.writeText(content).then(() => {
+      toast.success('文案已複製到剪貼簿');
+    }).catch(() => {
+      toast.error('複製失敗');
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -635,6 +648,13 @@ export default function PostManagement() {
                     <td className="p-4">
                       <div className="flex space-x-1">
                         <button 
+                          onClick={() => handleCopyContent(post.content)}
+                          className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                          title="複製文案"
+                        >
+                          <Copy size={16} />
+                        </button>
+                        <button 
                           onClick={() => {
                             setEditingPost(post);
                             setFormData(post);
@@ -683,6 +703,13 @@ export default function PostManagement() {
                       <h4 className="font-bold text-sm">{post.title}</h4>
                     </div>
                     <div className="flex space-x-1">
+                      <button 
+                        onClick={() => handleCopyContent(post.content)}
+                        className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg"
+                        title="複製文案"
+                      >
+                        <Copy size={16} />
+                      </button>
                       <button 
                         onClick={() => {
                           setEditingPost(post);

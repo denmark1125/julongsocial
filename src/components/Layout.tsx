@@ -17,7 +17,8 @@ import {
   AlertCircle,
   BellRing,
   Clock,
-  Lock
+  Lock,
+  CreditCard
 } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
@@ -185,6 +186,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     { id: 'posts', label: '貼文管理', icon: FileText, roles: ['engineer', 'manager', 'employee'] },
     { id: 'videos', label: '素材資料庫', icon: Video, roles: ['engineer', 'manager', 'employee'] },
     { id: 'calendar', label: '社群日曆', icon: CalendarIcon, roles: ['engineer', 'manager', 'employee'] },
+    { id: 'billing', label: '帳務管理', icon: CreditCard, roles: ['engineer', 'manager'] },
     { id: 'users', label: '員工管理', icon: ShieldCheck, roles: ['engineer', 'manager'] },
     { id: 'version', label: '版本日誌', icon: History, roles: ['engineer'] },
   ];

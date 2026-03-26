@@ -117,6 +117,48 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["vendorId", "habitTime", "date"]
+    },
+    "BillingContract": {
+      "title": "BillingContract",
+      "description": "廠商收費合約資料",
+      "type": "object",
+      "properties": {
+        "vendorId": { "type": "string", "description": "所屬廠商ID" },
+        "services": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string", "description": "服務名稱" },
+              "price": { "type": "integer", "description": "價格" },
+              "unit": { "type": "string", "description": "單位 (月/次)" }
+            }
+          }
+        },
+        "billingDay": { "type": "integer", "description": "每月出帳日 (1-31)" },
+        "totalAmount": { "type": "integer", "description": "每月總額" },
+        "status": { "type": "string", "enum": ["active", "paused", "ended"], "description": "合約狀態" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["vendorId", "services", "billingDay", "totalAmount", "status"]
+    },
+    "BillingRecord": {
+      "title": "BillingRecord",
+      "description": "每月收款紀錄",
+      "type": "object",
+      "properties": {
+        "vendorId": { "type": "string", "description": "所屬廠商ID" },
+        "contractId": { "type": "string", "description": "所屬合約ID" },
+        "billingMonth": { "type": "string", "description": "帳務月份 (YYYY-MM)" },
+        "dueDate": { "type": "string", "description": "應收日期 (YYYY-MM-DD)" },
+        "amount": { "type": "integer", "description": "應收金額" },
+        "status": { "type": "string", "enum": ["pending", "paid", "overdue"], "description": "收款狀態" },
+        "paidAt": { "type": "string", "format": "date-time", "description": "實際收款日期" },
+        "notes": { "type": "string", "description": "備註" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["vendorId", "contractId", "billingMonth", "dueDate", "amount", "status"]
     }
   },
   "firestore": {
@@ -143,6 +185,14 @@
     "/dismissedHabits/{id}": {
       "schema": "DismissedHabit",
       "description": "已刪除的預定排程提醒"
+    },
+    "/billingContracts/{id}": {
+      "schema": "BillingContract",
+      "description": "合約管理"
+    },
+    "/billingRecords/{id}": {
+      "schema": "BillingRecord",
+      "description": "收款紀錄管理"
     }
   }
 }
