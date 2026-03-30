@@ -61,6 +61,7 @@ export default function PostManagement() {
     content: '',
     status: 'draft',
     scheduledAt: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+    targetMonth: format(new Date(), 'yyyy-MM'),
     type: '專業',
     contentType: 'post',
     postUrl: '',
@@ -298,12 +299,13 @@ export default function PostManagement() {
       vendors.find(v => v.id === post.vendorId)?.name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesVendor = selectedVendorId === 'all' || post.vendorId === selectedVendorId;
     const matchesStatus = selectedStatus === 'all' || post.status === selectedStatus;
-    const matchesMonth = format(parseISO(post.scheduledAt), 'yyyy-MM') === selectedMonth;
+    const matchesMonth = (post.targetMonth || format(parseISO(post.scheduledAt), 'yyyy-MM')) === selectedMonth;
     return matchesSearch && matchesVendor && matchesStatus && matchesMonth;
   });
 
-  const months = Array.from({ length: 12 }, (_, i) => {
-    const date = subMonths(new Date(), 6 - i);
+  const months = Array.from({ length: 7 }, (_, i) => {
+    const baseDate = parseISO(`${selectedMonth}-01`);
+    const date = addMonths(subMonths(baseDate, 3), i);
     return format(date, 'yyyy-MM');
   });
 
@@ -320,7 +322,7 @@ export default function PostManagement() {
   const vendorStats = vendors.map(vendor => {
     const vendorMonthPosts = posts.filter(p => 
       p.vendorId === vendor.id && 
-      format(parseISO(p.scheduledAt), 'yyyy-MM') === selectedMonth
+      (p.targetMonth || format(parseISO(p.scheduledAt), 'yyyy-MM')) === selectedMonth
     );
     
     const postCount = vendorMonthPosts.filter(p => p.contentType === 'post').length;
@@ -333,6 +335,9 @@ export default function PostManagement() {
     const totalCount = vendorMonthPosts.length;
     const percentage = Math.min(Math.round((totalCount / totalTarget) * 100), 100);
     
+    const hasPosts = vendor.cooperationItems?.includes('graphic_post');
+    const hasVideos = vendor.cooperationItems?.includes('short_video');
+    
     return {
       id: vendor.id,
       name: vendor.name,
@@ -342,7 +347,9 @@ export default function PostManagement() {
       target: totalTarget,
       targetPosts,
       targetVideos,
-      percentage
+      percentage,
+      hasPosts,
+      hasVideos
     };
   });
 
@@ -366,30 +373,34 @@ export default function PostManagement() {
               </div>
             </div>
             <div className="flex gap-2 mb-2">
-              <div className="flex-1">
-                <div className="flex justify-between text-[8px] font-bold text-blue-400 mb-0.5">
-                  <span>圖文</span>
-                  <span>{stat.postCount}/{stat.targetPosts}</span>
+              {stat.hasPosts && (
+                <div className="flex-1">
+                  <div className="flex justify-between text-[8px] font-bold text-blue-400 mb-0.5">
+                    <span>圖文</span>
+                    <span>{stat.postCount}/{stat.targetPosts}</span>
+                  </div>
+                  <div className="w-full h-1 bg-blue-50 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-blue-400 transition-all duration-500"
+                      style={{ width: `${stat.targetPosts > 0 ? Math.min((stat.postCount / stat.targetPosts) * 100, 100) : 0}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="w-full h-1 bg-blue-50 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-blue-400 transition-all duration-500"
-                    style={{ width: `${stat.targetPosts > 0 ? Math.min((stat.postCount / stat.targetPosts) * 100, 100) : 0}%` }}
-                  />
+              )}
+              {stat.hasVideos && (
+                <div className="flex-1">
+                  <div className="flex justify-between text-[8px] font-bold text-orange-400 mb-0.5">
+                    <span>影音</span>
+                    <span>{stat.videoCount}/{stat.targetVideos}</span>
+                  </div>
+                  <div className="w-full h-1 bg-orange-50 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-orange-400 transition-all duration-500"
+                      style={{ width: `${stat.targetVideos > 0 ? Math.min((stat.videoCount / stat.targetVideos) * 100, 100) : 0}%` }}
+                    />
+                  </div>
                 </div>
-              </div>
-              <div className="flex-1">
-                <div className="flex justify-between text-[8px] font-bold text-orange-400 mb-0.5">
-                  <span>影音</span>
-                  <span>{stat.videoCount}/{stat.targetVideos}</span>
-                </div>
-                <div className="w-full h-1 bg-orange-50 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-orange-400 transition-all duration-500"
-                    style={{ width: `${stat.targetVideos > 0 ? Math.min((stat.videoCount / stat.targetVideos) * 100, 100) : 0}%` }}
-                  />
-                </div>
-              </div>
+              )}
             </div>
             <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
               <div 
@@ -425,6 +436,7 @@ export default function PostManagement() {
                 content: '',
                 status: 'draft',
                 scheduledAt: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+                targetMonth: selectedMonth,
                 type: '專業',
                 clientConfirmed: false,
                 internalConfirmed: false,
@@ -508,7 +520,7 @@ export default function PostManagement() {
                 const matchesSearch = p.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                   vendors.find(v => v.id === p.vendorId)?.name.toLowerCase().includes(searchTerm.toLowerCase());
                 const matchesVendor = selectedVendorId === 'all' || p.vendorId === selectedVendorId;
-                const matchesMonth = format(parseISO(p.scheduledAt), 'yyyy-MM') === selectedMonth;
+                const matchesMonth = (p.targetMonth || format(parseISO(p.scheduledAt), 'yyyy-MM')) === selectedMonth;
                 const matchesStatus = status.id === 'all' || p.status === status.id;
                 return matchesSearch && matchesVendor && matchesMonth && matchesStatus;
               }).length})
@@ -884,6 +896,21 @@ export default function PostManagement() {
                     >
                       <option value="">請選擇廠商</option>
                       {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">目標月份 (計算KPI用)</label>
+                    <select 
+                      required
+                      value={formData.targetMonth}
+                      onChange={(e) => setFormData({ ...formData, targetMonth: e.target.value })}
+                      className="w-full p-2 bg-[#F5F5F0] rounded-xl border-none"
+                    >
+                      {months.map(m => (
+                        <option key={m} value={m}>
+                          {format(parseISO(`${m}-01`), 'yyyy年 MM月')}
+                        </option>
+                      ))}
                     </select>
                   </div>
                   <div>

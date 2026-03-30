@@ -25,7 +25,9 @@ import {
   Box,
   Download,
   BarChart3,
-  Calendar
+  Calendar,
+  X,
+  ArrowLeftRight
 } from 'lucide-react';
 import { toJpeg } from 'html-to-image';
 import download from 'downloadjs';
@@ -60,9 +62,13 @@ export default function AssetDatabase() {
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [vendorSearchTerm, setVendorSearchTerm] = useState('');
   const [filterVendor, setFilterVendor] = useState('all');
   const [filterStatus, setFilterStatus] = useState('available');
+  const [filterStage, setFilterStage] = useState<'raw' | 'finished'>('finished');
   const [activeTab, setActiveTab] = useState<AssetType>('video');
+  const [convertingAsset, setConvertingAsset] = useState<Asset | null>(null);
+  const [conversionUrl, setConversionUrl] = useState('');
 
   const summaryRef = React.useRef<HTMLDivElement>(null);
 
@@ -71,7 +77,9 @@ export default function AssetDatabase() {
     url: '',
     vendorId: '',
     category: '',
-    type: 'video' as AssetType
+    type: 'video' as AssetType,
+    stage: 'raw' as 'raw' | 'finished',
+    filmingDate: new Date().toISOString().split('T')[0]
   });
 
   const defaultCategories = ['宣傳', '教學', '生活', '活動', '訪談', '開箱', '圖文', '資訊'];
@@ -116,11 +124,36 @@ export default function AssetDatabase() {
         createdAt: new Date().toISOString(),
         createdBy: auth.currentUser?.uid
       });
-      toast.success('素材已上架');
-      setNewAsset({ title: '', url: '', vendorId: '', category: '', type: activeTab });
+      toast.success(newAsset.stage === 'raw' ? '原始素材已建檔' : '素材已上架');
+      setNewAsset({ 
+        title: '', 
+        url: '', 
+        vendorId: '', 
+        category: '', 
+        type: activeTab,
+        stage: 'raw',
+        filmingDate: new Date().toISOString().split('T')[0]
+      });
       setIsAdding(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'assets');
+    }
+  };
+
+  const handleConvert = async () => {
+    if (!convertingAsset) return;
+    try {
+      await updateDoc(doc(db, 'assets', convertingAsset.id!), {
+        stage: 'finished',
+        url: conversionUrl || convertingAsset.url || '',
+        approved: false // New finished assets need approval
+      });
+      toast.success('已轉為成片，待審核');
+      setConvertingAsset(null);
+      setConversionUrl('');
+      setFilterStage('finished');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `assets/${convertingAsset.id}`);
     }
   };
 
@@ -148,7 +181,8 @@ export default function AssetDatabase() {
     const matchesSearch = a.title.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesVendor = filterVendor === 'all' || a.vendorId === filterVendor;
     const matchesStatus = filterStatus === 'all' || a.status === filterStatus;
-    return matchesTab && matchesSearch && matchesVendor && matchesStatus;
+    const matchesStage = a.stage === filterStage || (!a.stage && filterStage === 'finished');
+    return matchesTab && matchesSearch && matchesVendor && matchesStatus && matchesStage;
   });
 
   const getVendorName = (id: string) => vendors.find(v => v.id === id)?.name || '未知廠商';
@@ -184,12 +218,17 @@ export default function AssetDatabase() {
       return post && (post.status === 'draft' || post.status === 'scheduled');
     }).length;
 
+    const hasVideos = vendor.cooperationItems?.includes('short_video');
+    const hasPosts = vendor.cooperationItems?.includes('graphic_post');
+
     return {
       name: vendor.name,
       videos: availableVideos,
       posts: availablePosts,
       scheduledVideos,
-      scheduledPosts
+      scheduledPosts,
+      hasVideos,
+      hasPosts
     };
   }).sort((a, b) => (b.videos + b.posts + b.scheduledVideos + b.scheduledPosts) - (a.videos + a.posts + a.scheduledVideos + a.scheduledPosts));
 
@@ -272,38 +311,69 @@ export default function AssetDatabase() {
       </div>
 
       {/* Tabs */}
-      <div className="flex space-x-1 bg-white p-1 rounded-2xl border border-black/5 w-fit shadow-sm">
-        <button 
-          onClick={() => setActiveTab('video')}
-          className={`flex items-center space-x-2 px-6 py-2 rounded-xl text-sm font-bold transition-all ${
-            activeTab === 'video' ? 'bg-[#5A5A40] text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'
-          }`}
-        >
-          <Video size={16} />
-          <span>短素材 (影片)</span>
-        </button>
-        <button 
-          onClick={() => setActiveTab('post')}
-          className={`flex items-center space-x-2 px-6 py-2 rounded-xl text-sm font-bold transition-all ${
-            activeTab === 'post' ? 'bg-[#5A5A40] text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'
-          }`}
-        >
-          <FileText size={16} />
-          <span>貼文素材</span>
-        </button>
+      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+        <div className="flex space-x-1 bg-white p-1 rounded-2xl border border-black/5 w-fit shadow-sm">
+          <button 
+            onClick={() => setActiveTab('video')}
+            className={`flex items-center space-x-2 px-6 py-2 rounded-xl text-sm font-bold transition-all ${
+              activeTab === 'video' ? 'bg-[#5A5A40] text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'
+            }`}
+          >
+            <Video size={16} />
+            <span>短素材 (影片)</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab('post')}
+            className={`flex items-center space-x-2 px-6 py-2 rounded-xl text-sm font-bold transition-all ${
+              activeTab === 'post' ? 'bg-[#5A5A40] text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'
+            }`}
+          >
+            <FileText size={16} />
+            <span>貼文素材</span>
+          </button>
+        </div>
+
+        <div className="flex space-x-1 bg-white p-1 rounded-2xl border border-black/5 w-fit shadow-sm">
+          <button 
+            onClick={() => setFilterStage('raw')}
+            className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${
+              filterStage === 'raw' ? 'bg-[#8B7355] text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'
+            }`}
+          >
+            原始素材 (Raw)
+          </button>
+          <button 
+            onClick={() => setFilterStage('finished')}
+            className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${
+              filterStage === 'finished' ? 'bg-[#5A5A40] text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'
+            }`}
+          >
+            成片 (Finished)
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col lg:flex-row gap-8">
         {/* Left Sidebar: Vendor Stock Overview */}
         <div className="lg:w-72 flex-shrink-0 space-y-4">
           <div className="bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden">
-            <div className="p-6 border-b border-black/5 bg-[#F5F5F0]/30">
+            <div className="p-6 border-b border-black/5 bg-[#F5F5F0]/30 space-y-3">
               <h3 className="font-bold serif text-[#5A5A40] flex items-center">
                 <Box size={18} className="mr-2" />
                 廠商庫存快檢
               </h3>
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                <input 
+                  type="text"
+                  placeholder="搜尋廠商..."
+                  className="w-full pl-8 pr-3 py-1.5 bg-white rounded-xl border border-black/5 text-xs focus:ring-1 focus:ring-[#5A5A40]"
+                  value={vendorSearchTerm}
+                  onChange={(e) => setVendorSearchTerm(e.target.value)}
+                />
+              </div>
             </div>
-            <div className="p-2 max-h-[600px] overflow-y-auto no-scrollbar">
+            <div className="p-2 max-h-[500px] overflow-y-auto no-scrollbar">
               <button
                 onClick={() => setFilterVendor('all')}
                 className={cn(
@@ -319,7 +389,9 @@ export default function AssetDatabase() {
                   {assets.filter(a => a.type === activeTab && a.status === 'available').length}
                 </span>
               </button>
-              {vendors.map(vendor => {
+              {vendors
+                .filter(v => v.name.toLowerCase().includes(vendorSearchTerm.toLowerCase()))
+                .map(vendor => {
                 const count = assets.filter(a => a.vendorId === vendor.id && a.type === activeTab && a.status === 'available').length;
                 const pendingCount = assets.filter(a => a.vendorId === vendor.id && a.type === activeTab && !a.approved).length;
                 
@@ -411,7 +483,11 @@ export default function AssetDatabase() {
               </div>
               <button 
                 onClick={() => {
-                  setNewAsset({ ...newAsset, type: activeTab });
+                  setNewAsset({ 
+                    ...newAsset, 
+                    type: activeTab,
+                    stage: filterStage 
+                  });
                   setIsAdding(true);
                 }}
                 className="flex-1 md:flex-none bg-[#5A5A40] text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-[#4a4a35] transition-all flex items-center justify-center space-x-2 whitespace-nowrap"
@@ -461,24 +537,32 @@ export default function AssetDatabase() {
               <div className="absolute top-4 left-4">
                 <span className={cn(
                   "px-3 py-1 rounded-full text-[10px] font-bold text-white uppercase tracking-wider",
-                  asset.status === 'used' ? "bg-gray-400" : "bg-[#5A5A40]"
+                  asset.stage === 'raw' ? "bg-[#8B7355]" : asset.status === 'used' ? "bg-gray-400" : "bg-[#5A5A40]"
                 )}>
-                  {asset.category || '未分類'}
+                  {asset.stage === 'raw' ? '原始素材' : (asset.category || '未分類')}
                 </span>
               </div>
               <div className="absolute top-4 right-4">
-                <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                  asset.status === 'available' ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'
-                }`}>
-                  {asset.status === 'available' ? '可使用' : '已使用'}
+                <span className={cn(
+                  "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                  asset.stage === 'raw' ? "bg-[#8B7355]/10 text-[#8B7355] border border-[#8B7355]/20" : 
+                  asset.status === 'available' ? "bg-[#8A8A6A]/10 text-[#8A8A6A] border border-[#8A8A6A]/20" : 
+                  "bg-gray-100 text-gray-500 border border-gray-200"
+                )}>
+                  {asset.stage === 'raw' ? '待剪輯' : asset.status === 'available' ? '可使用' : '已使用'}
                 </span>
               </div>
             </div>
             <div className={cn("p-6 space-y-4", asset.status === 'used' && "py-3")}>
               <div>
-                <p className="text-[10px] font-bold text-[#5A5A40] uppercase tracking-widest mb-1">
-                  {getVendorName(asset.vendorId)}
-                </p>
+                <div className="flex justify-between items-start mb-1">
+                  <p className="text-[10px] font-bold text-[#5A5A40] uppercase tracking-widest">
+                    {getVendorName(asset.vendorId)}
+                  </p>
+                  {asset.filmingDate && (
+                    <p className="text-[10px] font-medium text-gray-400">拍攝: {asset.filmingDate}</p>
+                  )}
+                </div>
                 <h4 className={cn(
                   "font-bold leading-tight line-clamp-2",
                   asset.status === 'used' ? "text-sm text-gray-500" : "text-lg"
@@ -486,15 +570,24 @@ export default function AssetDatabase() {
               </div>
               <div className="flex items-center justify-between pt-4 border-t border-black/5">
                 <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => toggleApproval(asset)}
-                    className={cn(
-                      "px-3 py-1 rounded-lg text-[10px] font-bold transition-colors",
-                      asset.approved ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-400"
-                    )}
-                  >
-                    {asset.approved ? '已審核' : '待審核'}
-                  </button>
+                  {asset.stage === 'raw' ? (
+                    <button
+                      onClick={() => setConvertingAsset(asset)}
+                      className="bg-[#5A5A40] text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-[#4a4a35] transition-colors"
+                    >
+                      轉為成片
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => toggleApproval(asset)}
+                      className={cn(
+                        "px-3 py-1 rounded-lg text-[10px] font-bold transition-colors",
+                        asset.approved ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-400"
+                      )}
+                    >
+                      {asset.approved ? '已審核' : '待審核'}
+                    </button>
+                  )}
                   <span className="text-[10px] text-gray-400">{new Date(asset.createdAt).toLocaleDateString()}</span>
                 </div>
                 <button 
@@ -529,13 +622,36 @@ export default function AssetDatabase() {
             </div>
 
             <form onSubmit={handleAddAsset} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-bold text-gray-600 ml-1">素材階段</label>
+                  <select 
+                    className="w-full px-5 py-3 bg-[#F5F5F0] rounded-2xl border-none focus:ring-2 focus:ring-[#5A5A40]"
+                    value={newAsset.stage}
+                    onChange={(e) => setNewAsset({...newAsset, stage: e.target.value as 'raw' | 'finished'})}
+                  >
+                    <option value="raw">原始素材 (Raw)</option>
+                    <option value="finished">成片 (Finished)</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-bold text-gray-600 ml-1">拍攝日期</label>
+                  <input 
+                    type="date"
+                    className="w-full px-5 py-3 bg-[#F5F5F0] rounded-2xl border-none focus:ring-2 focus:ring-[#5A5A40]"
+                    value={newAsset.filmingDate}
+                    onChange={(e) => setNewAsset({...newAsset, filmingDate: e.target.value})}
+                  />
+                </div>
+              </div>
+
               <div className="space-y-2">
-                <label className="text-sm font-bold text-gray-600 ml-1">標題</label>
+                <label className="text-sm font-bold text-gray-600 ml-1">標題 / 名稱</label>
                 <input 
                   type="text"
                   required
                   className="w-full px-5 py-3 bg-[#F5F5F0] rounded-2xl border-none focus:ring-2 focus:ring-[#5A5A40]"
-                  placeholder="例如：2024 夏季新品宣傳片 A"
+                  placeholder="例如：2024 夏季新品拍攝素材"
                   value={newAsset.title}
                   onChange={(e) => setNewAsset({...newAsset, title: e.target.value})}
                 />
@@ -602,117 +718,183 @@ export default function AssetDatabase() {
         </div>
       )}
 
+      {/* Convert to Finished Modal */}
+      {convertingAsset && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-[40px] w-full max-w-lg p-8 space-y-6 shadow-2xl">
+            <div className="flex justify-between items-center">
+              <h3 className="text-2xl font-bold serif text-[#5A5A40]">轉為成片</h3>
+              <button onClick={() => setConvertingAsset(null)} className="p-2 hover:bg-gray-100 rounded-full">
+                <Plus size={24} className="rotate-45" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <p className="text-sm text-gray-500">將「{convertingAsset.title}」標記為剪輯完成，並轉入成片資料庫。</p>
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-gray-600 ml-1">影片連結 (選填)</label>
+                <input 
+                  type="url"
+                  className="w-full px-5 py-3 bg-[#F5F5F0] rounded-2xl border-none focus:ring-2 focus:ring-[#5A5A40]"
+                  placeholder="https://..."
+                  value={conversionUrl}
+                  onChange={(e) => setConversionUrl(e.target.value)}
+                />
+              </div>
+              <div className="pt-4 flex space-x-3">
+                <button 
+                  onClick={() => setConvertingAsset(null)}
+                  className="flex-1 py-4 rounded-2xl font-bold text-gray-500 hover:bg-gray-100 transition-all"
+                >
+                  取消
+                </button>
+                <button 
+                  onClick={handleConvert}
+                  className="flex-1 bg-[#5A5A40] text-white py-4 rounded-2xl font-bold shadow-xl hover:bg-[#4a4a35] transition-all"
+                >
+                  確認轉換
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Stock Summary Modal */}
       {isSummaryOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-[40px] w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
-            <div className="p-8 border-b border-black/5 flex justify-between items-center bg-white sticky top-0 z-10">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-2 md:p-4">
+          <div className="bg-white rounded-[32px] md:rounded-[40px] w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[95vh]">
+            <div className="p-4 md:p-6 border-b border-black/5 flex justify-between items-center bg-white sticky top-0 z-10">
               <div className="flex items-center space-x-3">
                 <div className="bg-[#5A5A40] p-2 rounded-xl text-white">
                   <BarChart3 size={20} />
                 </div>
-                <h3 className="text-2xl font-bold serif text-[#5A5A40]">個別 IP 素材庫存總覽</h3>
+                <h3 className="text-lg md:text-xl font-bold serif text-[#5A5A40]">個別 IP 素材庫存總覽</h3>
               </div>
-              <button onClick={() => setIsSummaryOpen(false)} className="p-2 hover:bg-gray-100 rounded-full">
-                <Plus size={24} className="rotate-45" />
+              <button onClick={() => setIsSummaryOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                <X size={24} />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-8 bg-[#F5F5F0]/30">
-              <div ref={summaryRef} className="bg-white p-10 rounded-[32px] shadow-sm border border-black/5 space-y-8">
-                <div className="flex justify-between items-end border-b border-black/5 pb-6">
+            <div className="flex-1 overflow-y-auto p-2 md:p-6 bg-[#F5F5F0]/30">
+              <div ref={summaryRef} className="bg-white p-3 md:p-8 rounded-[24px] md:rounded-[32px] shadow-sm border border-black/5 space-y-4 md:space-y-6">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end border-b border-black/5 pb-6 gap-4">
                   <div>
-                    <h1 className="text-3xl font-black serif text-[#1a1a1a] mb-1">聚浪 Julong Agency</h1>
-                    <p className="text-gray-500 font-bold tracking-widest uppercase text-sm">素材庫存即時報表</p>
+                    <h1 className="text-xl md:text-2xl font-black serif text-[#1a1a1a] mb-1">聚浪 Julong Agency</h1>
+                    <p className="text-gray-500 font-bold tracking-widest uppercase text-[10px] md:text-xs">素材庫存即時報表</p>
                   </div>
-                  <div className="text-right">
+                  <div className="text-left sm:text-right">
                     <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">導出日期</p>
-                    <p className="text-lg font-bold serif flex items-center justify-end">
-                      <Calendar size={16} className="mr-2 text-[#5A5A40]" />
+                    <p className="text-sm md:text-base font-bold serif flex items-center sm:justify-end">
+                      <Calendar size={14} className="mr-2 text-[#5A5A40]" />
                       {new Date().toLocaleDateString()}
                     </p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="bg-blue-50/50 p-5 rounded-3xl border border-blue-100 flex flex-col justify-between h-32 shadow-sm">
-                    <div className="bg-blue-100 p-2.5 rounded-xl text-blue-600 w-fit">
-                      <Video size={20} />
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4">
+                  <div className="bg-blue-50/50 p-2.5 md:p-4 rounded-2xl md:rounded-3xl border border-blue-100 flex flex-col justify-between min-h-[70px] md:min-h-[100px] shadow-sm">
+                    <div className="bg-blue-100 p-1.5 md:p-2 rounded-lg md:rounded-xl text-blue-600 w-fit">
+                      <Video size={14} className="md:w-[18px] md:h-[18px]" />
                     </div>
                     <div>
-                      <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1">總可用影片</p>
-                      <p className="text-3xl font-black text-blue-900 leading-none">{videoInventory} <span className="text-xs font-normal opacity-40">隻</span></p>
+                      <p className="text-[8px] md:text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-0.5">總可用影片</p>
+                      <p className="text-base md:text-2xl font-black text-blue-900 leading-none">{videoInventory} <span className="text-[10px] font-normal opacity-40">隻</span></p>
                     </div>
                   </div>
-                  <div className="bg-purple-50/50 p-5 rounded-3xl border border-purple-100 flex flex-col justify-between h-32 shadow-sm">
-                    <div className="bg-purple-100 p-2.5 rounded-xl text-purple-600 w-fit">
-                      <FileText size={20} />
+                  <div className="bg-purple-50/50 p-2.5 md:p-4 rounded-2xl md:rounded-3xl border border-purple-100 flex flex-col justify-between min-h-[70px] md:min-h-[100px] shadow-sm">
+                    <div className="bg-purple-100 p-1.5 md:p-2 rounded-lg md:rounded-xl text-purple-600 w-fit">
+                      <FileText size={14} className="md:w-[18px] md:h-[18px]" />
                     </div>
                     <div>
-                      <p className="text-[10px] font-bold text-purple-400 uppercase tracking-widest mb-1">總可用貼文</p>
-                      <p className="text-3xl font-black text-purple-900 leading-none">{postInventory} <span className="text-xs font-normal opacity-40">篇</span></p>
+                      <p className="text-[8px] md:text-[10px] font-bold text-purple-400 uppercase tracking-widest mb-0.5">總可用貼文</p>
+                      <p className="text-base md:text-2xl font-black text-purple-900 leading-none">{postInventory} <span className="text-[10px] font-normal opacity-40">篇</span></p>
                     </div>
                   </div>
-                  <div className="bg-orange-50/50 p-5 rounded-3xl border border-orange-100 flex flex-col justify-between h-32 shadow-sm">
-                    <div className="bg-orange-100 p-2.5 rounded-xl text-orange-600 w-fit">
-                      <Clock size={20} />
+                  <div className="bg-orange-50/50 p-2.5 md:p-4 rounded-2xl md:rounded-3xl border border-orange-100 flex flex-col justify-between min-h-[70px] md:min-h-[100px] shadow-sm">
+                    <div className="bg-orange-100 p-1.5 md:p-2 rounded-lg md:rounded-xl text-orange-600 w-fit">
+                      <Clock size={14} className="md:w-[18px] md:h-[18px]" />
                     </div>
                     <div>
-                      <p className="text-[10px] font-bold text-orange-400 uppercase tracking-widest mb-1">總排程影片</p>
-                      <p className="text-3xl font-black text-orange-900 leading-none">{scheduledVideoInventory} <span className="text-xs font-normal opacity-40">隻</span></p>
+                      <p className="text-[8px] md:text-[10px] font-bold text-orange-400 uppercase tracking-widest mb-0.5">總排程影片</p>
+                      <p className="text-base md:text-2xl font-black text-orange-900 leading-none">{scheduledVideoInventory} <span className="text-[10px] font-normal opacity-40">隻</span></p>
                     </div>
                   </div>
-                  <div className="bg-amber-50/50 p-5 rounded-3xl border border-amber-100 flex flex-col justify-between h-32 shadow-sm">
-                    <div className="bg-amber-100 p-2.5 rounded-xl text-amber-600 w-fit">
-                      <Clock size={20} />
+                  <div className="bg-amber-50/50 p-2.5 md:p-4 rounded-2xl md:rounded-3xl border border-amber-100 flex flex-col justify-between min-h-[70px] md:min-h-[100px] shadow-sm">
+                    <div className="bg-amber-100 p-1.5 md:p-2 rounded-lg md:rounded-xl text-amber-600 w-fit">
+                      <Clock size={14} className="md:w-[18px] md:h-[18px]" />
                     </div>
                     <div>
-                      <p className="text-[10px] font-bold text-amber-400 uppercase tracking-widest mb-1">總排程貼文</p>
-                      <p className="text-3xl font-black text-amber-900 leading-none">{scheduledPostInventory} <span className="text-xs font-normal opacity-40">篇</span></p>
+                      <p className="text-[8px] md:text-[10px] font-bold text-amber-400 uppercase tracking-widest mb-0.5">總排程貼文</p>
+                      <p className="text-base md:text-2xl font-black text-amber-900 leading-none">{scheduledPostInventory} <span className="text-[10px] font-normal opacity-40">篇</span></p>
                     </div>
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  <div className="grid grid-cols-12 px-4 py-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                    <div className="col-span-3">廠商名稱 (IP)</div>
-                    <div className="col-span-2 text-center">可用影片</div>
-                    <div className="col-span-2 text-center">可用貼文</div>
-                    <div className="col-span-2 text-center">排程影片</div>
-                    <div className="col-span-2 text-center">排程貼文</div>
-                    <div className="col-span-1 text-right">總計</div>
-                  </div>
-                  {vendorStocks.map((stock, idx) => (
-                    <div key={idx} className="grid grid-cols-12 items-center px-4 py-4 bg-[#F5F5F0]/50 rounded-2xl border border-black/5">
-                      <div className="col-span-3 font-bold text-gray-800 truncate pr-2">{stock.name}</div>
-                      <div className="col-span-2 text-center">
-                        <span className={cn(
-                          "px-2 py-1 rounded-full text-[11px] font-bold",
-                          stock.videos < 2 ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"
-                        )}>
-                          {stock.videos}
-                        </span>
-                      </div>
-                      <div className="col-span-2 text-center">
-                        <span className="px-2 py-1 rounded-full bg-purple-100 text-purple-700 text-[11px] font-bold">
-                          {stock.posts}
-                        </span>
-                      </div>
-                      <div className="col-span-2 text-center">
-                        <span className="px-2 py-1 rounded-full bg-orange-100 text-orange-700 text-[11px] font-bold">
-                          {stock.scheduledVideos}
-                        </span>
-                      </div>
-                      <div className="col-span-2 text-center">
-                        <span className="px-2 py-1 rounded-full bg-amber-100 text-amber-700 text-[11px] font-bold">
-                          {stock.scheduledPosts}
-                        </span>
-                      </div>
-                      <div className="col-span-1 text-right font-black text-gray-900 text-sm">
-                        {stock.videos + stock.posts + stock.scheduledVideos + stock.scheduledPosts}
-                      </div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">詳細庫存清單</p>
+                  <p className="text-[9px] text-[#5A5A40] font-medium md:hidden flex items-center">
+                    <ArrowLeftRight size={10} className="mr-1" /> 左右滑動查看
+                  </p>
+                </div>
+
+                <div className="overflow-x-auto no-scrollbar -mx-4 px-4">
+                  <div className="min-w-[550px] md:min-w-[750px] space-y-2">
+                    <div className="grid grid-cols-12 gap-2 px-4 py-2 text-[9px] md:text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-black/5">
+                      <div className="col-span-3">廠商名稱 (IP)</div>
+                      <div className="col-span-2 text-center">可用影片</div>
+                      <div className="col-span-2 text-center">可用貼文</div>
+                      <div className="col-span-2 text-center">排程影片</div>
+                      <div className="col-span-2 text-center">排程貼文</div>
+                      <div className="col-span-1 text-right">總計</div>
                     </div>
-                  ))}
+                    {vendorStocks.map((stock, idx) => (
+                      <div key={idx} className="grid grid-cols-12 gap-2 items-center px-4 py-3 md:py-4 bg-[#F5F5F0]/50 rounded-2xl border border-black/5 hover:bg-[#F5F5F0] transition-colors">
+                        <div className="col-span-3 font-bold text-gray-800 truncate pr-2 text-[11px] md:text-sm">{stock.name}</div>
+                        <div className="col-span-2 text-center">
+                          {stock.hasVideos ? (
+                            <span className={cn(
+                              "inline-block min-w-[20px] md:min-w-[24px] px-1.5 md:px-2 py-0.5 md:py-1 rounded-full text-[9px] md:text-[11px] font-bold",
+                              stock.videos < 2 ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"
+                            )}>
+                              {stock.videos}
+                            </span>
+                          ) : (
+                            <span className="text-gray-300 text-[9px]">-</span>
+                          )}
+                        </div>
+                        <div className="col-span-2 text-center">
+                          {stock.hasPosts ? (
+                            <span className="inline-block min-w-[20px] md:min-w-[24px] px-1.5 md:px-2 py-0.5 md:py-1 rounded-full bg-purple-100 text-purple-700 text-[9px] md:text-[11px] font-bold">
+                              {stock.posts}
+                            </span>
+                          ) : (
+                            <span className="text-gray-300 text-[9px]">-</span>
+                          )}
+                        </div>
+                        <div className="col-span-2 text-center">
+                          {stock.hasVideos ? (
+                            <span className="inline-block min-w-[20px] md:min-w-[24px] px-1.5 md:px-2 py-0.5 md:py-1 rounded-full bg-orange-100 text-orange-700 text-[9px] md:text-[11px] font-bold">
+                              {stock.scheduledVideos}
+                            </span>
+                          ) : (
+                            <span className="text-gray-300 text-[9px]">-</span>
+                          )}
+                        </div>
+                        <div className="col-span-2 text-center">
+                          {stock.hasPosts ? (
+                            <span className="inline-block min-w-[20px] md:min-w-[24px] px-1.5 md:px-2 py-0.5 md:py-1 rounded-full bg-amber-100 text-amber-700 text-[9px] md:text-[11px] font-bold">
+                              {stock.scheduledPosts}
+                            </span>
+                          ) : (
+                            <span className="text-gray-300 text-[9px]">-</span>
+                          )}
+                        </div>
+                        <div className="col-span-1 text-right font-black text-gray-900 text-[11px] md:text-sm">
+                          {stock.videos + stock.posts + stock.scheduledVideos + stock.scheduledPosts}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="pt-6 border-t border-black/5 text-center">
@@ -721,23 +903,23 @@ export default function AssetDatabase() {
               </div>
             </div>
 
-            <div className="p-8 bg-white border-t border-black/5 flex space-x-4">
+            <div className="p-4 md:p-6 bg-white border-t border-black/5 flex space-x-3 md:space-x-4">
               <button 
                 onClick={() => setIsSummaryOpen(false)}
-                className="flex-1 py-4 rounded-2xl font-bold text-gray-500 hover:bg-gray-100 transition-all"
+                className="flex-1 py-3 md:py-4 rounded-2xl font-bold text-gray-500 hover:bg-gray-100 transition-all text-sm md:text-base"
               >
                 關閉
               </button>
               <button 
                 onClick={handleExportJPG}
                 disabled={isExporting}
-                className="flex-1 bg-[#5A5A40] text-white py-4 rounded-2xl font-bold shadow-xl hover:bg-[#4a4a35] transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
+                className="flex-[2] bg-[#5A5A40] text-white py-3 md:py-4 rounded-2xl font-bold shadow-xl hover:bg-[#4a4a35] transition-all flex items-center justify-center space-x-2 disabled:opacity-50 text-sm md:text-base"
               >
                 {isExporting ? (
                   <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-white"></div>
                 ) : (
                   <>
-                    <Download size={20} />
+                    <Download size={18} />
                     <span>匯出 JPG 報表</span>
                   </>
                 )}

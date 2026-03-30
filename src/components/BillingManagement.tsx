@@ -61,6 +61,7 @@ export default function BillingManagement() {
   const [billingDay, setBillingDay] = useState(25);
   const [startDate, setStartDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(addMonths(new Date(), 12), 'yyyy-MM-dd'));
+  const [notes, setNotes] = useState('');
 
   useEffect(() => {
     const vUnsubscribe = onSnapshot(collection(db, 'vendors'), (snapshot) => {
@@ -85,26 +86,27 @@ export default function BillingManagement() {
 
   // Auto-generate records for current month when contracts or records change
   useEffect(() => {
-    if (contracts.length > 0 && records.length >= 0) {
-      const timer = setTimeout(() => {
-        generateMonthlyRecords(true); // silent mode
-      }, 1000);
-      return () => clearTimeout(timer);
+    if (contracts.length > 0) {
+      generateMonthlyRecords(true); // silent mode
     }
-  }, [contracts.length, currentMonth]);
+  }, [contracts.length, currentMonth, records.length]);
 
   const handleAddService = () => {
     setNewServices([...newServices, { name: '', price: 0, unit: '月' }]);
   };
 
   const handleRemoveService = (index: number) => {
-    if (newServices.length <= 1) return;
+    if (newServices.length <= 1) {
+      setNewServices([{ name: '', price: 0, unit: '月' }]);
+      return;
+    }
     setNewServices(newServices.filter((_, i) => i !== index));
   };
 
   const handleServiceChange = (index: number, field: keyof BillingService, value: string | number) => {
     const updated = [...newServices];
-    updated[index] = { ...updated[index], [field]: value };
+    const finalValue = field === 'price' ? (value === '' ? 0 : Number(value)) : value;
+    updated[index] = { ...updated[index], [field]: finalValue } as BillingService;
     setNewServices(updated);
   };
 
@@ -126,6 +128,7 @@ export default function BillingManagement() {
         status: 'active' as const,
         startDate,
         endDate,
+        notes,
         updatedAt: new Date().toISOString()
       };
 
@@ -159,6 +162,7 @@ export default function BillingManagement() {
     setBillingDay(contract.billingDay);
     setStartDate(contract.startDate);
     setEndDate(contract.endDate || '');
+    setNotes(contract.notes || '');
     setIsAddContractOpen(true);
   };
 
@@ -169,6 +173,7 @@ export default function BillingManagement() {
     setBillingDay(25);
     setStartDate(format(new Date(), 'yyyy-MM-dd'));
     setEndDate(format(addMonths(new Date(), 12), 'yyyy-MM-dd'));
+    setNotes('');
   };
 
   const togglePaymentStatus = async (record: BillingRecord) => {
@@ -283,6 +288,14 @@ export default function BillingManagement() {
     doc.text(`1. 每月總額: $${contract.totalAmount.toLocaleString()}`, 30, finalY + 10);
     doc.text(`2. 出帳日期: 每月 ${contract.billingDay} 號`, 30, finalY + 20);
     doc.text(`3. 合約期間: ${contract.startDate} 至 ${contract.endDate || '長期合作'}`, 30, finalY + 30);
+    
+    if (contract.notes) {
+      doc.setFontSize(14);
+      doc.text('四、 其他約定事項', 20, finalY + 50);
+      doc.setFontSize(12);
+      const splitNotes = doc.splitTextToSize(contract.notes, 160);
+      doc.text(splitNotes, 30, finalY + 60);
+    }
     
     // Footer
     doc.text('甲方簽章: ____________________', 20, 260);
@@ -462,8 +475,10 @@ export default function BillingManagement() {
                             <button 
                               onClick={() => togglePaymentStatus(record)}
                               className={cn(
-                                "text-xs font-bold hover:underline",
-                                record.status === 'paid' ? "text-gray-400" : "text-[#5A5A40]"
+                                "px-3 py-1 rounded-lg text-[10px] font-bold transition-all border",
+                                record.status === 'paid' 
+                                  ? "bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100" 
+                                  : "bg-[#5A5A40] text-white border-[#5A5A40] hover:bg-[#4A4A30] shadow-sm"
                               )}
                             >
                               {record.status === 'paid' ? '恢復為待收' : '確認收款'}
@@ -700,6 +715,17 @@ export default function BillingManagement() {
                   onChange={(e) => setBillingDay(parseInt(e.target.value))}
                   className="w-full p-3 bg-gray-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-[#5A5A40]"
                   required
+                />
+              </div>
+
+              {/* Notes */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">合約備註 / 特別條款</label>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full p-3 bg-gray-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-[#5A5A40] min-h-[100px]"
+                  placeholder="例如：本合約包含每月一次的實體會議..."
                 />
               </div>
 

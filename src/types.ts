@@ -13,6 +13,7 @@ export interface BillingContract {
   status: 'active' | 'paused' | 'ended';
   startDate: string; // YYYY-MM-DD
   endDate?: string; // YYYY-MM-DD
+  notes?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -87,6 +88,7 @@ export interface Post {
   content: string;
   status: PostStatus;
   scheduledAt: string;
+  targetMonth: string; // YYYY-MM
   type: string;
   contentType: 'video' | 'post';
   postUrl?: string;
@@ -105,6 +107,8 @@ export interface Asset {
   title: string;
   url?: string;
   type: AssetType;
+  stage: 'raw' | 'finished';
+  filmingDate?: string;
   category?: string; // e.g., '宣傳片', '教學'
   status: 'available' | 'used';
   usedInPostId?: string;
