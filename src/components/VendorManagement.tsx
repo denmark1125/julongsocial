@@ -7,11 +7,12 @@ import {
   updateDoc, 
   deleteDoc, 
   doc, 
-  serverTimestamp 
+  serverTimestamp,
+  orderBy
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Vendor, SocialAccount, OperationType } from '../types';
-import { Plus, Trash2, Edit2, ExternalLink, Shield, X, Eye, EyeOff } from 'lucide-react';
+import { Vendor, SocialAccount, OperationType, Editor } from '../types';
+import { Plus, Trash2, Edit2, ExternalLink, Shield, X, Eye, EyeOff, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -22,7 +23,10 @@ function cn(...inputs: ClassValue[]) {
 
 export default function VendorManagement() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [editors, setEditors] = useState<Editor[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditorModalOpen, setIsEditorModalOpen] = useState(false);
+  const [newEditorName, setNewEditorName] = useState('');
   const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
   const [visibleFormPasswords, setVisibleFormPasswords] = useState<Record<number, boolean>>({});
@@ -33,6 +37,7 @@ export default function VendorManagement() {
     cooperationItems: [] as string[],
     monthlyTargetPosts: 8,
     monthlyTargetVideos: 0,
+    editorId: '',
     editorName: ''
   });
 
@@ -47,6 +52,40 @@ export default function VendorManagement() {
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, 'editors'), orderBy('name'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setEditors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Editor)));
+    }, (error) => {
+      console.error('Firestore Error:', error);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleAddEditor = async () => {
+    if (!newEditorName.trim()) return;
+    try {
+      await addDoc(collection(db, 'editors'), {
+        name: newEditorName.trim(),
+        createdAt: new Date().toISOString()
+      });
+      setNewEditorName('');
+      toast.success('已新增剪輯師');
+    } catch (error) {
+      toast.error('新增失敗');
+    }
+  };
+
+  const handleDeleteEditor = async (id: string) => {
+    if (!window.confirm('確定要刪除此剪輯師嗎？')) return;
+    try {
+      await deleteDoc(doc(db, 'editors', id));
+      toast.success('已刪除');
+    } catch (error) {
+      toast.error('刪除失敗');
+    }
+  };
 
   const handleAddAccount = () => {
     setFormData({
@@ -162,24 +201,33 @@ export default function VendorManagement() {
           <h2 className="text-2xl font-bold serif text-[#5A5A40]">廠商管理</h2>
           <p className="text-sm text-gray-500">管理您的 IP 帳號與客戶廠商資料</p>
         </div>
-        <button 
-          onClick={() => {
-            setEditingVendor(null);
-            setFormData({ 
-              name: '', 
-              socialAccounts: [{ platform: 'IG', username: '', password: '' }], 
-              postingHabits: [],
-              cooperationItems: [],
-              monthlyTargetPosts: 8,
-              monthlyTargetVideos: 0,
-              editorName: ''
-            });
-            setIsModalOpen(true);
-          }}
-          className="w-full sm:w-auto bg-[#5A5A40] text-white px-6 py-3 rounded-xl flex items-center justify-center shadow-lg hover:bg-[#4a4a35] transition-all"
-        >
-          <Plus size={20} className="mr-2" /> 建立廠商資料
-        </button>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <button 
+            onClick={() => setIsEditorModalOpen(true)}
+            className="flex-1 sm:flex-none bg-white text-[#5A5A40] px-4 py-3 rounded-xl border border-[#5A5A40]/20 flex items-center justify-center shadow-sm hover:bg-gray-50 transition-all"
+          >
+            <Users size={20} className="mr-2" /> 剪輯師管理
+          </button>
+          <button 
+            onClick={() => {
+              setEditingVendor(null);
+              setFormData({ 
+                name: '', 
+                socialAccounts: [{ platform: 'IG', username: '', password: '' }], 
+                postingHabits: [],
+                cooperationItems: [],
+                monthlyTargetPosts: 8,
+                monthlyTargetVideos: 0,
+                editorId: '',
+                editorName: ''
+              });
+              setIsModalOpen(true);
+            }}
+            className="flex-1 sm:flex-none bg-[#5A5A40] text-white px-6 py-3 rounded-xl flex items-center justify-center shadow-lg hover:bg-[#4a4a35] transition-all"
+          >
+            <Plus size={20} className="mr-2" /> 建立廠商資料
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
@@ -321,32 +369,24 @@ export default function VendorManagement() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">剪輯師</label>
-                  <div className="relative">
-                    <input 
-                      type="text" 
-                      value={formData.editorName}
-                      onChange={(e) => setFormData({ ...formData, editorName: e.target.value })}
-                      className="w-full p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-[#5A5A40]"
-                      placeholder="輸入剪輯師名稱"
-                    />
-                    {/* Bring-in / Autocomplete suggestion */}
-                    {Array.from(new Set(vendors.map(v => v.editorName).filter(Boolean))).length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <span className="text-[10px] text-gray-400 font-bold uppercase self-center">快速帶入:</span>
-                        {Array.from(new Set(vendors.map(v => v.editorName).filter(Boolean))).map((name, i) => (
-                          <button
-                            key={i}
-                            type="button"
-                            onClick={() => setFormData({ ...formData, editorName: name || '' })}
-                            className="text-[10px] bg-white border border-gray-200 px-2 py-1 rounded-lg hover:bg-[#5A5A40] hover:text-white transition-all"
-                          >
-                            {name}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">負責剪輯師</label>
+                  <select 
+                    value={formData.editorId}
+                    onChange={(e) => {
+                      const selectedEditor = editors.find(ed => ed.id === e.target.value);
+                      setFormData({ 
+                        ...formData, 
+                        editorId: e.target.value,
+                        editorName: selectedEditor?.name || ''
+                      });
+                    }}
+                    className="w-full p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-[#5A5A40]"
+                  >
+                    <option value="">選擇剪輯師 (外包)</option>
+                    {editors.map(ed => (
+                      <option key={ed.id} value={ed.id}>{ed.name}</option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>
@@ -576,6 +616,55 @@ export default function VendorManagement() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Editor Management Modal */}
+      {isEditorModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-[#F5F5F0]/50">
+              <h3 className="text-xl font-bold serif text-[#5A5A40]">外包剪輯師管理</h3>
+              <button onClick={() => setIsEditorModalOpen(false)} className="p-2 hover:bg-white rounded-full transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-6">
+              <div className="flex gap-2">
+                <input 
+                  type="text"
+                  placeholder="輸入剪輯師姓名"
+                  value={newEditorName}
+                  onChange={(e) => setNewEditorName(e.target.value)}
+                  className="flex-1 p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-[#5A5A40]"
+                />
+                <button 
+                  onClick={handleAddEditor}
+                  className="bg-[#5A5A40] text-white px-4 rounded-xl font-bold hover:bg-[#4a4a35] transition-colors"
+                >
+                  新增
+                </button>
+              </div>
+              
+              <div className="max-h-[300px] overflow-y-auto space-y-2 pr-2">
+                {editors.map(ed => (
+                  <div key={ed.id} className="flex justify-between items-center p-3 bg-[#F5F5F0] rounded-xl group">
+                    <span className="font-bold text-[#5A5A40]">{ed.name}</span>
+                    <button 
+                      onClick={() => handleDeleteEditor(ed.id!)}
+                      className="text-red-400 hover:text-red-600 p-1 opacity-0 group-hover:opacity-100 transition-all"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+                {editors.length === 0 && (
+                  <div className="text-center py-8 text-gray-400 text-sm italic">
+                    尚未建立剪輯師資料
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

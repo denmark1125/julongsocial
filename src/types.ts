@@ -65,6 +65,12 @@ export interface PostingHabit {
 
 export type CooperationItem = 'short_video' | 'graphic_post';
 
+export interface Editor {
+  id?: string;
+  name: string;
+  createdAt: string;
+}
+
 export interface Vendor {
   id?: string;
   name: string;
@@ -73,7 +79,8 @@ export interface Vendor {
   cooperationItems: CooperationItem[];
   monthlyTargetPosts?: number;
   monthlyTargetVideos?: number;
-  editorName?: string;
+  editorId?: string;
+  editorName?: string; // Keep for display/fallback
   createdBy: string;
   createdAt: string;
 }
@@ -104,6 +111,7 @@ export type AssetType = 'video' | 'post';
 export interface Asset {
   id?: string;
   vendorId: string;
+  editorId?: string; // Link to freelance editor
   title: string;
   url?: string;
   type: AssetType;

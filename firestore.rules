@@ -71,7 +71,9 @@ service cloud.firestore {
              data.createdBy is string &&
              (!('cooperationItems' in data) || data.cooperationItems is list) &&
              (!('monthlyTargetPosts' in data) || data.monthlyTargetPosts is int) &&
-             (!('monthlyTargetVideos' in data) || data.monthlyTargetVideos is int);
+             (!('monthlyTargetVideos' in data) || data.monthlyTargetVideos is int) &&
+             (!('editorId' in data) || data.editorId is string) &&
+             (!('editorName' in data) || data.editorName is string);
     }
 
     function isValidPost(data) {
@@ -95,7 +97,8 @@ service cloud.firestore {
              data.approved is bool &&
              data.createdBy is string &&
              (!('url' in data) || data.url is string) &&
-             (!('category' in data) || data.category is string);
+             (!('category' in data) || data.category is string) &&
+             (!('editorId' in data) || data.editorId is string);
     }
 
     function isValidDismissedHabit(data) {
@@ -154,6 +157,13 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidAsset(request.resource.data);
       allow update: if isAuthenticated() && isValidAsset(request.resource.data);
+      allow delete: if isManager();
+    }
+
+    match /editors/{editorId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
       allow delete: if isManager();
     }
 

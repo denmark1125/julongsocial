@@ -61,6 +61,8 @@
         },
         "monthlyTargetPosts": { "type": "integer", "description": "每月預計圖文發布數" },
         "monthlyTargetVideos": { "type": "integer", "description": "每月預計影音發布數" },
+        "editorId": { "type": "string", "description": "負責剪輯師ID" },
+        "editorName": { "type": "string", "description": "負責剪輯師名稱" },
         "createdBy": { "type": "string", "description": "建立者UID" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
@@ -94,6 +96,7 @@
       "type": "object",
       "properties": {
         "vendorId": { "type": "string", "description": "所屬廠商ID" },
+        "editorId": { "type": "string", "description": "負責剪輯師ID" },
         "title": { "type": "string", "description": "素材標題" },
         "url": { "type": "string", "description": "素材連結 (選填)" },
         "type": { "type": "string", "enum": ["video", "post"], "description": "素材類型" },
@@ -105,6 +108,16 @@
         "createdBy": { "type": "string", "description": "建立者UID" }
       },
       "required": ["vendorId", "title", "type", "status", "approved", "createdBy"]
+    },
+    "Editor": {
+      "title": "Editor",
+      "description": "外包剪輯師資料",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "剪輯師姓名" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name"]
     },
     "DismissedHabit": {
       "title": "DismissedHabit",
@@ -181,6 +194,10 @@
     "/assets/{assetId}": {
       "schema": "Asset",
       "description": "素材資料庫"
+    },
+    "/editors/{editorId}": {
+      "schema": "Editor",
+      "description": "剪輯師管理"
     },
     "/dismissedHabits/{id}": {
       "schema": "DismissedHabit",
