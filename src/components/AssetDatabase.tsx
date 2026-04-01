@@ -29,7 +29,9 @@ import {
   X,
   ArrowLeftRight,
   ClipboardList,
-  Users
+  Users,
+  Archive,
+  RotateCcw
 } from 'lucide-react';
 import { toJpeg } from 'html-to-image';
 import download from 'downloadjs';
@@ -178,6 +180,16 @@ export default function AssetDatabase() {
     }
   };
 
+  const toggleArchive = async (asset: Asset) => {
+    try {
+      const newStatus = asset.status === 'archived' ? 'available' : 'archived';
+      await updateDoc(doc(db, 'assets', asset.id!), { status: newStatus });
+      toast.success(newStatus === 'archived' ? '已移至封存' : '已還原素材');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `assets/${asset.id}`);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     if (!window.confirm('確定要刪除此素材嗎？')) return;
     try {
@@ -192,40 +204,46 @@ export default function AssetDatabase() {
     const matchesTab = a.type === activeTab;
     const matchesSearch = a.title.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesVendor = filterVendor === 'all' || a.vendorId === filterVendor;
-    const matchesStatus = filterStatus === 'all' || a.status === filterStatus;
+    const matchesStatus = filterStatus === 'all' 
+      ? a.status !== 'archived' 
+      : a.status === filterStatus;
     const matchesStage = a.stage === filterStage || (!a.stage && filterStage === 'finished');
     return matchesTab && matchesSearch && matchesVendor && matchesStatus && matchesStage;
   });
 
   const getVendorName = (id: string) => vendors.find(v => v.id === id)?.name || '未知廠商';
 
-  const videoInventory = assets.filter(a => a.type === 'video' && a.status === 'available').length;
-  const postInventory = assets.filter(a => a.type === 'post' && a.status === 'available').length;
+  const videoInventory = assets.filter(a => a.type === 'video' && a.status === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
+  const postInventory = assets.filter(a => a.type === 'post' && a.status === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
 
   const scheduledVideoInventory = assets.filter(a => {
     if (a.type !== 'video' || a.status !== 'used' || !a.usedInPostId) return false;
+    if (a.stage !== filterStage && !(filterStage === 'finished' && !a.stage)) return false;
     const post = posts.find(p => p.id === a.usedInPostId);
     return post && (post.status === 'draft' || post.status === 'scheduled');
   }).length;
 
   const scheduledPostInventory = assets.filter(a => {
     if (a.type !== 'post' || a.status !== 'used' || !a.usedInPostId) return false;
+    if (a.stage !== filterStage && !(filterStage === 'finished' && !a.stage)) return false;
     const post = posts.find(p => p.id === a.usedInPostId);
     return post && (post.status === 'draft' || post.status === 'scheduled');
   }).length;
 
   const vendorStocks = vendors.map(vendor => {
-    const availableVideos = assets.filter(a => a.vendorId === vendor.id && a.type === 'video' && a.status === 'available').length;
-    const availablePosts = assets.filter(a => a.vendorId === vendor.id && a.type === 'post' && a.status === 'available').length;
+    const availableVideos = assets.filter(a => a.vendorId === vendor.id && a.type === 'video' && a.status === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
+    const availablePosts = assets.filter(a => a.vendorId === vendor.id && a.type === 'post' && a.status === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
     
     const scheduledVideos = assets.filter(a => {
       if (a.vendorId !== vendor.id || a.type !== 'video' || a.status !== 'used' || !a.usedInPostId) return false;
+      if (a.stage !== filterStage && !(filterStage === 'finished' && !a.stage)) return false;
       const post = posts.find(p => p.id === a.usedInPostId);
       return post && (post.status === 'draft' || post.status === 'scheduled');
     }).length;
 
     const scheduledPosts = assets.filter(a => {
       if (a.vendorId !== vendor.id || a.type !== 'post' || a.status !== 'used' || !a.usedInPostId) return false;
+      if (a.stage !== filterStage && !(filterStage === 'finished' && !a.stage)) return false;
       const post = posts.find(p => p.id === a.usedInPostId);
       return post && (post.status === 'draft' || post.status === 'scheduled');
     }).length;
@@ -321,7 +339,7 @@ export default function AssetDatabase() {
             </div>
             <div>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">待審核</p>
-              <p className="text-lg font-bold leading-none">{assets.filter(a => !a.approved).length} <span className="text-xs font-normal text-gray-400">件</span></p>
+              <p className="text-lg font-bold leading-none">{assets.filter(a => !a.approved && a.status !== 'archived').length} <span className="text-xs font-normal text-gray-400">件</span></p>
             </div>
           </div>
           <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm flex items-center space-x-3">
@@ -388,7 +406,10 @@ export default function AssetDatabase() {
 
         <div className="flex space-x-1 bg-white p-1 rounded-2xl border border-black/5 w-fit shadow-sm">
           <button 
-            onClick={() => setFilterStage('raw')}
+            onClick={() => {
+              setFilterStage('raw');
+              setFilterStatus('all');
+            }}
             className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${
               filterStage === 'raw' ? 'bg-[#8B7355] text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'
             }`}
@@ -396,7 +417,10 @@ export default function AssetDatabase() {
             原始素材 (Raw)
           </button>
           <button 
-            onClick={() => setFilterStage('finished')}
+            onClick={() => {
+              setFilterStage('finished');
+              setFilterStatus('all');
+            }}
             className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${
               filterStage === 'finished' ? 'bg-[#5A5A40] text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'
             }`}
@@ -439,14 +463,14 @@ export default function AssetDatabase() {
                   "text-[10px] px-2 py-0.5 rounded-full font-bold",
                   filterVendor === 'all' ? "bg-white/20" : "bg-gray-100"
                 )}>
-                  {assets.filter(a => a.type === activeTab && a.status === 'available').length}
+                  {assets.filter(a => a.type === activeTab && a.status === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length}
                 </span>
               </button>
               {vendors
                 .filter(v => v.name.toLowerCase().includes(vendorSearchTerm.toLowerCase()))
                 .map(vendor => {
-                const count = assets.filter(a => a.vendorId === vendor.id && a.type === activeTab && a.status === 'available').length;
-                const pendingCount = assets.filter(a => a.vendorId === vendor.id && a.type === activeTab && !a.approved).length;
+                const count = assets.filter(a => a.vendorId === vendor.id && a.type === activeTab && a.status === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
+                const pendingCount = assets.filter(a => a.vendorId === vendor.id && a.type === activeTab && !a.approved && a.status !== 'archived' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
                 
                 return (
                   <button
@@ -486,7 +510,7 @@ export default function AssetDatabase() {
               <Clock size={12} className="mr-1" /> 待處理提醒
             </p>
             <p className="text-xs text-amber-800 leading-relaxed">
-              目前共有 <span className="font-bold">{assets.filter(a => !a.approved).length}</span> 件素材尚未通過審核，請儘速確認以利排程。
+              目前共有 <span className="font-bold">{assets.filter(a => !a.approved && a.status !== 'archived' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length}</span> 件素材尚未通過審核，請儘速確認以利排程。
             </p>
           </div>
         </div>
@@ -506,23 +530,36 @@ export default function AssetDatabase() {
             </div>
             <div className="flex items-center gap-2 w-full md:w-auto">
               <div className="flex items-center bg-white rounded-xl border border-black/5 p-1 shadow-sm">
+                {filterStage === 'finished' && (
+                  <>
+                    <button
+                      onClick={() => setFilterStatus('available')}
+                      className={cn(
+                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                        filterStatus === 'available' ? "bg-[#5A5A40] text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"
+                      )}
+                    >
+                      可使用
+                    </button>
+                    <button
+                      onClick={() => setFilterStatus('used')}
+                      className={cn(
+                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                        filterStatus === 'used' ? "bg-[#5A5A40] text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"
+                      )}
+                    >
+                      已使用
+                    </button>
+                  </>
+                )}
                 <button
-                  onClick={() => setFilterStatus('available')}
+                  onClick={() => setFilterStatus('archived')}
                   className={cn(
                     "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
-                    filterStatus === 'available' ? "bg-[#5A5A40] text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"
+                    filterStatus === 'archived' ? "bg-[#5A5A40] text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"
                   )}
                 >
-                  可使用
-                </button>
-                <button
-                  onClick={() => setFilterStatus('used')}
-                  className={cn(
-                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
-                    filterStatus === 'used' ? "bg-[#5A5A40] text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"
-                  )}
-                >
-                  已使用
+                  回收站
                 </button>
                 <button
                   onClick={() => setFilterStatus('all')}
@@ -649,12 +686,21 @@ export default function AssetDatabase() {
                   )}
                   <span className="text-[10px] text-gray-400">{new Date(asset.createdAt).toLocaleDateString()}</span>
                 </div>
-                <button 
-                  onClick={() => handleDelete(asset.id!)}
-                  className="text-gray-400 hover:text-red-500 transition-colors"
-                >
-                  <Trash2 size={asset.status === 'used' ? 14 : 18} />
-                </button>
+                <div className="flex items-center space-x-2">
+                  <button 
+                    onClick={() => toggleArchive(asset)}
+                    className="text-gray-400 hover:text-[#5A5A40] transition-colors"
+                    title={asset.status === 'archived' ? '還原素材' : '移至回收站'}
+                  >
+                    {asset.status === 'archived' ? <RotateCcw size={18} /> : <Archive size={18} />}
+                  </button>
+                  <button 
+                    onClick={() => handleDelete(asset.id!)}
+                    className="text-gray-400 hover:text-red-500 transition-colors"
+                  >
+                    <Trash2 size={asset.status === 'used' ? 14 : 18} />
+                  </button>
+                </div>
               </div>
             </div>
           </div>

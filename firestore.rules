@@ -89,13 +89,15 @@ service cloud.firestore {
     }
 
     function isValidAsset(data) {
-      return data.keys().hasAll(['vendorId', 'title', 'type', 'status', 'approved', 'createdBy']) &&
+      return data.keys().hasAll(['vendorId', 'title', 'type', 'status', 'approved', 'createdBy', 'stage', 'createdAt']) &&
              data.vendorId is string &&
              isValidString(data.title, 200) &&
              data.type in ['video', 'post'] &&
-             data.status in ['available', 'used'] &&
+             data.status in ['available', 'used', 'archived'] &&
+             data.stage in ['raw', 'finished'] &&
              data.approved is bool &&
              data.createdBy is string &&
+             data.createdAt is string &&
              (!('url' in data) || data.url is string) &&
              (!('category' in data) || data.category is string) &&
              (!('editorId' in data) || data.editorId is string);

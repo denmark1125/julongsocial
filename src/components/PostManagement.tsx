@@ -970,7 +970,8 @@ export default function PostManagement() {
                         .filter(a => 
                           a.vendorId === formData.vendorId && 
                           a.type === formData.contentType &&
-                          (a.status === 'available' || a.id === formData.assetId)
+                          (a.status === 'available' || a.id === formData.assetId) &&
+                          a.stage === 'finished'
                         )
                         .map(a => (
                           <option key={a.id} value={a.id}>
@@ -979,8 +980,8 @@ export default function PostManagement() {
                         ))
                       }
                     </select>
-                    {assets.filter(a => a.vendorId === formData.vendorId && a.type === formData.contentType && a.status === 'available').length === 0 && (
-                      <p className="text-[10px] text-red-500 mt-1 font-bold">⚠️ 此廠商目前無可用{formData.contentType === 'video' ? '影片' : '貼文'}素材，請先至資料庫上架</p>
+                    {assets.filter(a => a.vendorId === formData.vendorId && a.type === formData.contentType && a.status === 'available' && a.stage === 'finished').length === 0 && (
+                      <p className="text-[10px] text-red-500 mt-1 font-bold">⚠️ 此廠商目前無可用{formData.contentType === 'video' ? '影片' : '貼文'}成片素材，請先至資料庫上架</p>
                     )}
                   </div>
                   <div>

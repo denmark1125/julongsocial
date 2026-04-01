@@ -118,7 +118,7 @@ export interface Asset {
   stage: 'raw' | 'finished';
   filmingDate?: string;
   category?: string; // e.g., '宣傳片', '教學'
-  status: 'available' | 'used';
+  status: 'available' | 'used' | 'archived';
   usedInPostId?: string;
   approved: boolean;
   createdAt: string;
