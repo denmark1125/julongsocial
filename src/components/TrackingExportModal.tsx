@@ -167,22 +167,45 @@ export default function TrackingExportModal({
 
   const handleExport = async () => {
     if (!exportRef.current) return;
+    
+    const loadingToast = toast.loading('正在準備導出圖片...');
+    
     try {
-      const dataUrl = await toJpeg(exportRef.current, { 
+      const element = exportRef.current;
+      
+      // Get the actual dimensions of the element
+      const width = element.scrollWidth;
+      const height = element.scrollHeight;
+
+      const dataUrl = await toJpeg(element, { 
         quality: 0.95, 
         backgroundColor: '#F5F5F0',
+        pixelRatio: 2,
+        width: width,
+        height: height,
         style: {
-          padding: '40px',
-          width: '1200px'
+          transform: 'scale(1)',
+          transformOrigin: 'top left',
+          margin: '0',
+          padding: '0',
+        },
+        filter: (node) => {
+          // Hide elements with 'export-ignore' class during export
+          if (node instanceof HTMLElement && node.classList.contains('export-ignore')) {
+            return false;
+          }
+          return true;
         }
       });
+      
       const editorName = selectedEditorId === 'all' ? '全部' : editors.find(e => e.id === selectedEditorId)?.name;
       const fileName = `催片清單_${editorName}_${format(selectedWeekStart, 'MMdd')}-${format(weekEnd, 'MMdd')}.jpg`;
+      
       download(dataUrl, fileName);
-      toast.success('導出成功');
+      toast.success('導出成功', { id: loadingToast });
     } catch (error) {
       console.error('Export failed:', error);
-      toast.error('導出失敗');
+      toast.error('導出失敗', { id: loadingToast });
     }
   };
 
@@ -326,8 +349,11 @@ export default function TrackingExportModal({
         </div>
 
         {/* Preview Area */}
-        <div className="flex-1 overflow-y-auto p-8 bg-gray-50">
-          <div ref={exportRef} className="bg-[#F5F5F0] rounded-3xl shadow-lg border border-black/5 overflow-hidden">
+        <div className="flex-1 overflow-auto p-4 sm:p-8 bg-gray-50 custom-scrollbar">
+          <div 
+            ref={exportRef} 
+            className="bg-[#F5F5F0] rounded-3xl shadow-lg border border-black/5 overflow-hidden w-[900px] mx-auto"
+          >
             {/* JPG Header */}
             <div className="p-10 bg-[#5A5A40] text-white">
               <div className="flex justify-between items-end">
@@ -350,11 +376,11 @@ export default function TrackingExportModal({
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="border-b-2 border-[#5A5A40]/20">
-                      <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-24">發布日期</th>
-                      <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-40">廠商 (IP)</th>
-                      <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-24">類型</th>
+                      <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[100px]">發布日期</th>
+                      <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[180px]">廠商 (IP)</th>
+                      <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[80px]">類型</th>
                       <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest">內容標題 / 狀態</th>
-                      <th className="py-4 text-right text-xs font-black text-[#5A5A40] uppercase tracking-widest w-48">備註</th>
+                      <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[200px]">備註</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -395,14 +421,20 @@ export default function TrackingExportModal({
                             )}
                           </div>
                         </td>
-                        <td className="py-5 align-top text-right">
-                          <input 
-                            type="text"
-                            value={customRemarks[item.id] || ''}
-                            onChange={(e) => handleRemarkChange(item.id, e.target.value)}
-                            placeholder="輸入備註..."
-                            className="w-full text-right bg-transparent border-none focus:ring-0 text-sm font-medium text-[#5A5A40] placeholder:text-gray-300"
-                          />
+                        <td className="py-5 align-top text-left">
+                          <div className="relative">
+                            <input 
+                              type="text"
+                              value={customRemarks[item.id] || ''}
+                              onChange={(e) => handleRemarkChange(item.id, e.target.value)}
+                              className="w-full text-left bg-transparent border-none focus:ring-0 text-sm font-medium text-[#5A5A40] p-0 relative z-10"
+                            />
+                            {!customRemarks[item.id] && (
+                              <div className="absolute inset-0 pointer-events-none text-gray-300 text-sm font-medium flex items-center justify-start export-ignore">
+                                輸入備註...
+                              </div>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
