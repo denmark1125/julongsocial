@@ -29,11 +29,14 @@ import {
   Trash2,
   Copy,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  BellRing
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { format, isPast, isToday, addDays, parseISO, getDay, setHours, setMinutes, startOfDay, isSameDay, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths, addMonths } from 'date-fns';
 import toast from 'react-hot-toast';
+import TrackingExportModal from './TrackingExportModal';
+import { DismissedHabit } from '../types';
 
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -46,7 +49,9 @@ export default function PostManagement() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedVendorId, setSelectedVendorId] = useState<string>('all');
@@ -144,10 +149,15 @@ export default function PostManagement() {
       setAssets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
     });
 
+    const dUnsubscribe = onSnapshot(collection(db, 'dismissedHabits'), (snapshot) => {
+      setDismissedHabits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DismissedHabit)));
+    });
+
     return () => {
       vUnsubscribe();
       pUnsubscribe();
       aUnsubscribe();
+      dUnsubscribe();
     };
   }, []);
 
@@ -422,6 +432,12 @@ export default function PostManagement() {
         </div>
         <div className="flex gap-2 w-full sm:w-auto">
           <button 
+            onClick={() => setIsTrackingModalOpen(true)}
+            className="flex-1 sm:flex-none flex items-center justify-center px-4 py-2 bg-orange-50 text-orange-600 rounded-xl shadow-sm border border-orange-100 hover:bg-orange-100 transition-all text-sm font-bold"
+          >
+            <BellRing size={18} className="mr-2" /> 催片導出
+          </button>
+          <button 
             onClick={exportToExcel}
             className="flex-1 sm:flex-none flex items-center justify-center px-4 py-2 bg-white text-gray-600 rounded-xl shadow-sm border border-black/5 hover:bg-gray-50 transition-all text-sm"
           >
@@ -445,7 +461,7 @@ export default function PostManagement() {
               });
               setIsModalOpen(true);
             }}
-            className="flex-1 sm:flex-none flex items-center justify-center px-6 py-2 bg-[#5A5A40] text-white rounded-xl shadow-lg hover:bg-[#4a4a35] transition-all text-sm"
+            className="flex-1 sm:flex-none flex items-center justify-center px-6 py-2 bg-[#5A5A40] text-white rounded-xl shadow-lg hover:bg-[#4a4a35] transition-all text-sm font-bold"
           >
             <Plus size={18} className="mr-2" /> 新增貼文
           </button>
@@ -1123,6 +1139,15 @@ export default function PostManagement() {
           </div>
         </div>
       )}
+      {/* Tracking Export Modal */}
+      <TrackingExportModal 
+        isOpen={isTrackingModalOpen}
+        onClose={() => setIsTrackingModalOpen(false)}
+        posts={posts}
+        vendors={vendors}
+        assets={assets}
+        dismissedHabits={dismissedHabits}
+      />
     </div>
   );
 }

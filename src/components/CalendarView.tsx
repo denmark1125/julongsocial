@@ -24,10 +24,11 @@ import {
   subDays,
   addDays
 } from 'date-fns';
-import { ChevronLeft, ChevronRight, Clock, Plus, Download, X, Calendar as CalendarIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Plus, Download, X, Calendar as CalendarIcon, BellRing } from 'lucide-react';
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
+import TrackingExportModal from './TrackingExportModal';
 
 export default function CalendarView() {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -37,6 +38,7 @@ export default function CalendarView() {
   const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
+  const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
 
   useEffect(() => {
     const vUnsubscribe = onSnapshot(collection(db, 'vendors'), (snapshot) => {
@@ -201,6 +203,12 @@ export default function CalendarView() {
         <div className="flex items-center justify-between w-full sm:w-auto">
           <div className="flex items-center space-x-4">
             <h3 className="text-xl font-bold serif">{format(currentDate, 'yyyy年 MM月')}</h3>
+            <button 
+              onClick={() => setIsTrackingModalOpen(true)}
+              className="hidden sm:flex bg-orange-50 text-orange-600 px-4 py-1.5 rounded-xl items-center shadow-sm border border-orange-100 hover:bg-orange-100 transition-all text-xs font-bold"
+            >
+              <BellRing size={16} className="mr-2" /> 催片導出
+            </button>
             <button 
               onClick={exportToExcel}
               className="hidden sm:flex bg-white text-gray-600 px-4 py-1.5 rounded-xl items-center shadow-sm border border-black/5 hover:bg-gray-50 transition-all text-xs font-bold"
@@ -450,6 +458,15 @@ export default function CalendarView() {
           onClose={() => setSelectedPost(null)}
         />
       )}
+      {/* Tracking Export Modal */}
+      <TrackingExportModal 
+        isOpen={isTrackingModalOpen}
+        onClose={() => setIsTrackingModalOpen(false)}
+        posts={posts}
+        vendors={vendors}
+        assets={assets}
+        dismissedHabits={dismissedHabits}
+      />
     </div>
   );
 }
