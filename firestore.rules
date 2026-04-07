@@ -28,6 +28,9 @@ service cloud.firestore {
     //
     // Collection: billingRecords
     // Fields: vendorId (string), contractId (string), billingMonth (string: YYYY-MM), dueDate (string: YYYY-MM-DD), amount (int), status (string: pending|paid|overdue)
+    //
+    // Collection: line_users
+    // Fields: lineUserId (string), linePictureUrl (string), lineDisplayName (string), UserId (string), createdAt (string)
     // ===============================================================
 
     // ===============================================================
@@ -129,6 +132,15 @@ service cloud.firestore {
              data.status in ['pending', 'paid', 'overdue'];
     }
 
+    function isValidLineUser(data) {
+      return data.keys().hasAll(['lineUserId', 'createdAt']) &&
+             data.lineUserId is string &&
+             data.createdAt is string &&
+             (!('linePictureUrl' in data) || data.linePictureUrl is string) &&
+             (!('lineDisplayName' in data) || data.lineDisplayName is string) &&
+             (!('UserId' in data) || data.UserId is string);
+    }
+
     match /users/{uid} {
       allow read: if true; // Allow public read for first-user detection and internal use
       allow create: if (isAuthenticated() && request.auth.uid == uid) || isManager() || !exists(/databases/$(database)/documents/users/$(uid)); 
@@ -186,6 +198,13 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isManager() && isValidBillingRecord(request.resource.data);
       allow update: if isManager() && isValidBillingRecord(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /line_users/{id} {
+      allow read: if isAuthenticated();
+      allow create: if true; // Allow creation from external webhooks (Make.com)
+      allow update: if isManager() && isValidLineUser(request.resource.data);
       allow delete: if isAdmin();
     }
   }

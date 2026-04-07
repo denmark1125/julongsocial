@@ -9,9 +9,23 @@
         "email": { "type": "string" },
         "role": { "type": "string", "enum": ["engineer", "manager", "employee"] },
         "displayName": { "type": "string" },
+        "lineUserId": { "type": "string", "description": "已綁定的 LINE UID" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "email", "role"]
+    },
+    "LineUser": {
+      "title": "LineUser",
+      "description": "從 LINE API 接收到的使用者資料",
+      "type": "object",
+      "properties": {
+        "lineUserId": { "type": "string", "description": "LINE 提供的唯一 UID" },
+        "linePictureUrl": { "type": "string", "description": "LINE 大頭照連結" },
+        "lineDisplayName": { "type": "string", "description": "LINE 顯示名稱" },
+        "UserId": { "type": "string", "description": "綁定的系統使用者 UID" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["lineUserId", "createdAt"]
     },
     "VersionLog": {
       "title": "VersionLog",
@@ -210,6 +224,10 @@
     "/billingRecords/{id}": {
       "schema": "BillingRecord",
       "description": "收款紀錄管理"
+    },
+    "/line_users/{id}": {
+      "schema": "LineUser",
+      "description": "LINE 使用者資料集合"
     }
   }
 }
