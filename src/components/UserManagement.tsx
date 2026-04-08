@@ -12,13 +12,22 @@ import { initializeApp, getApps, getApp, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { db } from '../firebase';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { UserProfile, UserRole } from '../types';
-import { Shield, User, Trash2, Edit2, X, Plus, Key, Mail, UserPlus } from 'lucide-react';
+import { UserProfile, UserRole, LineUser } from '../types';
+import { Shield, User, Trash2, Edit2, X, Plus, Key, Mail, UserPlus, MessageCircle, Link as LinkIcon, Unlink } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { format, parseISO } from 'date-fns';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
 import { PASSWORD_SUFFIX, ADMIN_USERNAME } from '../constants';
 
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
 export default function UserManagement({ currentUserRole }: { currentUserRole: UserRole }) {
+  const [activeSubTab, setActiveSubTab] = useState<'users' | 'line'>('users');
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [lineUsers, setLineUsers] = useState<LineUser[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newUser, setNewUser] = useState({
     username: '',
@@ -37,8 +46,51 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setUsers(snapshot.docs.map(doc => doc.data() as UserProfile));
     });
-    return () => unsubscribe();
+
+    const lq = query(collection(db, 'line_users'));
+    const lUnsubscribe = onSnapshot(lq, (snapshot) => {
+      setLineUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LineUser)));
+    });
+
+    return () => {
+      unsubscribe();
+      lUnsubscribe();
+    };
   }, []);
+
+  const handleBindLineUser = async (lineUserId: string, systemUid: string) => {
+    try {
+      const lineUser = lineUsers.find(lu => lu.lineUserId === lineUserId);
+      if (!lineUser) return;
+
+      // Update line_users document
+      await updateDoc(doc(db, 'line_users', lineUser.id!), { UserId: systemUid });
+      
+      // Update system user document
+      await updateDoc(doc(db, 'users', systemUid), { lineUserId: lineUserId });
+      
+      toast.success('綁定成功');
+    } catch (error) {
+      console.error('Binding error:', error);
+      toast.error('綁定失敗');
+    }
+  };
+
+  const handleUnbindLineUser = async (lineUserId: string, systemUid: string) => {
+    try {
+      const lineUser = lineUsers.find(lu => lu.lineUserId === lineUserId);
+      if (lineUser && lineUser.id) {
+        await updateDoc(doc(db, 'line_users', lineUser.id), { UserId: '' });
+      }
+      
+      await updateDoc(doc(db, 'users', systemUid), { lineUserId: '' });
+      
+      toast.success('已解除綁定');
+    } catch (error) {
+      console.error('Unbinding error:', error);
+      toast.error('解除綁定失敗');
+    }
+  };
 
   const handleUpdateRole = async (uid: string, newRole: UserRole) => {
     try {
@@ -171,9 +223,31 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <p className="text-gray-500">管理系統成員權限與帳號狀態</p>
-        {(currentUserRole === 'engineer' || currentUserRole === 'manager') && (
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="flex bg-white p-1 rounded-2xl border border-black/5 shadow-sm">
+          <button
+            onClick={() => setActiveSubTab('users')}
+            className={cn(
+              "px-6 py-2 rounded-xl text-sm font-bold transition-all flex items-center space-x-2",
+              activeSubTab === 'users' ? "bg-[#5A5A40] text-white shadow-md" : "text-gray-400 hover:bg-gray-50"
+            )}
+          >
+            <User size={18} />
+            <span>成員管理</span>
+          </button>
+          <button
+            onClick={() => setActiveSubTab('line')}
+            className={cn(
+              "px-6 py-2 rounded-xl text-sm font-bold transition-all flex items-center space-x-2",
+              activeSubTab === 'line' ? "bg-[#5A5A40] text-white shadow-md" : "text-gray-400 hover:bg-gray-50"
+            )}
+          >
+            <MessageCircle size={18} />
+            <span>LINE 串接管理</span>
+          </button>
+        </div>
+
+        {activeSubTab === 'users' && (currentUserRole === 'engineer' || currentUserRole === 'manager') && (
           <button 
             onClick={() => setIsModalOpen(true)}
             className="bg-[#5A5A40] text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-[#4a4a35] transition-all flex items-center space-x-2"
@@ -184,67 +258,187 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
         )}
       </div>
 
-      <div className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-[#F5F5F0] border-b border-black/5">
-              <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">使用者</th>
-              <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">帳號</th>
-              <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">電子郵件</th>
-              <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">目前權限</th>
-              <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">操作</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-black/5">
-            {users.map((user) => (
-              <tr key={user.uid} className="hover:bg-gray-50 transition-colors">
-                <td className="p-4">
-                  <div className="flex items-center">
-                    <div className="w-8 h-8 bg-[#5A5A40]/10 rounded-full flex items-center justify-center text-[#5A5A40] mr-3">
-                      <User size={16} />
-                    </div>
-                    <span className="font-medium">{user.displayName || '未設定名稱'}</span>
-                  </div>
-                </td>
-                <td className="p-4 text-sm text-gray-600 font-mono">{user.username}</td>
-                <td className="p-4 text-sm text-gray-600">{user.email || '-'}</td>
-                <td className="p-4">
-                  <select 
-                    value={user.role}
-                    onChange={(e) => handleUpdateRole(user.uid, e.target.value as UserRole)}
-                    className="bg-[#F5F5F0] border-none rounded-lg text-xs font-bold px-3 py-1 outline-none focus:ring-2 focus:ring-[#5A5A40]"
-                    disabled={currentUserRole !== 'engineer' && currentUserRole !== 'manager'}
-                  >
-                    <option value="employee">員工</option>
-                    <option value="manager">主管</option>
-                    <option value="engineer">工程師</option>
-                  </select>
-                </td>
-                <td className="p-4">
-                  <div className="flex items-center space-x-2">
-                    <button 
-                      onClick={() => setResettingUid(user.uid)}
-                      className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                      title="重設密碼"
-                    >
-                      <Key size={16} />
-                    </button>
-                    {currentUserRole === 'engineer' && (
-                      <button 
-                        onClick={() => handleDeleteUser(user.uid)}
-                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                        title="刪除帳號"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    )}
-                  </div>
-                </td>
+      {activeSubTab === 'users' ? (
+        <div className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-[#F5F5F0] border-b border-black/5">
+                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">使用者</th>
+                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">帳號</th>
+                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">電子郵件</th>
+                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">LINE 狀態</th>
+                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">目前權限</th>
+                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">操作</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="divide-y divide-black/5">
+              {users.map((user) => {
+                const linkedLineUser = lineUsers.find(lu => lu.lineUserId === user.lineUserId);
+                return (
+                  <tr key={user.uid} className="hover:bg-gray-50 transition-colors">
+                    <td className="p-4">
+                      <div className="flex items-center">
+                        <div className="w-8 h-8 bg-[#5A5A40]/10 rounded-full flex items-center justify-center text-[#5A5A40] mr-3 overflow-hidden">
+                          {linkedLineUser?.linePictureUrl ? (
+                            <img src={linkedLineUser.linePictureUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            <User size={16} />
+                          )}
+                        </div>
+                        <span className="font-medium">{user.displayName || '未設定名稱'}</span>
+                      </div>
+                    </td>
+                    <td className="p-4 text-sm text-gray-600 font-mono">{user.username}</td>
+                    <td className="p-4 text-sm text-gray-600">{user.email || '-'}</td>
+                    <td className="p-4">
+                      {user.lineUserId ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700 border border-green-200">
+                          已綁定 LINE
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-400 border border-gray-200">
+                          未綁定
+                        </span>
+                      )}
+                    </td>
+                    <td className="p-4">
+                      <select 
+                        value={user.role}
+                        onChange={(e) => handleUpdateRole(user.uid, e.target.value as UserRole)}
+                        className="bg-[#F5F5F0] border-none rounded-lg text-xs font-bold px-3 py-1 outline-none focus:ring-2 focus:ring-[#5A5A40]"
+                        disabled={currentUserRole !== 'engineer' && currentUserRole !== 'manager'}
+                      >
+                        <option value="employee">員工</option>
+                        <option value="manager">主管</option>
+                        <option value="engineer">工程師</option>
+                      </select>
+                    </td>
+                    <td className="p-4">
+                      <div className="flex items-center space-x-2">
+                        <button 
+                          onClick={() => setResettingUid(user.uid)}
+                          className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                          title="重設密碼"
+                        >
+                          <Key size={16} />
+                        </button>
+                        {currentUserRole === 'engineer' && (
+                          <button 
+                            onClick={() => handleDeleteUser(user.uid)}
+                            className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                            title="刪除帳號"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
+          <div className="p-6 border-b border-black/5 bg-[#F5F5F0]/50">
+            <h3 className="text-lg font-bold serif text-[#5A5A40]">待綁定 LINE 使用者</h3>
+            <p className="text-xs text-gray-500 mt-1">當員工加入官方 LINE 後，系統會在此顯示其資訊，請將其與系統帳號進行綁定。</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-[#F5F5F0] border-b border-black/5">
+                  <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">LINE 頭像</th>
+                  <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">LINE 名稱</th>
+                  <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">LINE UID</th>
+                  <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">加入時間</th>
+                  <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">綁定狀態</th>
+                  <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-black/5">
+                {lineUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-12 text-center text-gray-400 italic">
+                      目前尚無 LINE 使用者資料
+                    </td>
+                  </tr>
+                ) : (
+                  lineUsers.map((lineUser) => {
+                    const linkedUser = users.find(u => u.uid === lineUser.UserId);
+                    return (
+                      <tr key={lineUser.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="p-4">
+                          <div className="w-12 h-12 rounded-2xl overflow-hidden bg-gray-100 border border-black/5 shadow-sm">
+                            {lineUser.linePictureUrl ? (
+                              <img src={lineUser.linePictureUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-gray-300">
+                                <User size={24} />
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4 font-bold text-[#5A5A40]">{lineUser.lineDisplayName || '未知名稱'}</td>
+                        <td className="p-4 text-xs text-gray-400 font-mono">{lineUser.lineUserId}</td>
+                        <td className="p-4 text-xs text-gray-500">
+                          {lineUser.createdAt ? format(parseISO(lineUser.createdAt), 'yyyy/MM/dd HH:mm') : '-'}
+                        </td>
+                        <td className="p-4">
+                          {linkedUser ? (
+                            <div className="flex items-center space-x-2">
+                              <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-full font-bold border border-green-200">
+                                已綁定：{linkedUser.displayName}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="bg-gray-100 text-gray-400 text-[10px] px-2 py-0.5 rounded-full font-bold border border-gray-200">
+                              尚未綁定
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-4">
+                          {linkedUser ? (
+                            <button 
+                              onClick={() => handleUnbindLineUser(lineUser.lineUserId, linkedUser.uid)}
+                              className="flex items-center space-x-1 text-red-500 hover:text-red-700 text-xs font-bold transition-colors"
+                            >
+                              <Unlink size={14} />
+                              <span>解除綁定</span>
+                            </button>
+                          ) : (
+                            <div className="flex items-center space-x-2">
+                              <select 
+                                className="bg-[#F5F5F0] border-none rounded-lg text-xs font-bold px-3 py-1.5 outline-none focus:ring-2 focus:ring-[#5A5A40] min-w-[120px]"
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    handleBindLineUser(lineUser.lineUserId, e.target.value);
+                                  }
+                                }}
+                                defaultValue=""
+                              >
+                                <option value="" disabled>選擇成員...</option>
+                                {users
+                                  .filter(u => !u.lineUserId)
+                                  .map(u => (
+                                    <option key={u.uid} value={u.uid}>{u.displayName}</option>
+                                  ))
+                                }
+                              </select>
+                              <LinkIcon size={14} className="text-gray-300" />
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Create User Modal */}
       {isModalOpen && (

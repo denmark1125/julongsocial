@@ -39,6 +39,16 @@ export interface UserProfile {
   email?: string;
   role: UserRole;
   displayName?: string;
+  lineUserId?: string; // Linked LINE User ID
+  createdAt: string;
+}
+
+export interface LineUser {
+  id?: string;
+  lineUserId: string;
+  linePictureUrl?: string;
+  lineDisplayName?: string;
+  UserId?: string; // Linked system user UID
   createdAt: string;
 }
 

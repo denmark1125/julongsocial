@@ -30,7 +30,9 @@ import {
   Copy,
   ChevronLeft,
   ChevronRight,
-  BellRing
+  BellRing,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { format, isPast, isToday, addDays, parseISO, getDay, setHours, setMinutes, startOfDay, isSameDay, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths, addMonths } from 'date-fns';
@@ -60,6 +62,11 @@ export default function PostManagement() {
   const [openStatusId, setOpenStatusId] = useState<string | null>(null);
   const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
   
+  const [sortConfig, setSortConfig] = useState<{
+    field: 'platforms' | 'contentType' | 'status' | 'scheduledAt' | 'title' | 'vendorName' | 'clientConfirmed' | 'internalConfirmed';
+    direction: 'asc' | 'desc';
+  }>({ field: 'scheduledAt', direction: 'asc' });
+
   const [formData, setFormData] = useState<Partial<Post>>({
     vendorId: '',
     title: '',
@@ -312,6 +319,41 @@ export default function PostManagement() {
     const matchesMonth = (post.targetMonth || format(parseISO(post.scheduledAt), 'yyyy-MM')) === selectedMonth;
     return matchesSearch && matchesVendor && matchesStatus && matchesMonth;
   });
+
+  const sortedPosts = [...filteredPosts].sort((a, b) => {
+    const { field, direction } = sortConfig;
+    let valA: any = a[field as keyof Post];
+    let valB: any = b[field as keyof Post];
+
+    if (field === 'vendorName') {
+      valA = vendors.find(v => v.id === a.vendorId)?.name || '';
+      valB = vendors.find(v => v.id === b.vendorId)?.name || '';
+    } else if (field === 'platforms') {
+      valA = a.platforms.join(',');
+      valB = b.platforms.join(',');
+    }
+
+    if (valA === undefined || valA === null) valA = '';
+    if (valB === undefined || valB === null) valB = '';
+
+    if (valA < valB) return direction === 'asc' ? -1 : 1;
+    if (valA > valB) return direction === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  const handleSort = (field: typeof sortConfig.field) => {
+    setSortConfig(prev => ({
+      field,
+      direction: prev.field === field && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const SortIcon = ({ field }: { field: typeof sortConfig.field }) => {
+    if (sortConfig.field !== field) return <ChevronDown size={12} className="ml-1 opacity-20" />;
+    return sortConfig.direction === 'asc' 
+      ? <ArrowUp size={12} className="ml-1 text-[#5A5A40]" /> 
+      : <ArrowDown size={12} className="ml-1 text-[#5A5A40]" />;
+  };
 
   const months = Array.from({ length: 7 }, (_, i) => {
     const baseDate = parseISO(`${selectedMonth}-01`);
@@ -580,19 +622,54 @@ export default function PostManagement() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-[#F5F5F0] border-b border-black/5">
-                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">發布社群</th>
-                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">內容類型</th>
-                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">發布狀態</th>
-                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">發布時間</th>
+                <th 
+                  className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  onClick={() => handleSort('platforms')}
+                >
+                  <div className="flex items-center">發布社群 <SortIcon field="platforms" /></div>
+                </th>
+                <th 
+                  className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  onClick={() => handleSort('contentType')}
+                >
+                  <div className="flex items-center">內容類型 <SortIcon field="contentType" /></div>
+                </th>
+                <th 
+                  className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  onClick={() => handleSort('status')}
+                >
+                  <div className="flex items-center">發布狀態 <SortIcon field="status" /></div>
+                </th>
+                <th 
+                  className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  onClick={() => handleSort('scheduledAt')}
+                >
+                  <div className="flex items-center">發布時間 <SortIcon field="scheduledAt" /></div>
+                </th>
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">貼文位置</th>
-                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">文案標題 / 內容</th>
-                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">客戶確認</th>
-                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center">內部檢核</th>
+                <th 
+                  className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  onClick={() => handleSort('title')}
+                >
+                  <div className="flex items-center">文案標題 / 內容 <SortIcon field="title" /></div>
+                </th>
+                <th 
+                  className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center cursor-pointer hover:bg-gray-100 transition-colors"
+                  onClick={() => handleSort('clientConfirmed')}
+                >
+                  <div className="flex items-center justify-center">客戶確認 <SortIcon field="clientConfirmed" /></div>
+                </th>
+                <th 
+                  className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center cursor-pointer hover:bg-gray-100 transition-colors"
+                  onClick={() => handleSort('internalConfirmed')}
+                >
+                  <div className="flex items-center justify-center">內部檢核 <SortIcon field="internalConfirmed" /></div>
+                </th>
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-black/5">
-              {filteredPosts.map((post) => {
+              {sortedPosts.map((post) => {
                 const vendor = vendors.find(v => v.id === post.vendorId);
                 
                 return (
@@ -711,10 +788,10 @@ export default function PostManagement() {
 
         {/* Mobile Card View */}
         <div className="md:hidden divide-y divide-black/5">
-          {filteredPosts.length === 0 ? (
+          {sortedPosts.length === 0 ? (
             <div className="p-8 text-center text-gray-400 italic">本月尚無貼文</div>
           ) : (
-            filteredPosts.map((post) => {
+            sortedPosts.map((post) => {
               const vendor = vendors.find(v => v.id === post.vendorId);
               return (
                 <div key={post.id} className="p-4 space-y-3">

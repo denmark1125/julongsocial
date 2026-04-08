@@ -66,7 +66,11 @@ export default function AssetDatabase() {
   const [isAdding, setIsAdding] = useState(false);
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [isTaskListOpen, setIsTaskListOpen] = useState(false);
+  const [exportMode, setExportMode] = useState<'editor' | 'vendor'>('editor');
   const [selectedEditorId, setSelectedEditorId] = useState('');
+  const [selectedVendorIdForExport, setSelectedVendorIdForExport] = useState('');
+  const [includeRaw, setIncludeRaw] = useState(true);
+  const [includeFinished, setIncludeFinished] = useState(false);
   const [taskNotes, setTaskNotes] = useState<Record<string, string>>({});
   const [isExporting, setIsExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -282,9 +286,16 @@ export default function AssetDatabase() {
     setIsExporting(true);
     try {
       const dataUrl = await toJpeg(taskListRef.current, { quality: 0.95, backgroundColor: '#F5F5F0' });
-      const editorName = editors.find(e => e.id === selectedEditorId)?.name || '剪輯師';
-      download(dataUrl, `${editorName}_剪輯工作紀錄表_${new Date().toLocaleDateString()}.jpg`);
-      toast.success('工作紀錄表已匯出');
+      let fileName = '';
+      if (exportMode === 'editor') {
+        const editorName = editors.find(e => e.id === selectedEditorId)?.name || '剪輯師';
+        fileName = `${editorName}_剪輯工作紀錄表_${new Date().toLocaleDateString()}.jpg`;
+      } else {
+        const vendorName = vendors.find(v => v.id === selectedVendorIdForExport)?.name || '廠商';
+        fileName = `${vendorName}_素材進度表_${new Date().toLocaleDateString()}.jpg`;
+      }
+      download(dataUrl, fileName);
+      toast.success('報表已匯出');
     } catch (err) {
       console.error('Export failed', err);
       toast.error('匯出失敗');
@@ -1067,44 +1078,116 @@ export default function AssetDatabase() {
               </button>
             </div>
 
-            <div className="p-4 md:p-6 bg-gray-50 border-b border-gray-100 flex flex-col sm:flex-row gap-4 items-center">
-              <div className="flex-1 w-full">
-                <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">選擇剪輯師</label>
-                <select 
-                  value={selectedEditorId}
-                  onChange={(e) => setSelectedEditorId(e.target.value)}
-                  className="w-full p-3 bg-white rounded-xl border border-gray-200 text-sm font-bold focus:ring-2 focus:ring-[#5A5A40]"
+            <div className="p-4 md:p-6 bg-gray-50 border-b border-gray-100 space-y-4">
+              <div className="flex bg-white p-1 rounded-2xl border border-gray-200 w-fit shadow-sm">
+                <button
+                  onClick={() => setExportMode('editor')}
+                  className={cn(
+                    "px-6 py-2 rounded-xl text-xs font-bold transition-all flex items-center space-x-2",
+                    exportMode === 'editor' ? "bg-[#5A5A40] text-white shadow-md" : "text-gray-400 hover:bg-gray-50"
+                  )}
                 >
-                  <option value="">-- 請選擇剪輯師 --</option>
-                  {editors.map(ed => (
-                    <option key={ed.id} value={ed.id}>{ed.name}</option>
-                  ))}
-                </select>
+                  <Users size={14} />
+                  <span>按剪輯師導出</span>
+                </button>
+                <button
+                  onClick={() => setExportMode('vendor')}
+                  className={cn(
+                    "px-6 py-2 rounded-xl text-xs font-bold transition-all flex items-center space-x-2",
+                    exportMode === 'vendor' ? "bg-[#5A5A40] text-white shadow-md" : "text-gray-400 hover:bg-gray-50"
+                  )}
+                >
+                  <Box size={14} />
+                  <span>按 IP (廠商) 導出</span>
+                </button>
               </div>
-              <button 
-                disabled={!selectedEditorId || isExporting}
-                onClick={handleExportTaskJPG}
-                className="w-full sm:w-auto bg-[#5A5A40] text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-[#4a4a35] disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center space-x-2"
-              >
-                <Download size={18} />
-                <span>{isExporting ? '生成中...' : '導出 JPG 檔案'}</span>
-              </button>
+
+              <div className="flex flex-col sm:flex-row gap-4 items-end">
+                <div className="flex-1 w-full">
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
+                    {exportMode === 'editor' ? '選擇剪輯師' : '選擇廠商 (IP)'}
+                  </label>
+                  {exportMode === 'editor' ? (
+                    <select 
+                      value={selectedEditorId}
+                      onChange={(e) => setSelectedEditorId(e.target.value)}
+                      className="w-full p-3 bg-white rounded-xl border border-gray-200 text-sm font-bold focus:ring-2 focus:ring-[#5A5A40]"
+                    >
+                      <option value="">-- 請選擇剪輯師 --</option>
+                      {editors.map(ed => (
+                        <option key={ed.id} value={ed.id}>{ed.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <select 
+                      value={selectedVendorIdForExport}
+                      onChange={(e) => setSelectedVendorIdForExport(e.target.value)}
+                      className="w-full p-3 bg-white rounded-xl border border-gray-200 text-sm font-bold focus:ring-2 focus:ring-[#5A5A40]"
+                    >
+                      <option value="">-- 請選擇廠商 --</option>
+                      {vendors.map(v => (
+                        <option key={v.id} value={v.id}>{v.name}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-4 bg-white p-3 rounded-xl border border-gray-200">
+                  <label className="flex items-center space-x-2 cursor-pointer group">
+                    <input 
+                      type="checkbox" 
+                      checked={includeRaw}
+                      onChange={(e) => setIncludeRaw(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300 text-[#5A5A40] focus:ring-[#5A5A40]"
+                    />
+                    <span className="text-xs font-bold text-gray-600 group-hover:text-[#5A5A40]">原始素材 (Raw)</span>
+                  </label>
+                  <label className="flex items-center space-x-2 cursor-pointer group">
+                    <input 
+                      type="checkbox" 
+                      checked={includeFinished}
+                      onChange={(e) => setIncludeFinished(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300 text-[#5A5A40] focus:ring-[#5A5A40]"
+                    />
+                    <span className="text-xs font-bold text-gray-600 group-hover:text-[#5A5A40]">待發布成片</span>
+                  </label>
+                </div>
+
+                <button 
+                  disabled={(exportMode === 'editor' ? !selectedEditorId : !selectedVendorIdForExport) || isExporting}
+                  onClick={handleExportTaskJPG}
+                  className="w-full sm:w-auto bg-[#5A5A40] text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-[#4a4a35] disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center space-x-2"
+                >
+                  <Download size={18} />
+                  <span>{isExporting ? '生成中...' : '導出 JPG'}</span>
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-2 md:p-6 bg-[#F5F5F0]/30">
-              {selectedEditorId ? (
+              {(exportMode === 'editor' ? selectedEditorId : selectedVendorIdForExport) ? (
                 <div ref={taskListRef} className="bg-white p-4 md:p-10 rounded-[24px] md:rounded-[32px] shadow-sm border border-black/5 space-y-6">
                   {/* Header Style Reference */}
-                  <div className="bg-[#8B0000] p-4 -mx-4 md:-mx-10 -mt-4 md:-mt-10 mb-8 flex justify-center items-center">
-                    <h2 className="text-white text-xl md:text-2xl font-black tracking-[0.2em]">
-                      聚浪 Julong Agency - {getEditorName(selectedEditorId)} 剪輯工作紀錄表
+                  <div className={cn(
+                    "p-4 -mx-4 md:-mx-10 -mt-4 md:-mt-10 mb-8 flex justify-center items-center",
+                    exportMode === 'editor' ? "bg-[#8B0000]" : "bg-[#5A5A40]"
+                  )}>
+                    <h2 className="text-white text-xl md:text-2xl font-black tracking-[0.2em] text-center">
+                      {exportMode === 'editor' 
+                        ? `聚浪 Julong Agency - ${getEditorName(selectedEditorId)} 剪輯工作紀錄表`
+                        : `聚浪 Julong Agency - ${getVendorName(selectedVendorIdForExport)} 素材進度表`
+                      }
                     </h2>
                   </div>
 
                   <div className="flex justify-between items-end border-b border-gray-100 pb-4">
                     <div className="space-y-1">
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">剪輯師</p>
-                      <p className="text-xl font-bold text-[#5A5A40] serif">{getEditorName(selectedEditorId)}</p>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                        {exportMode === 'editor' ? '剪輯師' : '廠商名稱 (IP)'}
+                      </p>
+                      <p className="text-xl font-bold text-[#5A5A40] serif">
+                        {exportMode === 'editor' ? getEditorName(selectedEditorId) : getVendorName(selectedVendorIdForExport)}
+                      </p>
                     </div>
                     <div className="text-right space-y-1">
                       <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">導出日期</p>
@@ -1119,25 +1202,57 @@ export default function AssetDatabase() {
                     <thead>
                       <tr className="bg-[#F5F5F0]">
                         <th className="p-3 text-center text-xs font-black text-[#5A5A40] uppercase tracking-widest border border-gray-300 w-[5%]">NO.</th>
-                        <th className="p-3 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest border border-gray-300 w-[15%]">IP 名稱</th>
-                        <th className="p-3 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest border border-gray-300 w-[12%]">發片習慣</th>
-                        <th className="p-3 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest border border-gray-300 w-[38%]">片名 (素材標題)</th>
+                        {exportMode === 'editor' && (
+                          <th className="p-3 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest border border-gray-300 w-[15%]">IP 名稱</th>
+                        )}
+                        <th className={cn(
+                          "p-3 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest border border-gray-300",
+                          exportMode === 'editor' ? "w-[12%]" : "w-[15%]"
+                        )}>
+                          {exportMode === 'editor' ? '發片習慣' : '素材階段'}
+                        </th>
+                        <th className={cn(
+                          "p-3 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest border border-gray-300",
+                          exportMode === 'editor' ? "w-[38%]" : "w-[50%]"
+                        )}>片名 (素材標題)</th>
                         <th className="p-3 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest border border-gray-300 w-[30%]">備註事項</th>
                       </tr>
                     </thead>
                     <tbody>
                       {assets
-                        .filter(a => getEffectiveEditorId(a) === selectedEditorId && a.stage === 'raw' && a.status === 'available')
+                        .filter(a => {
+                          const matchesTarget = exportMode === 'editor' 
+                            ? getEffectiveEditorId(a) === selectedEditorId 
+                            : a.vendorId === selectedVendorIdForExport;
+                          
+                          const isRaw = a.stage === 'raw' && a.status === 'available';
+                          const isFinished = a.stage === 'finished' && a.status === 'available';
+                          
+                          const matchesStage = (includeRaw && isRaw) || (includeFinished && isFinished);
+                          
+                          return matchesTarget && matchesStage;
+                        })
                         .map((asset, idx) => (
                           <tr key={asset.id} className="hover:bg-gray-50 transition-colors">
                             <td className="p-3 text-center text-sm font-bold text-gray-500 border border-gray-300">
                               {idx + 1}
                             </td>
-                            <td className="p-3 text-sm font-bold text-gray-700 border border-gray-300">
-                              {getVendorName(asset.vendorId)}
-                            </td>
-                            <td className="p-3 text-xs font-bold text-[#8B7355] border border-gray-300">
-                              {getVendorHabits(asset.vendorId)}
+                            {exportMode === 'editor' && (
+                              <td className="p-3 text-sm font-bold text-gray-700 border border-gray-300">
+                                {getVendorName(asset.vendorId)}
+                              </td>
+                            )}
+                            <td className="p-3 text-xs font-bold border border-gray-300">
+                              {exportMode === 'editor' ? (
+                                <span className="text-[#8B7355]">{getVendorHabits(asset.vendorId)}</span>
+                              ) : (
+                                <span className={cn(
+                                  "px-2 py-0.5 rounded-full",
+                                  asset.stage === 'raw' ? "bg-[#8B7355]/10 text-[#8B7355]" : "bg-green-100 text-green-700"
+                                )}>
+                                  {asset.stage === 'raw' ? '待剪輯' : '已成片'}
+                                </span>
+                              )}
                             </td>
                             <td className="p-3 text-sm font-medium text-gray-600 border border-gray-300">
                               {asset.title}
@@ -1153,10 +1268,18 @@ export default function AssetDatabase() {
                             </td>
                           </tr>
                         ))}
-                      {assets.filter(a => getEffectiveEditorId(a) === selectedEditorId && a.stage === 'raw' && a.status === 'available').length === 0 && (
+                      {assets.filter(a => {
+                          const matchesTarget = exportMode === 'editor' 
+                            ? getEffectiveEditorId(a) === selectedEditorId 
+                            : a.vendorId === selectedVendorIdForExport;
+                          const isRaw = a.stage === 'raw' && a.status === 'available';
+                          const isFinished = a.stage === 'finished' && a.status === 'available';
+                          const matchesStage = (includeRaw && isRaw) || (includeFinished && isFinished);
+                          return matchesTarget && matchesStage;
+                        }).length === 0 && (
                         <tr>
-                          <td colSpan={5} className="p-20 text-center text-gray-400 italic text-sm border border-gray-300">
-                            目前無待剪輯的原始素材
+                          <td colSpan={exportMode === 'editor' ? 5 : 4} className="p-20 text-center text-gray-400 italic text-sm border border-gray-300">
+                            目前無符合條件的素材
                           </td>
                         </tr>
                       )}
@@ -1174,9 +1297,11 @@ export default function AssetDatabase() {
               ) : (
                 <div className="h-full flex flex-col items-center justify-center space-y-4 py-20">
                   <div className="bg-white p-6 rounded-full shadow-sm border border-black/5">
-                    <Users size={48} className="text-gray-200" />
+                    {exportMode === 'editor' ? <Users size={48} className="text-gray-200" /> : <Box size={48} className="text-gray-200" />}
                   </div>
-                  <p className="text-gray-400 font-bold">請先選擇一位剪輯師以生成清單</p>
+                  <p className="text-gray-400 font-bold">
+                    {exportMode === 'editor' ? '請先選擇一位剪輯師以生成清單' : '請先選擇一個廠商以生成進度表'}
+                  </p>
                 </div>
               )}
             </div>

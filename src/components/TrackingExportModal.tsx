@@ -172,17 +172,14 @@ export default function TrackingExportModal({
     
     try {
       const element = exportRef.current;
+      const rect = element.getBoundingClientRect();
       
-      // Get the actual dimensions of the element
-      const width = element.scrollWidth;
-      const height = element.scrollHeight;
-
       const dataUrl = await toJpeg(element, { 
-        quality: 0.95, 
+        quality: 1, 
         backgroundColor: '#F5F5F0',
-        pixelRatio: 2,
-        width: width,
-        height: height,
+        pixelRatio: 3,
+        width: rect.width,
+        height: rect.height,
         style: {
           transform: 'scale(1)',
           transformOrigin: 'top left',
@@ -190,7 +187,6 @@ export default function TrackingExportModal({
           padding: '0',
         },
         filter: (node) => {
-          // Hide elements with 'export-ignore' class during export
           if (node instanceof HTMLElement && node.classList.contains('export-ignore')) {
             return false;
           }
@@ -352,37 +348,38 @@ export default function TrackingExportModal({
         <div className="flex-1 overflow-auto p-4 sm:p-8 bg-gray-50 custom-scrollbar">
           <div 
             ref={exportRef} 
-            className="bg-[#F5F5F0] rounded-3xl shadow-lg border border-black/5 overflow-hidden w-[900px] mx-auto"
+            className="bg-[#F5F5F0] p-12 flex justify-center min-w-max"
           >
-            {/* JPG Header */}
-            <div className="p-10 bg-[#5A5A40] text-white">
-              <div className="flex justify-between items-end">
-                <div>
-                  <h1 className="text-4xl font-black tracking-tighter mb-2">TRACKING LIST</h1>
-                  <p className="text-lg opacity-80 font-medium tracking-wide">
-                    {selectedEditorId === 'all' ? '全部剪輯師' : editors.find(e => e.id === selectedEditorId)?.name} 催片清單
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm opacity-60 uppercase tracking-widest mb-1">Timeframe</p>
-                  <p className="text-xl font-bold">{format(selectedWeekStart, 'yyyy/MM/dd')} - {format(weekEnd, 'MM/dd')}</p>
+            <div className="bg-[#F5F5F0] rounded-[40px] shadow-2xl border border-black/5 overflow-hidden w-[760px]">
+              {/* JPG Header */}
+              <div className="p-12 bg-[#5A5A40] text-white">
+                <div className="flex justify-between items-end">
+                  <div>
+                    <h1 className="text-5xl font-black tracking-tighter mb-2">TRACKING LIST</h1>
+                    <p className="text-xl opacity-80 font-medium tracking-wide">
+                      {selectedEditorId === 'all' ? '全部剪輯師' : editors.find(e => e.id === selectedEditorId)?.name} 催片清單
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm opacity-60 uppercase tracking-widest mb-1">Timeframe</p>
+                    <p className="text-2xl font-bold">{format(selectedWeekStart, 'yyyy/MM/dd')} - {format(weekEnd, 'MM/dd')}</p>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* JPG Content */}
-            <div className="p-10">
-              {trackingData.length > 0 ? (
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr className="border-b-2 border-[#5A5A40]/20">
-                      <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[100px]">發布日期</th>
-                      <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[180px]">廠商 (IP)</th>
-                      <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[80px]">類型</th>
-                      <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest">內容標題 / 狀態</th>
-                      <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[200px]">備註</th>
-                    </tr>
-                  </thead>
+              {/* JPG Content */}
+              <div className="p-12">
+                {trackingData.length > 0 ? (
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="border-b-2 border-[#5A5A40]/20">
+                        <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[100px]">發布日期</th>
+                        <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[150px]">廠商 (IP)</th>
+                        <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[60px]">類型</th>
+                        <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest">內容標題 / 狀態</th>
+                        <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[150px]">備註</th>
+                      </tr>
+                    </thead>
                   <tbody>
                     {trackingData.map((item, idx) => (
                       <tr key={item.id} className={clsx(
@@ -482,6 +479,7 @@ export default function TrackingExportModal({
               導出 JPG 清單
             </button>
           </div>
+        </div>
         </div>
       </div>
     </div>
