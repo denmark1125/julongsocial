@@ -104,7 +104,7 @@ export default function TrackingExportModal({
 
       dayPosts.forEach(post => {
         const hasAsset = post.assetId && post.assetId !== 'to_be_added';
-        const isMissingVideo = post.contentType === 'video' && !hasAsset;
+        const isMissingVideo = (post.contentType === 'video' && !hasAsset) || post.status === 'pending';
         
         if (exportMode === 'all' || isMissingVideo) {
           const key = `${vendor.id}_post_${post.id}_${dateStr}`;

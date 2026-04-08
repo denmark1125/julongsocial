@@ -21,7 +21,9 @@ export default function PostDetailModal({ post, vendor, asset, onClose }: PostDe
             <div className={clsx(
               "p-2 rounded-xl",
               post.status === 'published' ? "bg-green-100 text-green-700" : 
-              post.status === 'scheduled' ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-700"
+              post.status === 'scheduled' ? "bg-blue-100 text-blue-700" : 
+              post.status === 'pending' ? "bg-orange-100 text-orange-700" :
+              "bg-gray-100 text-gray-700"
             )}>
               {post.contentType === 'video' ? <Video size={20} /> : <FileText size={20} />}
             </div>
@@ -49,9 +51,11 @@ export default function PostDetailModal({ post, vendor, asset, onClose }: PostDe
               <div className={clsx(
                 "text-sm font-bold",
                 post.status === 'published' ? "text-green-600" : 
-                post.status === 'scheduled' ? "text-blue-600" : "text-gray-600"
+                post.status === 'scheduled' ? "text-blue-600" : 
+                post.status === 'pending' ? "text-orange-600" :
+                "text-gray-600"
               )}>
-                {post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : '草稿'}
+                {post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : post.status === 'pending' ? '待補中' : '草稿'}
               </div>
             </div>
             <div className="bg-gray-50 p-4 rounded-2xl border border-black/5">

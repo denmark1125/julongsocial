@@ -83,7 +83,7 @@ service cloud.firestore {
       return data.keys().hasAll(['vendorId', 'title', 'status', 'createdBy']) &&
              data.vendorId is string &&
              isValidString(data.title, 200) &&
-             data.status in ['draft', 'scheduled', 'published'] &&
+             data.status in ['draft', 'scheduled', 'published', 'pending'] &&
              data.createdBy is string &&
              (!('assetId' in data) || data.assetId is string) &&
              (!('content' in data) || data.content is string) &&

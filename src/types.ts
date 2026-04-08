@@ -95,7 +95,7 @@ export interface Vendor {
   createdAt: string;
 }
 
-export type PostStatus = 'draft' | 'scheduled' | 'published';
+export type PostStatus = 'draft' | 'scheduled' | 'published' | 'pending';
 
 export interface Post {
   id?: string;

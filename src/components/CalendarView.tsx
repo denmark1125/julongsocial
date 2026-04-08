@@ -367,7 +367,9 @@ export default function CalendarView() {
                             className={clsx(
                               "text-[9px] p-1 rounded border flex flex-col leading-tight mb-1 cursor-pointer hover:shadow-md transition-all",
                               post.status === 'published' ? "bg-green-50 text-green-700 border-green-100" : 
-                              post.status === 'scheduled' ? "bg-blue-50 text-blue-700 border-blue-100" : "bg-gray-50 text-gray-600 border-gray-200"
+                              post.status === 'scheduled' ? "bg-blue-50 text-blue-700 border-blue-100" : 
+                              post.status === 'pending' ? "bg-orange-50 text-orange-700 border-orange-100" :
+                              "bg-gray-50 text-gray-600 border-gray-200"
                             )}
                           >
                             <div className="flex items-center gap-1 overflow-hidden">
@@ -408,7 +410,9 @@ export default function CalendarView() {
                       className={clsx(
                         "p-4 rounded-2xl border shadow-sm flex items-center space-x-4 active:scale-[0.98] transition-all",
                         post.status === 'published' ? "bg-green-50/50 border-green-100" : 
-                        post.status === 'scheduled' ? "bg-blue-50/50 border-blue-100" : "bg-white border-black/5"
+                        post.status === 'scheduled' ? "bg-blue-50/50 border-blue-100" : 
+                        post.status === 'pending' ? "bg-orange-50/50 border-orange-100" :
+                        "bg-white border-black/5"
                       )}
                     >
                       <div className="text-center min-w-[50px]">
@@ -429,9 +433,11 @@ export default function CalendarView() {
                           <span className={clsx(
                             "text-[8px] font-bold px-1.5 py-0.5 rounded-full",
                             post.status === 'published' ? "bg-green-100 text-green-700" : 
-                            post.status === 'scheduled' ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-700"
+                            post.status === 'scheduled' ? "bg-blue-100 text-blue-700" : 
+                            post.status === 'pending' ? "bg-orange-100 text-orange-700" :
+                            "bg-gray-100 text-gray-700"
                           )}>
-                            {post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : '草稿'}
+                            {post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : post.status === 'pending' ? '待補中' : '草稿'}
                           </span>
                         </div>
                       </div>

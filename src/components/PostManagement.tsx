@@ -63,9 +63,9 @@ export default function PostManagement() {
   const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
   
   const [sortConfig, setSortConfig] = useState<{
-    field: 'platforms' | 'contentType' | 'status' | 'scheduledAt' | 'title' | 'vendorName' | 'clientConfirmed' | 'internalConfirmed';
+    field: 'platforms' | 'contentType' | 'status' | 'scheduledAt' | 'title' | 'vendorName' | 'clientConfirmed' | 'internalConfirmed' | 'createdAt';
     direction: 'asc' | 'desc';
-  }>({ field: 'scheduledAt', direction: 'asc' });
+  }>({ field: 'createdAt', direction: 'desc' });
 
   const [formData, setFormData] = useState<Partial<Post>>({
     vendorId: '',
@@ -366,6 +366,7 @@ export default function PostManagement() {
     switch (status) {
       case 'published': return <span onClick={onClick} className={cn(baseClasses, "bg-green-100 text-green-700 border-green-200")}><CheckCircle2 size={12} className="mr-1" /> 已發布 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
       case 'scheduled': return <span onClick={onClick} className={cn(baseClasses, "bg-blue-100 text-blue-700 border-blue-200")}><Clock size={12} className="mr-1" /> 已排程 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
+      case 'pending': return <span onClick={onClick} className={cn(baseClasses, "bg-orange-100 text-orange-700 border-orange-200")}><BellRing size={12} className="mr-1" /> 待補中 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
       case 'draft': return <span onClick={onClick} className={cn(baseClasses, "bg-gray-100 text-gray-700 border-gray-200")}><FileEdit size={12} className="mr-1" /> 草稿 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
     }
   };
@@ -556,6 +557,7 @@ export default function PostManagement() {
         {[
           { id: 'all', label: '全部狀態' },
           { id: 'draft', label: '草稿' },
+          { id: 'pending', label: '待補中' },
           { id: 'scheduled', label: '已排程' },
           { id: 'published', label: '已發布' }
         ].map(status => (
@@ -698,7 +700,7 @@ export default function PostManagement() {
                             <div className="fixed inset-0 z-10" onClick={() => setOpenStatusId(null)} />
                             <div className="absolute top-full left-0 mt-1 bg-white shadow-2xl rounded-2xl border border-black/5 py-2 z-20 min-w-[120px] animate-in fade-in slide-in-from-top-2 duration-200">
                               <div className="px-3 py-1 text-[9px] font-bold text-gray-400 uppercase tracking-widest border-b border-black/5 mb-1">變更狀態</div>
-                              {(['draft', 'scheduled', 'published'] as PostStatus[]).map(s => (
+                              {(['draft', 'pending', 'scheduled', 'published'] as PostStatus[]).map(s => (
                                 <button 
                                   key={s}
                                   onClick={() => {
@@ -710,7 +712,7 @@ export default function PostManagement() {
                                     post.status === s ? "font-bold text-[#5A5A40] bg-[#F5F5F0]" : "text-gray-600"
                                   )}
                                 >
-                                  {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : '已發布'}
+                                  {s === 'draft' ? '草稿' : s === 'pending' ? '待補中' : s === 'scheduled' ? '已排程' : '已發布'}
                                 </button>
                               ))}
                             </div>
@@ -847,7 +849,7 @@ export default function PostManagement() {
                             <div className="fixed inset-0 z-10" onClick={() => setOpenStatusId(null)} />
                             <div className="absolute bottom-full left-0 mb-1 bg-white shadow-2xl rounded-2xl border border-black/5 py-2 z-20 min-w-[120px] animate-in fade-in slide-in-from-bottom-2 duration-200">
                               <div className="px-3 py-1 text-[9px] font-bold text-gray-400 uppercase tracking-widest border-b border-black/5 mb-1">變更狀態</div>
-                              {(['draft', 'scheduled', 'published'] as PostStatus[]).map(s => (
+                              {(['draft', 'pending', 'scheduled', 'published'] as PostStatus[]).map(s => (
                                 <button 
                                   key={s}
                                   onClick={() => {
@@ -859,7 +861,7 @@ export default function PostManagement() {
                                     post.status === s ? "font-bold text-[#5A5A40] bg-[#F5F5F0]" : "text-gray-600"
                                   )}
                                 >
-                                  {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : '已發布'}
+                                  {s === 'draft' ? '草稿' : s === 'pending' ? '待補中' : s === 'scheduled' ? '已排程' : '已發布'}
                                 </button>
                               ))}
                             </div>
@@ -1031,6 +1033,26 @@ export default function PostManagement() {
                           )}
                         >
                           {type === 'post' ? '圖文' : '短影音'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">發布狀態</label>
+                    <div className="flex gap-2">
+                      {(['draft', 'pending', 'scheduled', 'published'] as PostStatus[]).map(s => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setFormData({ ...formData, status: s })}
+                          className={cn(
+                            "flex-1 py-2 rounded-xl text-[10px] font-bold transition-all border",
+                            formData.status === s 
+                              ? "bg-[#5A5A40] text-white border-[#5A5A40]" 
+                              : "bg-gray-50 text-gray-400 border-black/5 hover:border-gray-200"
+                          )}
+                        >
+                          {s === 'draft' ? '草稿' : s === 'pending' ? '待補中' : s === 'scheduled' ? '已排程' : '已發布'}
                         </button>
                       ))}
                     </div>
