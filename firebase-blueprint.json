@@ -27,6 +27,19 @@
       },
       "required": ["lineUserId", "createdAt"]
     },
+    "LineConnection": {
+      "title": "LineConnection",
+      "description": "LINE 串接管理資料",
+      "type": "object",
+      "properties": {
+        "lineUserId": { "type": "string", "description": "LINE User ID" },
+        "linePictureUrl": { "type": "string", "description": "LINE Picture URL" },
+        "lineDisplayName": { "type": "string", "description": "LINE Display Name" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "UserId": { "type": "string", "description": "系統使用者 ID (預設為空字串)" }
+      },
+      "required": ["lineUserId", "createdAt", "UserId"]
+    },
     "VersionLog": {
       "title": "VersionLog",
       "description": "系統更新日誌",
@@ -91,7 +104,7 @@
         "assetId": { "type": "string", "description": "所屬素材ID" },
         "title": { "type": "string", "description": "文案標題" },
         "content": { "type": "string", "description": "文案內容" },
-        "status": { "type": "string", "enum": ["draft", "scheduled", "published"], "description": "發布狀態" },
+        "status": { "type": "string", "enum": ["draft", "scheduled", "published", "pending"], "description": "發布狀態" },
         "scheduledAt": { "type": "string", "format": "date-time", "description": "預計發布時間" },
         "type": { "type": "string", "description": "貼文類型 (專業/生活等)" },
         "contentType": { "type": "string", "enum": ["video", "post"], "description": "內容類型 (短影音/圖文)" },
@@ -228,6 +241,10 @@
     "/line_users/{id}": {
       "schema": "LineUser",
       "description": "LINE 使用者資料集合"
+    },
+    "/line_connections/{id}": {
+      "schema": "LineConnection",
+      "description": "LINE 串接管理集合"
     }
   }
 }

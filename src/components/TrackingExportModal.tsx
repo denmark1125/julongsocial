@@ -56,7 +56,11 @@ export default function TrackingExportModal({
 }: TrackingExportModalProps) {
   const [editors, setEditors] = useState<Editor[]>([]);
   const [selectedEditorId, setSelectedEditorId] = useState<string>('all');
-  const [exportMode, setExportMode] = useState<'missing' | 'all'>('missing');
+  const [exportMode, setExportMode] = useState<'missing' | 'all' | 'schedule'>('missing');
+  const [showVideos, setShowVideos] = useState(true);
+  const [showPosts, setShowPosts] = useState(true);
+  const [startDate, setStartDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
+  const [endDate, setEndDate] = useState<string>(format(addDays(new Date(), 7), 'yyyy-MM-dd'));
   const [selectedWeekStart, setSelectedWeekStart] = useState<Date>(
     startOfWeek(addDays(new Date(), 7), { weekStartsOn: 1 }) // Default to next week
   );
@@ -87,7 +91,9 @@ export default function TrackingExportModal({
   if (!isOpen) return null;
 
   const weekEnd = endOfWeek(selectedWeekStart, { weekStartsOn: 1 });
-  const weekDays = Array.from({ length: 7 }, (_, i) => addDays(selectedWeekStart, i));
+  const weekDays = exportMode === 'schedule' 
+    ? Array.from({ length: Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)) + 1 }, (_, i) => addDays(new Date(startDate), i))
+    : Array.from({ length: 7 }, (_, i) => addDays(selectedWeekStart, i));
 
   const trackingData: any[] = [];
 
@@ -106,11 +112,33 @@ export default function TrackingExportModal({
         const hasAsset = post.assetId && post.assetId !== 'to_be_added';
         const isMissingVideo = (post.contentType === 'video' && !hasAsset) || post.status === 'pending';
         
-        if (exportMode === 'all' || isMissingVideo) {
+        // Content type filter
+        if (post.contentType === 'video' && !showVideos) return;
+        if (post.contentType === 'post' && !showPosts) return;
+
+        if (exportMode === 'schedule') {
+          // Schedule mode: Only scheduled posts with assets
+          if (post.status === 'scheduled' && hasAsset) {
+            const key = `${vendor.id}_post_${post.id}_${dateStr}`;
+            trackingData.push({
+              id: key,
+              date: day,
+              scheduledAt: post.scheduledAt,
+              vendorName: vendor.name,
+              type: post.contentType,
+              title: post.title,
+              status: post.status,
+              isMissing: false,
+              isHabit: false,
+              post: post
+            });
+          }
+        } else if (exportMode === 'all' || isMissingVideo) {
           const key = `${vendor.id}_post_${post.id}_${dateStr}`;
           trackingData.push({
             id: key,
             date: day,
+            scheduledAt: post.scheduledAt,
             vendorName: vendor.name,
             type: post.contentType,
             title: post.title,
@@ -122,43 +150,57 @@ export default function TrackingExportModal({
         }
       });
 
-      // 2. Check for unfulfilled habits (Orange items in calendar)
-      const habits = (vendor.postingHabits || []).filter(h => h.daysOfWeek.includes(dayOfWeek));
-      
-      habits.forEach(habit => {
-        const isDismissed = dismissedHabits.some(d => 
-          d.vendorId === vendor.id && 
-          d.habitTime === habit.time && 
-          d.date === dateStr
-        );
+      // 2. Check for unfulfilled habits (Orange items in calendar) - Skip in schedule mode
+      if (exportMode !== 'schedule') {
+        const habits = (vendor.postingHabits || []).filter(h => h.daysOfWeek.includes(dayOfWeek));
+        
+        habits.forEach(habit => {
+          const isDismissed = dismissedHabits.some(d => 
+            d.vendorId === vendor.id && 
+            d.habitTime === habit.time && 
+            d.date === dateStr
+          );
 
-        if (isDismissed) return;
+          if (isDismissed) return;
 
-        const isFulfilled = posts.some(p => 
-          p.vendorId === vendor.id && 
-          (
-            isSameDay(parseISO(p.scheduledAt), day) || 
-            isSameDay(parseISO(p.scheduledAt), subDays(day, 1)) ||
-            isSameDay(parseISO(p.scheduledAt), addDays(day, 1))
-          )
-        );
+          const isFulfilled = posts.some(p => 
+            p.vendorId === vendor.id && 
+            (
+              isSameDay(parseISO(p.scheduledAt), day) || 
+              isSameDay(parseISO(p.scheduledAt), subDays(day, 1)) ||
+              isSameDay(parseISO(p.scheduledAt), addDays(day, 1))
+            )
+          );
 
-        if (!isFulfilled) {
-          const key = `${vendor.id}_habit_${habit.time}_${dateStr}`;
-          trackingData.push({
-            id: key,
-            date: day,
-            vendorName: vendor.name,
-            type: habit.contentTypes[0] || 'video',
-            title: `[提醒] ${habit.time} 預計發片`,
-            status: 'missing',
-            isMissing: true,
-            isHabit: true,
-            habit: habit
-          });
-        }
-      });
+          if (!isFulfilled) {
+            // Content type filter for habits
+            const habitType = habit.contentTypes[0] || 'video';
+            if (habitType === 'video' && !showVideos) return;
+            if (habitType === 'post' && !showPosts) return;
+
+            const key = `${vendor.id}_habit_${habit.time}_${dateStr}`;
+            trackingData.push({
+              id: key,
+              date: day,
+              vendorName: vendor.name,
+              type: habit.contentTypes[0] || 'video',
+              title: `[提醒] ${habit.time} 預計發片`,
+              status: 'missing',
+              isMissing: true,
+              isHabit: true,
+              habit: habit
+            });
+          }
+        });
+      }
     });
+  });
+
+  // Sort by date and time
+  trackingData.sort((a, b) => {
+    const dateA = a.scheduledAt ? parseISO(a.scheduledAt).getTime() : a.date.getTime();
+    const dateB = b.scheduledAt ? parseISO(b.scheduledAt).getTime() : b.date.getTime();
+    return dateA - dateB;
   });
 
   const handleRemarkChange = (id: string, value: string) => {
@@ -244,25 +286,43 @@ export default function TrackingExportModal({
 
           <div className="space-y-2">
             <label className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center">
-              <CalendarIcon className="w-3 h-3 mr-1" /> 追蹤週次
+              <CalendarIcon className="w-3 h-3 mr-1" /> 追蹤時間
             </label>
-            <div className="flex items-center space-x-2">
-              <button 
-                onClick={() => setSelectedWeekStart(subDays(selectedWeekStart, 7))}
-                className="p-3 bg-[#F5F5F0] rounded-2xl hover:bg-gray-200"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <div className="flex-1 p-3 bg-[#F5F5F0] rounded-2xl text-center text-sm font-medium">
-                {format(selectedWeekStart, 'MM/dd')} - {format(weekEnd, 'MM/dd')}
+            {exportMode === 'schedule' ? (
+              <div className="flex items-center space-x-2">
+                <input 
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="flex-1 p-3 bg-[#F5F5F0] rounded-2xl text-sm font-medium border-none focus:ring-2 focus:ring-[#8B7355]"
+                />
+                <span className="text-gray-400">至</span>
+                <input 
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="flex-1 p-3 bg-[#F5F5F0] rounded-2xl text-sm font-medium border-none focus:ring-2 focus:ring-[#8B7355]"
+                />
               </div>
-              <button 
-                onClick={() => setSelectedWeekStart(addDays(selectedWeekStart, 7))}
-                className="p-3 bg-[#F5F5F0] rounded-2xl hover:bg-gray-200"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
+            ) : (
+              <div className="flex items-center space-x-2">
+                <button 
+                  onClick={() => setSelectedWeekStart(subDays(selectedWeekStart, 7))}
+                  className="p-3 bg-[#F5F5F0] rounded-2xl hover:bg-gray-200"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <div className="flex-1 p-3 bg-[#F5F5F0] rounded-2xl text-center text-sm font-medium">
+                  {format(selectedWeekStart, 'MM/dd')} - {format(weekEnd, 'MM/dd')}
+                </div>
+                <button 
+                  onClick={() => setSelectedWeekStart(addDays(selectedWeekStart, 7))}
+                  className="p-3 bg-[#F5F5F0] rounded-2xl hover:bg-gray-200"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -273,21 +333,62 @@ export default function TrackingExportModal({
               <button 
                 onClick={() => setExportMode('missing')}
                 className={clsx(
-                  "flex-1 py-2 rounded-xl text-xs font-bold transition-all",
+                  "flex-1 py-2 rounded-xl text-[10px] font-bold transition-all",
                   exportMode === 'missing' ? "bg-white text-[#8B7355] shadow-sm" : "text-gray-400"
                 )}
               >
-                僅待補影片
+                待補影片
               </button>
               <button 
                 onClick={() => setExportMode('all')}
                 className={clsx(
-                  "flex-1 py-2 rounded-xl text-xs font-bold transition-all",
+                  "flex-1 py-2 rounded-xl text-[10px] font-bold transition-all",
                   exportMode === 'all' ? "bg-white text-[#8B7355] shadow-sm" : "text-gray-400"
                 )}
               >
                 全部排程
               </button>
+              <button 
+                onClick={() => setExportMode('schedule')}
+                className={clsx(
+                  "flex-1 py-2 rounded-xl text-[10px] font-bold transition-all",
+                  exportMode === 'schedule' ? "bg-white text-[#8B7355] shadow-sm" : "text-gray-400"
+                )}
+              >
+                發片清單
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center">
+              <CheckSquare className="w-3 h-3 mr-1" /> 內容篩選
+            </label>
+            <div className="flex space-x-4 bg-[#F5F5F0] p-3 rounded-2xl">
+              <label className="flex items-center space-x-2 cursor-pointer group">
+                <div 
+                  onClick={() => setShowVideos(!showVideos)}
+                  className={clsx(
+                    "w-5 h-5 rounded-lg flex items-center justify-center transition-all",
+                    showVideos ? "bg-[#8B7355] text-white" : "bg-white border border-gray-200"
+                  )}
+                >
+                  {showVideos && <CheckSquare className="w-3.5 h-3.5" />}
+                </div>
+                <span className={clsx("text-xs font-bold", showVideos ? "text-[#5A5A40]" : "text-gray-400")}>影片</span>
+              </label>
+              <label className="flex items-center space-x-2 cursor-pointer group">
+                <div 
+                  onClick={() => setShowPosts(!showPosts)}
+                  className={clsx(
+                    "w-5 h-5 rounded-lg flex items-center justify-center transition-all",
+                    showPosts ? "bg-[#8B7355] text-white" : "bg-white border border-gray-200"
+                  )}
+                >
+                  {showPosts && <CheckSquare className="w-3.5 h-3.5" />}
+                </div>
+                <span className={clsx("text-xs font-bold", showPosts ? "text-[#5A5A40]" : "text-gray-400")}>貼文</span>
+              </label>
             </div>
           </div>
         </div>
@@ -355,14 +456,22 @@ export default function TrackingExportModal({
               <div className="p-12 bg-[#5A5A40] text-white">
                 <div className="flex justify-between items-end">
                   <div>
-                    <h1 className="text-5xl font-black tracking-tighter mb-2">TRACKING LIST</h1>
+                    <h1 className="text-5xl font-black tracking-tighter mb-2">
+                      {exportMode === 'schedule' ? 'SCHEDULE LIST' : 'TRACKING LIST'}
+                    </h1>
                     <p className="text-xl opacity-80 font-medium tracking-wide">
-                      {selectedEditorId === 'all' ? '全部剪輯師' : editors.find(e => e.id === selectedEditorId)?.name} 催片清單
+                      {selectedEditorId !== 'all' && editors.find(e => e.id === selectedEditorId)?.name} 
+                      {exportMode === 'schedule' ? ' 發片排程清單' : ' 催片清單'}
                     </p>
                   </div>
                   <div className="text-right">
                     <p className="text-sm opacity-60 uppercase tracking-widest mb-1">Timeframe</p>
-                    <p className="text-2xl font-bold">{format(selectedWeekStart, 'yyyy/MM/dd')} - {format(weekEnd, 'MM/dd')}</p>
+                    <p className="text-2xl font-bold">
+                      {exportMode === 'schedule' 
+                        ? `${format(parseISO(startDate), 'yyyy/MM/dd')} - ${format(parseISO(endDate), 'yyyy/MM/dd')}`
+                        : `${format(selectedWeekStart, 'yyyy/MM/dd')} - ${format(weekEnd, 'yyyy/MM/dd')}`
+                      }
+                    </p>
                   </div>
                 </div>
               </div>
@@ -373,7 +482,7 @@ export default function TrackingExportModal({
                   <table className="w-full border-collapse">
                     <thead>
                       <tr className="border-b-2 border-[#5A5A40]/20">
-                        <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[100px]">發布日期</th>
+                        <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[120px]">發布日期</th>
                         <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[150px]">廠商 (IP)</th>
                         <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[60px]">類型</th>
                         <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest">內容標題 / 狀態</th>
@@ -387,8 +496,12 @@ export default function TrackingExportModal({
                         item.isMissing ? "bg-orange-50/50" : ""
                       )}>
                         <td className="py-5 align-top">
-                          <div className="text-sm font-bold text-[#5A5A40]">{format(item.date, 'MM/dd')}</div>
-                          <div className="text-[10px] text-gray-400 font-medium uppercase">{format(item.date, 'EEEE', { locale: undefined })}</div>
+                          <div className="text-sm font-bold text-[#5A5A40]">
+                            {item.scheduledAt ? format(parseISO(item.scheduledAt), 'MM/dd HH:mm') : format(item.date, 'MM/dd')}
+                          </div>
+                          <div className="text-[10px] text-gray-400 font-medium uppercase">
+                            {format(item.date, 'EEEE')}
+                          </div>
                         </td>
                         <td className="py-5 align-top">
                           <div className="text-sm font-bold text-[#5A5A40]">{item.vendorName}</div>

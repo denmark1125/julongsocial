@@ -52,6 +52,16 @@ export interface LineUser {
   createdAt: string;
 }
 
+export interface LineConnection {
+  id?: string;
+  lineUserId?: string;
+  linePictureUrl?: string;
+  lineDisplayName?: string;
+  UserId?: string; // Linked system user UID (empty string if not linked)
+  createdAt?: string;
+  [key: string]: any; // Allow other fields like 'timestamp' or 'isBound'
+}
+
 export interface VersionLog {
   id?: string;
   version: string;

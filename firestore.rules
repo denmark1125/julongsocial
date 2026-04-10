@@ -31,6 +31,9 @@ service cloud.firestore {
     //
     // Collection: line_users
     // Fields: lineUserId (string), linePictureUrl (string), lineDisplayName (string), UserId (string), createdAt (string)
+    //
+    // Collection: line_connections
+    // Fields: lineUserId (string), linePictureUrl (string), lineDisplayName (string), UserId (string), createdAt (string)
     // ===============================================================
 
     // ===============================================================
@@ -50,7 +53,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && (
-        getUserData().role == 'engineer' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'engineer') ||
         (request.auth.token.email == "denmark1125@gmail.com" && request.auth.token.email_verified == true) ||
         (request.auth.token.email == "david@forest.system")
       );
@@ -141,8 +144,19 @@ service cloud.firestore {
              (!('UserId' in data) || data.UserId is string);
     }
 
+    function isValidLineConnection(data) {
+      return data.keys().hasAll(['lineUserId', 'UserId']) &&
+             data.lineUserId is string &&
+             data.UserId is string &&
+             (!('linePictureUrl' in data) || data.linePictureUrl is string) &&
+             (!('lineDisplayName' in data) || data.lineDisplayName is string) &&
+             (!('createdAt' in data) || data.createdAt is string) &&
+             (!('timestamp' in data) || data.timestamp is string) &&
+             (!('isBound' in data) || data.isBound is bool);
+    }
+
     match /users/{uid} {
-      allow read: if true; // Allow public read for first-user detection and internal use
+      allow read: if true; 
       allow create: if (isAuthenticated() && request.auth.uid == uid) || isManager() || !exists(/databases/$(database)/documents/users/$(uid)); 
       allow update: if isManager();
       allow delete: if isAdmin();
@@ -204,7 +218,14 @@ service cloud.firestore {
     match /line_users/{id} {
       allow read: if isAuthenticated();
       allow create: if true; // Allow creation from external webhooks (Make.com)
-      allow update: if isManager() && isValidLineUser(request.resource.data);
+      allow update: if isAuthenticated() && (isManager() || isAdmin()) && isValidLineUser(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /line_connections/{id} {
+      allow read: if true;
+      allow create: if true; 
+      allow update: if true;
       allow delete: if isAdmin();
     }
   }

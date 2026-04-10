@@ -6,14 +6,16 @@ import {
   updateDoc, 
   doc, 
   deleteDoc,
-  setDoc
+  setDoc,
+  getDocs
 } from 'firebase/firestore';
 import { initializeApp, getApps, getApp, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { db } from '../firebase';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { UserProfile, UserRole, LineUser } from '../types';
+import { UserProfile, UserRole, LineConnection, FirestoreErrorInfo, OperationType } from '../types';
 import { Shield, User, Trash2, Edit2, X, Plus, Key, Mail, UserPlus, MessageCircle, Link as LinkIcon, Unlink } from 'lucide-react';
+import { auth as firebaseAuth } from '../firebase';
 import toast from 'react-hot-toast';
 import { format, parseISO } from 'date-fns';
 import { clsx, type ClassValue } from 'clsx';
@@ -27,7 +29,7 @@ function cn(...inputs: ClassValue[]) {
 export default function UserManagement({ currentUserRole }: { currentUserRole: UserRole }) {
   const [activeSubTab, setActiveSubTab] = useState<'users' | 'line'>('users');
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [lineUsers, setLineUsers] = useState<LineUser[]>([]);
+  const [lineConnections, setLineConnections] = useState<LineConnection[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newUser, setNewUser] = useState({
     username: '',
@@ -42,14 +44,44 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
   const [isResetting, setIsResetting] = useState(false);
 
   useEffect(() => {
+    const handleFirestoreError = (error: any, operationType: OperationType, path: string | null) => {
+      const errInfo: FirestoreErrorInfo = {
+        error: error instanceof Error ? error.message : String(error),
+        authInfo: {
+          userId: firebaseAuth.currentUser?.uid || '',
+          email: firebaseAuth.currentUser?.email || '',
+          emailVerified: firebaseAuth.currentUser?.emailVerified || false,
+          isAnonymous: firebaseAuth.currentUser?.isAnonymous || false,
+          tenantId: firebaseAuth.currentUser?.tenantId || '',
+          providerInfo: firebaseAuth.currentUser?.providerData.map(provider => ({
+            providerId: provider.providerId,
+            displayName: provider.displayName || '',
+            email: provider.email || '',
+            photoUrl: provider.photoURL || ''
+          })) || []
+        },
+        operationType,
+        path
+      };
+      console.error(`Firestore Error (${operationType}):`, JSON.stringify(errInfo, null, 2));
+      return errInfo;
+    };
+
     const q = query(collection(db, 'users'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setUsers(snapshot.docs.map(doc => doc.data() as UserProfile));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'users');
     });
 
-    const lq = query(collection(db, 'line_users'));
+    const lq = query(collection(db, 'line_connections'));
     const lUnsubscribe = onSnapshot(lq, (snapshot) => {
-      setLineUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LineUser)));
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LineConnection));
+      console.log('LINE Connections data received:', data);
+      setLineConnections(data);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'line_connections');
+      toast.error(`無法讀取 LINE 串接資料 (${error.code || '權限錯誤'})`);
     });
 
     return () => {
@@ -58,16 +90,18 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
     };
   }, []);
 
-  const handleBindLineUser = async (lineUserId: string, systemUid: string) => {
+  const handleBindLineUser = async (connectionId: string, systemUid: string) => {
     try {
-      const lineUser = lineUsers.find(lu => lu.lineUserId === lineUserId);
-      if (!lineUser) return;
+      const connection = lineConnections.find(lc => lc.id === connectionId);
+      if (!connection) return;
 
-      // Update line_users document
-      await updateDoc(doc(db, 'line_users', lineUser.id!), { UserId: systemUid });
+      const lineUid = connection.id || (connection.UserId?.startsWith('U') ? connection.UserId : connection.lineUserId);
+
+      // Update line_connections document
+      await updateDoc(doc(db, 'line_connections', connectionId), { UserId: systemUid });
       
       // Update system user document
-      await updateDoc(doc(db, 'users', systemUid), { lineUserId: lineUserId });
+      await updateDoc(doc(db, 'users', systemUid), { lineUserId: lineUid });
       
       toast.success('綁定成功');
     } catch (error) {
@@ -76,13 +110,9 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
     }
   };
 
-  const handleUnbindLineUser = async (lineUserId: string, systemUid: string) => {
+  const handleUnbindLineUser = async (connectionId: string, systemUid: string) => {
     try {
-      const lineUser = lineUsers.find(lu => lu.lineUserId === lineUserId);
-      if (lineUser && lineUser.id) {
-        await updateDoc(doc(db, 'line_users', lineUser.id), { UserId: '' });
-      }
-      
+      await updateDoc(doc(db, 'line_connections', connectionId), { UserId: '' });
       await updateDoc(doc(db, 'users', systemUid), { lineUserId: '' });
       
       toast.success('已解除綁定');
@@ -273,14 +303,14 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
             </thead>
             <tbody className="divide-y divide-black/5">
               {users.map((user) => {
-                const linkedLineUser = lineUsers.find(lu => lu.lineUserId === user.lineUserId);
+                const linkedConnection = lineConnections.find(lc => lc.lineUserId === user.lineUserId);
                 return (
                   <tr key={user.uid} className="hover:bg-gray-50 transition-colors">
                     <td className="p-4">
                       <div className="flex items-center">
                         <div className="w-8 h-8 bg-[#5A5A40]/10 rounded-full flex items-center justify-center text-[#5A5A40] mr-3 overflow-hidden">
-                          {linkedLineUser?.linePictureUrl ? (
-                            <img src={linkedLineUser.linePictureUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          {linkedConnection?.linePictureUrl ? (
+                            <img src={linkedConnection.linePictureUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                           ) : (
                             <User size={16} />
                           )}
@@ -358,21 +388,29 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                 </tr>
               </thead>
               <tbody className="divide-y divide-black/5">
-                {lineUsers.length === 0 ? (
+                {lineConnections.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="p-12 text-center text-gray-400 italic">
                       目前尚無 LINE 使用者資料
                     </td>
                   </tr>
                 ) : (
-                  lineUsers.map((lineUser) => {
-                    const linkedUser = users.find(u => u.uid === lineUser.UserId);
+                  lineConnections.map((connection) => {
+                    // Flexible field mapping based on screenshot
+                    const lineUid = connection.id || (connection.UserId?.startsWith('U') ? connection.UserId : connection.lineUserId);
+                    const displayName = connection.lineDisplayName || (connection.lineUserId?.startsWith('U') ? '未知名稱' : connection.lineUserId) || '未知名稱';
+                    const createdAt = connection.createdAt || (connection as any).timestamp;
+                    
+                    // Check if UserId is a system UID (not a LINE UID starting with U)
+                    const isSystemUid = connection.UserId && !connection.UserId.startsWith('U');
+                    const linkedUser = isSystemUid ? users.find(u => u.uid === connection.UserId) : null;
+                    
                     return (
-                      <tr key={lineUser.id} className="hover:bg-gray-50 transition-colors">
+                      <tr key={connection.id} className="hover:bg-gray-50 transition-colors">
                         <td className="p-4">
                           <div className="w-12 h-12 rounded-2xl overflow-hidden bg-gray-100 border border-black/5 shadow-sm">
-                            {lineUser.linePictureUrl ? (
-                              <img src={lineUser.linePictureUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            {connection.linePictureUrl ? (
+                              <img src={connection.linePictureUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                             ) : (
                               <div className="w-full h-full flex items-center justify-center text-gray-300">
                                 <User size={24} />
@@ -380,10 +418,14 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                             )}
                           </div>
                         </td>
-                        <td className="p-4 font-bold text-[#5A5A40]">{lineUser.lineDisplayName || '未知名稱'}</td>
-                        <td className="p-4 text-xs text-gray-400 font-mono">{lineUser.lineUserId}</td>
+                        <td className="p-4 font-bold text-[#5A5A40]">{displayName}</td>
+                        <td className="p-4 text-xs text-gray-400 font-mono">{lineUid}</td>
                         <td className="p-4 text-xs text-gray-500">
-                          {lineUser.createdAt ? format(parseISO(lineUser.createdAt), 'yyyy/MM/dd HH:mm') : '-'}
+                          {createdAt ? (
+                            typeof createdAt === 'string' && createdAt.includes('年') 
+                              ? createdAt // Display as is if it's the custom format from screenshot
+                              : format(parseISO(createdAt), 'yyyy/MM/dd HH:mm')
+                          ) : '-'}
                         </td>
                         <td className="p-4">
                           {linkedUser ? (
@@ -401,7 +443,7 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                         <td className="p-4">
                           {linkedUser ? (
                             <button 
-                              onClick={() => handleUnbindLineUser(lineUser.lineUserId, linkedUser.uid)}
+                              onClick={() => handleUnbindLineUser(connection.id!, linkedUser.uid)}
                               className="flex items-center space-x-1 text-red-500 hover:text-red-700 text-xs font-bold transition-colors"
                             >
                               <Unlink size={14} />
@@ -413,7 +455,7 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                                 className="bg-[#F5F5F0] border-none rounded-lg text-xs font-bold px-3 py-1.5 outline-none focus:ring-2 focus:ring-[#5A5A40] min-w-[120px]"
                                 onChange={(e) => {
                                   if (e.target.value) {
-                                    handleBindLineUser(lineUser.lineUserId, e.target.value);
+                                    handleBindLineUser(connection.id!, e.target.value);
                                   }
                                 }}
                                 defaultValue=""

@@ -7,7 +7,7 @@ import {
   createUserWithEmailAndPassword,
   User
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, getDocs, query, limit } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs, query, limit, getDocFromServer } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
@@ -34,6 +34,21 @@ export default function App() {
   const [password, setPassword] = useState('');
 
   useEffect(() => {
+    // Connection test as per instructions
+    async function testConnection() {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+        console.log("Firestore connection test successful.");
+      } catch (error) {
+        if(error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration. The client is offline.");
+          toast.error("Firebase 連線失敗，請檢查網路或設定。");
+        }
+        // Skip logging for other errors, as this is simply a connection test.
+      }
+    }
+    testConnection();
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
