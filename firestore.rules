@@ -2,8 +2,211 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if true;
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields: uid (string), email (string), role (string: engineer|manager|employee), displayName (string)
+    //
+    // Collection: vendors
+    // Fields: name (string), socialAccounts (list), postingHabits (list), cooperationItems (list), createdBy (string), createdAt (timestamp)
+    //
+    // Collection: posts
+    // Fields: vendorId (string), assetId (string), title (string), content (string), status (string: draft|scheduled|published), 
+    //         scheduledAt (string/timestamp), type (string), contentType (string: video|post), 
+    //         clientConfirmed (bool), internalConfirmed (bool), platforms (list), createdBy (string)
+    //
+    // Collection: assets
+    // Fields: vendorId (string), title (string), url (string), type (string: video|post), category (string), status (string: available|used), 
+    //         usedInPostId (string), createdAt (string), createdBy (string)
+    //
+    // Collection: dismissedHabits
+    // Fields: vendorId (string), habitTime (string), date (string: YYYY-MM-DD), createdAt (timestamp)
+    //
+    // Collection: billingContracts
+    // Fields: vendorId (string), services (list), billingDay (int), totalAmount (int), status (string: active|paused|ended)
+    //
+    // Collection: billingRecords
+    // Fields: vendorId (string), contractId (string), billingMonth (string: YYYY-MM), dueDate (string: YYYY-MM-DD), amount (int), status (string: pending|paid|overdue)
+    //
+    // Collection: line_users
+    // Fields: lineUserId (string), linePictureUrl (string), lineDisplayName (string), UserId (string), createdAt (string)
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        getUserData().role == 'engineer' ||
+        (request.auth.token.email == "denmark1125@gmail.com" && request.auth.token.email_verified == true) ||
+        (request.auth.token.email == "david@forest.system")
+      );
+    }
+
+    function isManager() {
+      return isAuthenticated() && (getUserData().role == 'manager' || isAdmin());
+    }
+
+    function isValidString(val, maxLen) {
+      return val is string && val.size() > 0 && val.size() <= maxLen;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    
+    function isValidVendor(data) {
+      return data.keys().hasAll(['name', 'createdBy']) &&
+             isValidString(data.name, 100) &&
+             data.createdBy is string &&
+             (!('cooperationItems' in data) || data.cooperationItems is list) &&
+             (!('monthlyTargetPosts' in data) || data.monthlyTargetPosts is int) &&
+             (!('monthlyTargetVideos' in data) || data.monthlyTargetVideos is int) &&
+             (!('editorId' in data) || data.editorId is string) &&
+             (!('editorName' in data) || data.editorName is string);
+    }
+
+    function isValidPost(data) {
+      return data.keys().hasAll(['vendorId', 'title', 'status', 'createdBy']) &&
+             data.vendorId is string &&
+             isValidString(data.title, 200) &&
+             data.status in ['draft', 'scheduled', 'published', 'pending'] &&
+             data.createdBy is string &&
+             (!('assetId' in data) || data.assetId is string) &&
+             (!('content' in data) || data.content is string) &&
+             (!('clientConfirmed' in data) || data.clientConfirmed is bool) &&
+             (!('internalConfirmed' in data) || data.internalConfirmed is bool);
+    }
+
+    function isValidAsset(data) {
+      return data.keys().hasAll(['vendorId', 'title', 'type', 'status', 'approved', 'createdBy', 'stage', 'createdAt']) &&
+             data.vendorId is string &&
+             isValidString(data.title, 200) &&
+             data.type in ['video', 'post'] &&
+             data.status in ['available', 'used', 'archived'] &&
+             data.stage in ['raw', 'finished'] &&
+             data.approved is bool &&
+             data.createdBy is string &&
+             data.createdAt is string &&
+             (!('url' in data) || data.url is string) &&
+             (!('category' in data) || data.category is string) &&
+             (!('editorId' in data) || data.editorId is string);
+    }
+
+    function isValidDismissedHabit(data) {
+      return data.keys().hasAll(['vendorId', 'habitTime', 'date']) &&
+             data.vendorId is string &&
+             data.habitTime is string &&
+             data.date is string;
+    }
+
+    function isValidBillingContract(data) {
+      return data.keys().hasAll(['vendorId', 'services', 'billingDay', 'totalAmount', 'status']) &&
+             data.vendorId is string &&
+             data.services is list &&
+             data.billingDay is int && data.billingDay >= 1 && data.billingDay <= 31 &&
+             data.totalAmount is int &&
+             data.status in ['active', 'paused', 'ended'];
+    }
+
+    function isValidBillingRecord(data) {
+      return data.keys().hasAll(['vendorId', 'contractId', 'billingMonth', 'dueDate', 'amount', 'status']) &&
+             data.vendorId is string &&
+             data.contractId is string &&
+             data.billingMonth is string &&
+             data.dueDate is string &&
+             data.amount is int &&
+             data.status in ['pending', 'paid', 'overdue'];
+    }
+
+    function isValidLineUser(data) {
+      return data.keys().hasAll(['lineUserId', 'createdAt']) &&
+             data.lineUserId is string &&
+             data.createdAt is string &&
+             (!('linePictureUrl' in data) || data.linePictureUrl is string) &&
+             (!('lineDisplayName' in data) || data.lineDisplayName is string) &&
+             (!('UserId' in data) || data.UserId is string);
+    }
+
+    match /users/{uid} {
+      allow read: if true; // Allow public read for first-user detection and internal use
+      allow create: if (isAuthenticated() && request.auth.uid == uid) || isManager() || !exists(/databases/$(database)/documents/users/$(uid)); 
+      allow update: if isManager();
+      allow delete: if isAdmin();
+    }
+
+    match /version_logs/{logId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /vendors/{vendorId} {
+      allow read: if isAuthenticated();
+      allow create: if isManager() && isValidVendor(request.resource.data);
+      allow update: if isManager() && isValidVendor(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /posts/{postId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidPost(request.resource.data);
+      allow update: if isAuthenticated() && isValidPost(request.resource.data);
+      allow delete: if isManager();
+    }
+
+    match /assets/{assetId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidAsset(request.resource.data);
+      allow update: if isAuthenticated() && isValidAsset(request.resource.data);
+      allow delete: if isManager();
+    }
+
+    match /editors/{editorId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isManager();
+    }
+
+    match /dismissedHabits/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidDismissedHabit(request.resource.data);
+      allow delete: if isManager();
+    }
+
+    match /billingContracts/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isManager() && isValidBillingContract(request.resource.data);
+      allow update: if isManager() && isValidBillingContract(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /billingRecords/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isManager() && isValidBillingRecord(request.resource.data);
+      allow update: if isManager() && isValidBillingRecord(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /line_users/{id} {
+      allow read: if isAuthenticated();
+      allow create: if true; // Allow creation from external webhooks (Make.com)
+      allow update: if isManager() && isValidLineUser(request.resource.data);
+      allow delete: if isAdmin();
     }
   }
 }
