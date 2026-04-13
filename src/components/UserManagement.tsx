@@ -422,11 +422,21 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                         <td className="p-4 font-bold text-[#5A5A40]">{displayName}</td>
                         <td className="p-4 text-xs text-gray-400 font-mono">{lineUid}</td>
                         <td className="p-4 text-xs text-gray-500">
-                          {createdAt ? (
-                            typeof createdAt === 'string' && createdAt.includes('年') 
-                              ? createdAt // Display as is if it's the custom format from screenshot
-                              : format(parseISO(createdAt), 'yyyy/MM/dd HH:mm')
-                          ) : '-'}
+                          {createdAt ? (() => {
+                            try {
+                              // Handle Firestore Timestamp object
+                              if (typeof createdAt === 'object' && createdAt !== null && 'toDate' in createdAt) {
+                                return format((createdAt as any).toDate(), 'yyyy/MM/dd HH:mm');
+                              }
+                              // Handle plain string
+                              if (typeof createdAt === 'string') {
+                                return format(parseISO(createdAt), 'yyyy/MM/dd HH:mm');
+                              }
+                              return '-';
+                            } catch {
+                              return '-';
+                            }
+                          })() : '-'}
                         </td>
                         <td className="p-4">
                           {linkedUser ? (
