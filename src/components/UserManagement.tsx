@@ -44,6 +44,7 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
   const [isResetting, setIsResetting] = useState(false);
 
   useEffect(() => {
+    console.log('Current Project ID:', db.app.options.projectId);
     const handleFirestoreError = (error: any, operationType: OperationType, path: string | null) => {
       const errInfo: FirestoreErrorInfo = {
         error: error instanceof Error ? error.message : String(error),

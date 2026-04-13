@@ -122,6 +122,7 @@ export interface Post {
   clientConfirmed: boolean;
   internalConfirmed: boolean;
   platforms: string[];
+  publishedPlatforms?: string[]; // Platforms already published
   createdBy: string;
   createdAt: string;
 }
@@ -170,5 +171,13 @@ export interface FirestoreErrorInfo {
     userId?: string;
     email?: string;
     emailVerified?: boolean;
+    isAnonymous?: boolean;
+    tenantId?: string;
+    providerInfo?: {
+      providerId: string;
+      displayName: string;
+      email: string;
+      photoUrl: string;
+    }[];
   };
 }

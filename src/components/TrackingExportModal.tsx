@@ -117,8 +117,8 @@ export default function TrackingExportModal({
         if (post.contentType === 'post' && !showPosts) return;
 
         if (exportMode === 'schedule') {
-          // Schedule mode: Only scheduled posts with assets
-          if (post.status === 'scheduled' && hasAsset) {
+          // Schedule mode: Include everything EXCEPT pending (orange) items
+          if (post.status !== 'pending') {
             const key = `${vendor.id}_post_${post.id}_${dateStr}`;
             trackingData.push({
               id: key,
@@ -446,12 +446,12 @@ export default function TrackingExportModal({
         </div>
 
         {/* Preview Area */}
-        <div className="flex-1 overflow-auto p-4 sm:p-8 bg-gray-50 custom-scrollbar">
+        <div className="flex-1 overflow-auto p-0 bg-gray-100 custom-scrollbar">
           <div 
             ref={exportRef} 
-            className="bg-[#F5F5F0] p-12 flex justify-center min-w-max"
+            className="bg-[#F5F5F0] flex justify-center w-full"
           >
-            <div className="bg-[#F5F5F0] rounded-[40px] shadow-2xl border border-black/5 overflow-hidden w-[760px]">
+            <div className="bg-[#F5F5F0] shadow-none border-none overflow-hidden w-full max-w-[800px]">
               {/* JPG Header */}
               <div className="p-12 bg-[#5A5A40] text-white">
                 <div className="flex justify-between items-end">

@@ -231,6 +231,16 @@ export default function PostManagement() {
         }
       }
     }
+
+    if (newStatus === 'scheduled') {
+      // Warning if asset not approved, but don't block
+      if (post.assetId && post.assetId !== 'to_be_added') {
+        const asset = assets.find(a => a.id === post.assetId);
+        if (asset && !asset.approved) {
+          toast('提醒：成片素材尚未審核', { icon: '⚠️', duration: 4000 });
+        }
+      }
+    }
     
     try {
       await updateDoc(doc(db, 'posts', post.id!), { status: newStatus });
@@ -281,6 +291,20 @@ export default function PostManagement() {
   const toggleConfirmation = async (post: Post, field: 'clientConfirmed' | 'internalConfirmed') => {
     try {
       await updateDoc(doc(db, 'posts', post.id!), { [field]: !post[field] });
+    } catch (error) {
+      toast.error('更新失敗');
+    }
+  };
+
+  const togglePlatformPublished = async (post: Post, platform: string) => {
+    try {
+      const current = post.publishedPlatforms || [];
+      const updated = current.includes(platform)
+        ? current.filter(p => p !== platform)
+        : [...current, platform];
+      
+      await updateDoc(doc(db, 'posts', post.id!), { publishedPlatforms: updated });
+      toast.success(`${platform} 發布狀態已更新`);
     } catch (error) {
       toast.error('更新失敗');
     }
@@ -677,12 +701,28 @@ export default function PostManagement() {
                 return (
                   <tr key={post.id} className="hover:bg-gray-50 transition-colors">
                     <td className="p-4">
-                      <div className="flex flex-wrap gap-1">
-                        {post.platforms.map(p => (
-                          <span key={p} className="bg-gray-200 text-[10px] px-1.5 py-0.5 rounded font-bold">{p}</span>
-                        ))}
+                      <div className="flex flex-wrap gap-1 mb-1">
+                        {post.platforms.map(p => {
+                          const isPublished = post.publishedPlatforms?.includes(p);
+                          return (
+                            <button
+                              key={p}
+                              onClick={() => togglePlatformPublished(post, p)}
+                              className={cn(
+                                "text-[10px] px-1.5 py-0.5 rounded font-bold transition-all flex items-center gap-1",
+                                isPublished 
+                                  ? "bg-green-100 text-green-700 border border-green-200" 
+                                  : "bg-gray-100 text-gray-400 border border-gray-200 hover:border-gray-400"
+                              )}
+                              title={isPublished ? `已在 ${p} 發布` : `標記 ${p} 為已發布`}
+                            >
+                              {isPublished && <CheckCircle2 size={8} />}
+                              {p}
+                            </button>
+                          );
+                        })}
                       </div>
-                      <div className="text-xs text-gray-400 mt-1 truncate max-w-[100px]">{vendor?.name}</div>
+                      <div className="text-xs text-gray-400 truncate max-w-[100px]">{vendor?.name}</div>
                     </td>
                     <td className="p-4">
                       <span className={cn(
