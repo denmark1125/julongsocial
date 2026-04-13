@@ -24,8 +24,8 @@ function initializeFirebaseAdmin() {
       });
     }
     adminAuth = admin.auth();
-    adminDb = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
-    console.log("Using Firestore database:", firebaseConfig.firestoreDatabaseId);
+    adminDb = getFirestore(admin.app()); // 使用 (default) 資料庫
+    console.log("Using Firestore default database.");
   } catch (e) {
     console.error("Firebase Admin Initialization Error:", e);
   }
@@ -53,7 +53,7 @@ app.get("/api/debug", (req, res) => {
     nodeEnv: process.env.NODE_ENV,
     port: PORT,
     firebaseProjectId: firebaseConfig.projectId,
-    firebaseDatabaseId: firebaseConfig.firestoreDatabaseId,
+    firestoreDatabase: "(default)",
     appsInitialized: admin.apps.length
   });
 });
