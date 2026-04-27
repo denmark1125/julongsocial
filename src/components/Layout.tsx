@@ -129,7 +129,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
           if (isDismissed) return;
 
           const isFulfilled = posts.some(p => 
-            p.vendorId === vendor.id && 
+            p.vendorId === vendor.id && p.scheduledAt &&
             (isSameDay(parseISO(p.scheduledAt), checkDate) || isSameDay(parseISO(p.scheduledAt), subDays(checkDate, 1)) || isSameDay(parseISO(p.scheduledAt), addDays(checkDate, 1)))
           );
           

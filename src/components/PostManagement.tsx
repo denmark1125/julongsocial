@@ -319,7 +319,7 @@ export default function PostManagement() {
         '貼文標題': post.title,
         '內容類型': post.contentType === 'video' ? '短影音' : '圖文',
         '發布狀態': post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : '草稿',
-        '預計發布時間': format(parseISO(post.scheduledAt), 'yyyy-MM-dd HH:mm'),
+        '預計發布時間': post.scheduledAt ? format(parseISO(post.scheduledAt), 'yyyy-MM-dd HH:mm') : '-',
         '發布平台': post.platforms.join(', '),
         '業主審核': post.clientConfirmed ? '已確認' : '待確認',
         '內部檢核': post.internalConfirmed ? '已檢核' : '待檢核',
@@ -340,7 +340,7 @@ export default function PostManagement() {
       vendors.find(v => v.id === post.vendorId)?.name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesVendor = selectedVendorId === 'all' || post.vendorId === selectedVendorId;
     const matchesStatus = selectedStatus === 'all' || post.status === selectedStatus;
-    const matchesMonth = (post.targetMonth || format(parseISO(post.scheduledAt), 'yyyy-MM')) === selectedMonth;
+    const matchesMonth = (post.targetMonth || (post.scheduledAt ? format(parseISO(post.scheduledAt), 'yyyy-MM') : null)) === selectedMonth;
     return matchesSearch && matchesVendor && matchesStatus && matchesMonth;
   });
 
@@ -391,16 +391,18 @@ export default function PostManagement() {
       case 'published': return <span onClick={onClick} className={cn(baseClasses, "bg-green-100 text-green-700 border-green-200")}><CheckCircle2 size={12} className="mr-1" /> 已發布 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
       case 'scheduled': return <span onClick={onClick} className={cn(baseClasses, "bg-blue-100 text-blue-700 border-blue-200")}><Clock size={12} className="mr-1" /> 已排程 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
       case 'pending': return <span onClick={onClick} className={cn(baseClasses, "bg-orange-100 text-orange-700 border-orange-200")}><BellRing size={12} className="mr-1" /> 待補中 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
+      case 'recognized': return <span onClick={onClick} className={cn(baseClasses, "bg-purple-100 text-purple-700 border-purple-200")}><CheckCircle2 size={12} className="mr-1" /> 已認列 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
       case 'draft': return <span onClick={onClick} className={cn(baseClasses, "bg-gray-100 text-gray-700 border-gray-200")}><FileEdit size={12} className="mr-1" /> 草稿 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
     }
   };
 
   // Statistics calculation
   const vendorStats = vendors.map(vendor => {
-    const vendorMonthPosts = posts.filter(p => 
-      p.vendorId === vendor.id && 
-      (p.targetMonth || format(parseISO(p.scheduledAt), 'yyyy-MM')) === selectedMonth
-    );
+    const vendorMonthPosts = posts.filter(p => {
+      if (p.vendorId !== vendor.id) return false;
+      const month = p.targetMonth || (p.scheduledAt ? format(parseISO(p.scheduledAt), 'yyyy-MM') : null);
+      return month === selectedMonth;
+    });
     
     const postCount = vendorMonthPosts.filter(p => p.contentType === 'post').length;
     const videoCount = vendorMonthPosts.filter(p => p.contentType === 'video').length;
@@ -581,9 +583,10 @@ export default function PostManagement() {
         {[
           { id: 'all', label: '全部狀態' },
           { id: 'draft', label: '草稿' },
-          { id: 'pending', label: '待補中' },
           { id: 'scheduled', label: '已排程' },
-          { id: 'published', label: '已發布' }
+          { id: 'published', label: '已發布' },
+          { id: 'recognized', label: '已認列' },
+          { id: 'pending', label: '待補中' }
         ].map(status => (
           <button
             key={status.id}
@@ -598,13 +601,14 @@ export default function PostManagement() {
             {status.id === 'draft' && <FileEdit size={12} className="mr-1.5" />}
             {status.id === 'scheduled' && <Clock size={12} className="mr-1.5" />}
             {status.id === 'published' && <CheckCircle2 size={12} className="mr-1.5" />}
+            {status.id === 'recognized' && <CheckCircle2 size={12} className="mr-1.5" />}
             {status.label}
             <span className="ml-1.5 opacity-50 text-[10px]">
               ({posts.filter(p => {
                 const matchesSearch = p.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                   vendors.find(v => v.id === p.vendorId)?.name.toLowerCase().includes(searchTerm.toLowerCase());
                 const matchesVendor = selectedVendorId === 'all' || p.vendorId === selectedVendorId;
-                const matchesMonth = (p.targetMonth || format(parseISO(p.scheduledAt), 'yyyy-MM')) === selectedMonth;
+                const matchesMonth = (p.targetMonth || (p.scheduledAt ? format(parseISO(p.scheduledAt), 'yyyy-MM') : null)) === selectedMonth;
                 const matchesStatus = status.id === 'all' || p.status === status.id;
                 return matchesSearch && matchesVendor && matchesMonth && matchesStatus;
               }).length})
@@ -695,34 +699,45 @@ export default function PostManagement() {
               </tr>
             </thead>
             <tbody className="divide-y divide-black/5">
-              {sortedPosts.map((post) => {
+              {sortedPosts.map((post, index) => {
                 const vendor = vendors.find(v => v.id === post.vendorId);
+                const isNearBottom = index >= sortedPosts.length - 3 && sortedPosts.length > 3;
                 
                 return (
                   <tr key={post.id} className="hover:bg-gray-50 transition-colors">
                     <td className="p-4">
-                      <div className="flex flex-wrap gap-1 mb-1">
-                        {post.platforms.map(p => {
-                          const isPublished = post.publishedPlatforms?.includes(p);
-                          return (
-                            <button
-                              key={p}
-                              onClick={() => togglePlatformPublished(post, p)}
-                              className={cn(
-                                "text-[10px] px-1.5 py-0.5 rounded font-bold transition-all flex items-center gap-1",
-                                isPublished 
-                                  ? "bg-green-100 text-green-700 border border-green-200" 
-                                  : "bg-gray-100 text-gray-400 border border-gray-200 hover:border-gray-400"
-                              )}
-                              title={isPublished ? `已在 ${p} 發布` : `標記 ${p} 為已發布`}
-                            >
-                              {isPublished && <CheckCircle2 size={8} />}
-                              {p}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <div className="text-xs text-gray-400 truncate max-w-[100px]">{vendor?.name}</div>
+                      {vendor?.selfPublishing ? (
+                        <div className="flex flex-col gap-1">
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 font-bold w-fit">廠商自行發布專案</span>
+                          <span className="text-[9px] text-gray-400">認列：{post.platforms.join(', ')}</span>
+                          <div className="text-xs text-gray-400 truncate max-w-[100px]">{vendor?.name}</div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex flex-wrap gap-1 mb-1">
+                            {post.platforms.map(p => {
+                              const isPublished = post.publishedPlatforms?.includes(p);
+                              return (
+                                <button
+                                  key={p}
+                                  onClick={() => togglePlatformPublished(post, p)}
+                                  className={cn(
+                                    "text-[10px] px-1.5 py-0.5 rounded font-bold transition-all flex items-center gap-1",
+                                    isPublished 
+                                      ? "bg-green-100 text-green-700 border border-green-200" 
+                                      : "bg-gray-100 text-gray-400 border border-gray-200 hover:border-gray-400"
+                                  )}
+                                  title={isPublished ? `已在 ${p} 發布` : `標記 ${p} 為已發布`}
+                                >
+                                  {isPublished && <CheckCircle2 size={8} />}
+                                  {p}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div className="text-xs text-gray-400 truncate max-w-[100px]">{vendor?.name}</div>
+                        </>
+                      )}
                     </td>
                     <td className="p-4">
                       <span className={cn(
@@ -738,9 +753,14 @@ export default function PostManagement() {
                         {openStatusId === post.id && (
                           <>
                             <div className="fixed inset-0 z-10" onClick={() => setOpenStatusId(null)} />
-                            <div className="absolute top-full left-0 mt-1 bg-white shadow-2xl rounded-2xl border border-black/5 py-2 z-20 min-w-[120px] animate-in fade-in slide-in-from-top-2 duration-200">
+                            <div className={cn(
+                              "absolute left-0 bg-white shadow-2xl rounded-2xl border border-black/5 py-2 z-20 min-w-[120px] animate-in fade-in duration-200",
+                              isNearBottom 
+                                ? "bottom-full mb-1 slide-in-from-bottom-2" 
+                                : "top-full mt-1 slide-in-from-top-2"
+                            )}>
                               <div className="px-3 py-1 text-[9px] font-bold text-gray-400 uppercase tracking-widest border-b border-black/5 mb-1">變更狀態</div>
-                              {(['draft', 'pending', 'scheduled', 'published'] as PostStatus[]).map(s => (
+                              {(['draft', 'scheduled', 'published', 'recognized', 'pending'] as PostStatus[]).map(s => (
                                 <button 
                                   key={s}
                                   onClick={() => {
@@ -752,7 +772,7 @@ export default function PostManagement() {
                                     post.status === s ? "font-bold text-[#5A5A40] bg-[#F5F5F0]" : "text-gray-600"
                                   )}
                                 >
-                                  {s === 'draft' ? '草稿' : s === 'pending' ? '待補中' : s === 'scheduled' ? '已排程' : '已發布'}
+                                  {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : s === 'published' ? '已發布' : s === 'recognized' ? '已認列' : '待補中'}
                                 </button>
                               ))}
                             </div>
@@ -761,8 +781,8 @@ export default function PostManagement() {
                       </div>
                     </td>
                     <td className="p-4">
-                      <div className="text-sm font-medium">{format(parseISO(post.scheduledAt), 'MM/dd')}</div>
-                      <div className="text-xs text-gray-400">{format(parseISO(post.scheduledAt), 'HH:mm')}</div>
+                      <div className="text-sm font-medium">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'MM/dd') : '-'}</div>
+                      <div className="text-xs text-gray-400">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'HH:mm') : '-'}</div>
                     </td>
                     <td className="p-4">
                       {post.postUrl ? (
@@ -833,8 +853,10 @@ export default function PostManagement() {
           {sortedPosts.length === 0 ? (
             <div className="p-8 text-center text-gray-400 italic">本月尚無貼文</div>
           ) : (
-            sortedPosts.map((post) => {
+            sortedPosts.map((post, index) => {
               const vendor = vendors.find(v => v.id === post.vendorId);
+              const isNearTop = index < 2 && sortedPosts.length > 2;
+
               return (
                 <div key={post.id} className="p-4 space-y-3">
                   <div className="flex justify-between items-start">
@@ -880,16 +902,21 @@ export default function PostManagement() {
                     <div className="flex items-center space-x-3">
                       <div className="flex items-center text-gray-500">
                         <CalendarIcon size={12} className="mr-1" />
-                        {format(parseISO(post.scheduledAt), 'MM/dd HH:mm')}
+                        {post.scheduledAt ? format(parseISO(post.scheduledAt), 'MM/dd HH:mm') : '-'}
                       </div>
                       <div className="relative">
                         {getStatusBadge(post.status, () => setOpenStatusId(openStatusId === post.id ? null : post.id!))}
                         {openStatusId === post.id && (
                           <>
                             <div className="fixed inset-0 z-10" onClick={() => setOpenStatusId(null)} />
-                            <div className="absolute bottom-full left-0 mb-1 bg-white shadow-2xl rounded-2xl border border-black/5 py-2 z-20 min-w-[120px] animate-in fade-in slide-in-from-bottom-2 duration-200">
+                            <div className={cn(
+                              "absolute left-0 bg-white shadow-2xl rounded-2xl border border-black/5 py-2 z-20 min-w-[120px] animate-in fade-in duration-200",
+                              isNearTop
+                                ? "top-full mt-1 slide-in-from-top-2"
+                                : "bottom-full mb-1 slide-in-from-bottom-2"
+                            )}>
                               <div className="px-3 py-1 text-[9px] font-bold text-gray-400 uppercase tracking-widest border-b border-black/5 mb-1">變更狀態</div>
-                              {(['draft', 'pending', 'scheduled', 'published'] as PostStatus[]).map(s => (
+                              {(['draft', 'scheduled', 'published', 'recognized', 'pending'] as PostStatus[]).map(s => (
                                 <button 
                                   key={s}
                                   onClick={() => {
@@ -901,7 +928,7 @@ export default function PostManagement() {
                                     post.status === s ? "font-bold text-[#5A5A40] bg-[#F5F5F0]" : "text-gray-600"
                                   )}
                                 >
-                                  {s === 'draft' ? '草稿' : s === 'pending' ? '待補中' : s === 'scheduled' ? '已排程' : '已發布'}
+                                  {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : s === 'published' ? '已發布' : s === 'recognized' ? '已認列' : '待補中'}
                                 </button>
                               ))}
                             </div>
@@ -1079,8 +1106,8 @@ export default function PostManagement() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">發布狀態</label>
-                    <div className="flex gap-2">
-                      {(['draft', 'pending', 'scheduled', 'published'] as PostStatus[]).map(s => (
+                    <div className="flex flex-wrap gap-2">
+                      {(['draft', 'scheduled', 'published', 'recognized', 'pending'] as PostStatus[]).map(s => (
                         <button
                           key={s}
                           type="button"
@@ -1092,7 +1119,7 @@ export default function PostManagement() {
                               : "bg-gray-50 text-gray-400 border-black/5 hover:border-gray-200"
                           )}
                         >
-                          {s === 'draft' ? '草稿' : s === 'pending' ? '待補中' : s === 'scheduled' ? '已排程' : '已發布'}
+                          {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : s === 'published' ? '已發布' : s === 'recognized' ? '已認列' : '待補中'}
                         </button>
                       ))}
                     </div>
@@ -1235,26 +1262,53 @@ export default function PostManagement() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">發布平台</label>
-                    <div className="flex flex-wrap gap-2">
-                      {['IG', 'FB', 'TikTok', 'YT', 'LINE'].map(p => (
-                        <button
-                          key={p}
-                          type="button"
-                          onClick={() => {
-                            const newPlatforms = formData.platforms?.includes(p)
-                              ? formData.platforms.filter(x => x !== p)
-                              : [...(formData.platforms || []), p];
-                            setFormData({ ...formData, platforms: newPlatforms });
-                          }}
-                          className={cn(
-                            "px-3 py-1 rounded-full text-xs font-bold transition-all",
-                            formData.platforms?.includes(p) ? "bg-[#5A5A40] text-white" : "bg-gray-100 text-gray-400"
-                          )}
-                        >
-                          {p}
-                        </button>
-                      ))}
-                    </div>
+                    {vendors.find(v => v.id === formData.vendorId)?.selfPublishing ? (
+                      <div className="bg-green-50 p-4 rounded-2xl border border-green-100 mb-2">
+                        <p className="text-xs text-green-800 font-bold mb-1">✓ 廠商自行發布模式</p>
+                        <p className="text-[10px] text-green-600/70">此廠商設定為自行發布。系統將僅記錄用於服務次數認列。您仍可選取預計認列的平台：</p>
+                        <div className="flex flex-wrap gap-2 mt-3">
+                          {['IG', 'FB', 'TikTok', 'YT', 'LINE'].map(p => (
+                            <button
+                              key={p}
+                              type="button"
+                              onClick={() => {
+                                const newPlatforms = formData.platforms?.includes(p)
+                                  ? formData.platforms.filter(x => x !== p)
+                                  : [...(formData.platforms || []), p];
+                                setFormData({ ...formData, platforms: newPlatforms });
+                              }}
+                              className={cn(
+                                "px-3 py-1 rounded-full text-xs font-bold transition-all",
+                                formData.platforms?.includes(p) ? "bg-green-600 text-white" : "bg-white text-green-300 border border-green-100"
+                              )}
+                            >
+                              {p}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {['IG', 'FB', 'TikTok', 'YT', 'LINE'].map(p => (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => {
+                              const newPlatforms = formData.platforms?.includes(p)
+                                  ? formData.platforms.filter(x => x !== p)
+                                  : [...(formData.platforms || []), p];
+                              setFormData({ ...formData, platforms: newPlatforms });
+                            }}
+                            className={cn(
+                              "px-3 py-1 rounded-full text-xs font-bold transition-all",
+                              formData.platforms?.includes(p) ? "bg-[#5A5A40] text-white" : "bg-gray-100 text-gray-400"
+                            )}
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 

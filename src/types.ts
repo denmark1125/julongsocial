@@ -101,11 +101,12 @@ export interface Vendor {
   monthlyTargetVideos?: number;
   editorId?: string;
   editorName?: string; // Keep for display/fallback
+  selfPublishing?: boolean; // Vendor publishes by themselves
   createdBy: string;
   createdAt: string;
 }
 
-export type PostStatus = 'draft' | 'scheduled' | 'published' | 'pending';
+export type PostStatus = 'draft' | 'scheduled' | 'published' | 'pending' | 'recognized';
 
 export interface Post {
   id?: string;
@@ -123,6 +124,7 @@ export interface Post {
   internalConfirmed: boolean;
   platforms: string[];
   publishedPlatforms?: string[]; // Platforms already published
+  isRecognized?: boolean; // Explicit flag for service recognition
   createdBy: string;
   createdAt: string;
 }

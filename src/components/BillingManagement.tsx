@@ -5,6 +5,7 @@ import {
   onSnapshot, 
   addDoc, 
   updateDoc, 
+  deleteDoc,
   doc, 
   where,
   orderBy,
@@ -49,10 +50,14 @@ export default function BillingManagement() {
   const [contracts, setContracts] = useState<BillingContract[]>([]);
   const [records, setRecords] = useState<BillingRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isGenerating, setIsGenerating] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [isAddContractOpen, setIsAddContractOpen] = useState(false);
   const [editingContractId, setEditingContractId] = useState<string | null>(null);
+  const [isEditRecordOpen, setIsEditRecordOpen] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<BillingRecord | null>(null);
+  const [recordEditData, setRecordEditData] = useState({ amount: 0, dueDate: '' });
   const [selectedVendorId, setSelectedVendorId] = useState('');
   const [activeView, setActiveView] = useState<'billing' | 'contracts'>('billing');
   
@@ -190,6 +195,41 @@ export default function BillingManagement() {
     }
   };
 
+  const handleDeleteRecord = async (recordId: string) => {
+    if (!window.confirm('確定要刪除此帳單紀錄嗎？')) return;
+    try {
+      await deleteDoc(doc(db, 'billingRecords', recordId));
+      toast.success('帳單紀錄已刪除');
+    } catch (error) {
+      console.error('Error deleting record:', error);
+      toast.error('刪除失敗');
+    }
+  };
+
+  const handleEditRecord = (record: BillingRecord) => {
+    setEditingRecord(record);
+    setRecordEditData({ amount: record.amount, dueDate: record.dueDate });
+    setIsEditRecordOpen(true);
+  };
+
+  const handleUpdateRecord = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingRecord) return;
+    try {
+      await updateDoc(doc(db, 'billingRecords', editingRecord.id!), {
+        amount: recordEditData.amount,
+        dueDate: recordEditData.dueDate,
+        updatedAt: new Date().toISOString()
+      });
+      toast.success('帳單紀錄更新成功');
+      setIsEditRecordOpen(false);
+      setEditingRecord(null);
+    } catch (error) {
+      console.error('Error updating record:', error);
+      toast.error('更新失敗');
+    }
+  };
+
   const handleDeleteContract = async (contractId: string) => {
     if (!window.confirm('確定要刪除此合約嗎？這將不會刪除已生成的帳單紀錄。')) return;
     try {
@@ -205,46 +245,56 @@ export default function BillingManagement() {
   };
 
   const generateMonthlyRecords = async (silent = false) => {
-    const monthStr = format(currentMonth, 'yyyy-MM');
-    const existingRecords = records.filter(r => r.billingMonth === monthStr);
-    const activeContracts = contracts.filter(c => c.status === 'active');
+    if (isGenerating) return;
+    setIsGenerating(true);
     
-    let createdCount = 0;
-    for (const contract of activeContracts) {
-      // Check if current month is within contract duration
-      const contractStart = parseISO(contract.startDate);
-      const contractEnd = contract.endDate ? parseISO(contract.endDate) : null;
-      const monthStart = startOfMonth(currentMonth);
-      const monthEnd = endOfMonth(currentMonth);
+    try {
+      const monthStr = format(currentMonth, 'yyyy-MM');
+      const existingRecords = records.filter(r => r.billingMonth === monthStr);
+      const activeContracts = contracts.filter(c => c.status === 'active');
+      
+      let createdCount = 0;
+      for (const contract of activeContracts) {
+        // Check if current month is within contract duration
+        const contractStart = parseISO(contract.startDate);
+        const contractEnd = contract.endDate ? parseISO(contract.endDate) : null;
+        const monthStart = startOfMonth(currentMonth);
+        const monthEnd = endOfMonth(currentMonth);
 
-      const isWithinContract = isWithinInterval(monthStart, { 
-        start: startOfDay(contractStart), 
-        end: contractEnd ? endOfDay(contractEnd) : endOfDay(addMonths(new Date(), 999)) 
-      }) || isSameMonth(contractStart, currentMonth);
+        const isWithinContract = isWithinInterval(monthStart, { 
+          start: startOfDay(contractStart), 
+          end: contractEnd ? endOfDay(contractEnd) : endOfDay(addMonths(new Date(), 999)) 
+        }) || isSameMonth(contractStart, currentMonth);
 
-      if (!isWithinContract) continue;
+        if (!isWithinContract) continue;
 
-      const alreadyExists = existingRecords.some(r => r.contractId === contract.id);
-      if (!alreadyExists) {
-        const dueDate = format(new Date(currentMonth.getFullYear(), currentMonth.getMonth(), contract.billingDay), 'yyyy-MM-dd');
-        const recordData: Omit<BillingRecord, 'id'> = {
-          vendorId: contract.vendorId,
-          contractId: contract.id!,
-          billingMonth: monthStr,
-          dueDate,
-          amount: contract.totalAmount,
-          status: 'pending',
-          createdAt: new Date().toISOString()
-        };
-        await addDoc(collection(db, 'billingRecords'), recordData);
-        createdCount++;
+        const alreadyExists = existingRecords.some(r => r.contractId === contract.id);
+        if (!alreadyExists) {
+          const dueDate = format(new Date(currentMonth.getFullYear(), currentMonth.getMonth(), contract.billingDay), 'yyyy-MM-dd');
+          const recordData: Omit<BillingRecord, 'id'> = {
+            vendorId: contract.vendorId,
+            contractId: contract.id!,
+            billingMonth: monthStr,
+            dueDate,
+            amount: contract.totalAmount,
+            status: 'pending',
+            createdAt: new Date().toISOString()
+          };
+          await addDoc(collection(db, 'billingRecords'), recordData);
+          createdCount++;
+        }
       }
-    }
-    
-    if (createdCount > 0 && !silent) {
-      toast.success(`已生成 ${createdCount} 筆本月帳單`);
-    } else if (!silent) {
-      toast.error('本月帳單已全部生成或無活動合約');
+      
+      if (createdCount > 0 && !silent) {
+        toast.success(`已生成 ${createdCount} 筆本月帳單`);
+      } else if (!silent) {
+        toast.error('本月帳單已全部生成或無活動合約');
+      }
+    } catch (error) {
+      console.error('Error generating records:', error);
+      if (!silent) toast.error('帳單生成失敗');
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -483,6 +533,13 @@ export default function BillingManagement() {
                             >
                               {record.status === 'paid' ? '恢復為待收' : '確認收款'}
                             </button>
+                            <button 
+                              onClick={() => handleEditRecord(record)}
+                              className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500"
+                              title="編輯紀錄"
+                            >
+                              <Edit2 size={16} />
+                            </button>
                             {contract && (
                               <button 
                                 onClick={() => generateContractPDF(contract)}
@@ -492,6 +549,13 @@ export default function BillingManagement() {
                                 <FileDown size={16} />
                               </button>
                             )}
+                            <button 
+                              onClick={() => handleDeleteRecord(record.id!)}
+                              className="p-1.5 hover:bg-red-50 rounded-lg text-red-400"
+                              title="刪除紀錄"
+                            >
+                              <Trash2 size={16} />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -741,6 +805,57 @@ export default function BillingManagement() {
                   className="w-full bg-[#5A5A40] text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-[#4A4A30] transition-all"
                 >
                   {editingContractId ? '確認更新合約' : '確認建立合約'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Record Modal */}
+      {isEditRecordOpen && editingRecord && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md rounded-[32px] shadow-2xl overflow-hidden">
+            <div className="p-6 border-b border-black/5 flex justify-between items-center bg-[#F5F5F0]">
+              <h3 className="text-xl font-bold serif">編輯帳單紀錄</h3>
+              <button onClick={() => { setIsEditRecordOpen(false); setEditingRecord(null); }} className="p-2 hover:bg-black/5 rounded-full">
+                <X size={24} />
+              </button>
+            </div>
+            
+            <form onSubmit={handleUpdateRecord} className="p-6 space-y-6">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">應收日期</label>
+                  <input
+                    type="date"
+                    value={recordEditData.dueDate}
+                    onChange={(e) => setRecordEditData({ ...recordEditData, dueDate: e.target.value })}
+                    className="w-full p-3 bg-gray-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-[#5A5A40]"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">應收金額</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+                    <input
+                      type="number"
+                      value={recordEditData.amount}
+                      onChange={(e) => setRecordEditData({ ...recordEditData, amount: parseInt(e.target.value) })}
+                      className="w-full pl-8 pr-4 py-3 bg-gray-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-[#5A5A40]"
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4">
+                <button
+                  type="submit"
+                  className="w-full bg-[#5A5A40] text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-[#4A4A30] transition-all"
+                >
+                  確認更新
                 </button>
               </div>
             </form>

@@ -168,8 +168,8 @@ export default function CalendarView() {
         '廠商名稱': vendor?.name || '未知',
         '貼文標題': post.title,
         '內容類型': post.contentType === 'video' ? '短影音' : '圖文',
-        '發布狀態': post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : '草稿',
-        '預計發布時間': format(parseISO(post.scheduledAt), 'yyyy-MM-dd HH:mm'),
+        '發布狀態': post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : post.status === 'recognized' ? '已認列' : post.status === 'pending' ? '待補中' : '草稿',
+        '預計發布時間': post.scheduledAt ? format(parseISO(post.scheduledAt), 'yyyy-MM-dd HH:mm') : '-',
         '發布平台': post.platforms?.join(', ') || '',
         '業主審核': post.clientConfirmed ? '已確認' : '待確認',
         '內部檢核': post.internalConfirmed ? '已檢核' : '待檢核',
@@ -286,7 +286,7 @@ export default function CalendarView() {
               {calendarDays.map((day, idx) => {
                 if (!day) return <div key={`pad-${idx}`} className="bg-gray-50/30 border-r border-b border-black/5"></div>;
                 
-                const dayPosts = posts.filter(p => isSameDay(parseISO(p.scheduledAt), day));
+                const dayPosts = posts.filter(p => p.scheduledAt && isSameDay(parseISO(p.scheduledAt), day));
                 const dayOfWeek = getDay(day);
                 
                 // Find habits for this day
@@ -373,7 +373,7 @@ export default function CalendarView() {
                             )}
                           >
                             <div className="flex items-center gap-1 overflow-hidden">
-                              <span className="font-bold flex-shrink-0">{format(parseISO(post.scheduledAt), 'HH:mm')}</span>
+                              <span className="font-bold flex-shrink-0">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'HH:mm') : '-'}</span>
                               <span className="opacity-70 flex-shrink-0">[{post.contentType === 'post' ? '圖文' : '影'}]</span>
                               <span className="truncate font-bold">{vendor?.name}</span>
                             </div>
@@ -393,7 +393,7 @@ export default function CalendarView() {
               filteredPosts.map((post, idx) => {
                 const vendor = vendors.find(v => v.id === post.vendorId);
                 const prevPost = idx > 0 ? filteredPosts[idx - 1] : null;
-                const showDateHeader = !prevPost || !isSameDay(parseISO(post.scheduledAt), parseISO(prevPost.scheduledAt));
+                const showDateHeader = !prevPost || (post.scheduledAt && prevPost.scheduledAt && !isSameDay(parseISO(post.scheduledAt), parseISO(prevPost.scheduledAt)));
 
                 return (
                   <div key={post.id} className="space-y-2">
@@ -401,7 +401,7 @@ export default function CalendarView() {
                       <div className="sticky top-0 bg-white/90 backdrop-blur-sm py-2 z-10 flex items-center">
                         <div className="w-1 h-4 bg-[#5A5A40] rounded-full mr-2" />
                         <span className="text-xs font-bold text-gray-500">
-                          {format(parseISO(post.scheduledAt), 'MM月dd日')} ({weekDays[getDay(parseISO(post.scheduledAt))]})
+                          {post.scheduledAt ? format(parseISO(post.scheduledAt), 'MM月dd日') : '-'} ({post.scheduledAt ? weekDays[getDay(parseISO(post.scheduledAt))] : '-'})
                         </span>
                       </div>
                     )}
@@ -416,7 +416,7 @@ export default function CalendarView() {
                       )}
                     >
                       <div className="text-center min-w-[50px]">
-                        <div className="text-sm font-bold text-gray-900">{format(parseISO(post.scheduledAt), 'HH:mm')}</div>
+                        <div className="text-sm font-bold text-gray-900">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'HH:mm') : '-'}</div>
                         <div className="text-[10px] font-bold text-gray-400 uppercase">{post.contentType === 'post' ? '圖文' : '短影音'}</div>
                       </div>
                       <div className="flex-1 min-w-0">
@@ -435,9 +435,10 @@ export default function CalendarView() {
                             post.status === 'published' ? "bg-green-100 text-green-700" : 
                             post.status === 'scheduled' ? "bg-blue-100 text-blue-700" : 
                             post.status === 'pending' ? "bg-orange-100 text-orange-700" :
+                            post.status === 'recognized' ? "bg-purple-100 text-purple-700" :
                             "bg-gray-100 text-gray-700"
                           )}>
-                            {post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : post.status === 'pending' ? '待補中' : '草稿'}
+                            {post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : post.status === 'pending' ? '待補中' : post.status === 'recognized' ? '已認列' : '草稿'}
                           </span>
                         </div>
                       </div>

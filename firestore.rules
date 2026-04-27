@@ -30,7 +30,7 @@ service cloud.firestore {
     // Collection: billingRecords
     // Fields: vendorId (string), contractId (string), billingMonth (string: YYYY-MM), dueDate (string: YYYY-MM-DD), amount (int), status (string: pending|paid|overdue)
     //
-    // Collection: line_users
+    // Collection: line_connections
     // Fields: lineUserId (string), linePictureUrl (string), lineDisplayName (string), UserId (string), createdAt (string)
     // ===============================================================
 
@@ -77,19 +77,21 @@ service cloud.firestore {
              (!('monthlyTargetPosts' in data) || data.monthlyTargetPosts is int) &&
              (!('monthlyTargetVideos' in data) || data.monthlyTargetVideos is int) &&
              (!('editorId' in data) || data.editorId is string) &&
-             (!('editorName' in data) || data.editorName is string);
+             (!('editorName' in data) || data.editorName is string) &&
+             (!('selfPublishing' in data) || data.selfPublishing is bool);
     }
 
     function isValidPost(data) {
       return data.keys().hasAll(['vendorId', 'title', 'status', 'createdBy']) &&
              data.vendorId is string &&
              isValidString(data.title, 200) &&
-             data.status in ['draft', 'scheduled', 'published', 'pending'] &&
+             data.status in ['draft', 'scheduled', 'published', 'pending', 'recognized'] &&
              data.createdBy is string &&
              (!('assetId' in data) || data.assetId is string) &&
              (!('content' in data) || data.content is string) &&
              (!('clientConfirmed' in data) || data.clientConfirmed is bool) &&
-             (!('internalConfirmed' in data) || data.internalConfirmed is bool);
+             (!('internalConfirmed' in data) || data.internalConfirmed is bool) &&
+             (!('isRecognized' in data) || data.isRecognized is bool);
     }
 
     function isValidAsset(data) {
@@ -202,7 +204,14 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    match /line_users/{id} {
+    match /billingRecords/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isManager() && isValidBillingRecord(request.resource.data);
+      allow update: if isManager() && isValidBillingRecord(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /line_connections/{id} {
       allow read: if isAuthenticated();
       allow create: if true; // Allow creation from external webhooks (Make.com)
       allow update: if isManager() && isValidLineUser(request.resource.data);

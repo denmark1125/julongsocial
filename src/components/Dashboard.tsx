@@ -268,8 +268,8 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
                   <div key={post.id} className="flex items-center justify-between p-3 md:p-4 rounded-2xl md:rounded-3xl hover:bg-[#F5F5F0] transition-colors group">
                     <div className="flex items-center space-x-3 md:space-x-4">
                       <div className="w-12 h-12 md:w-14 md:h-14 bg-[#F5F5F0] group-hover:bg-white rounded-xl md:rounded-2xl flex flex-col items-center justify-center text-[#5A5A40] transition-colors">
-                        <span className="text-[8px] md:text-[10px] font-bold uppercase">{format(parseISO(post.scheduledAt), 'MMM')}</span>
-                        <span className="text-lg md:text-xl font-bold leading-none">{format(parseISO(post.scheduledAt), 'dd')}</span>
+                        <span className="text-[8px] md:text-[10px] font-bold uppercase">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'MMM') : '-'}</span>
+                        <span className="text-lg md:text-xl font-bold leading-none">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'dd') : '-'}</span>
                       </div>
                       <div className="max-w-[140px] md:max-w-[200px]">
                         <p className="font-bold text-xs md:text-sm truncate">{post.title}</p>
@@ -280,9 +280,11 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
                       <span className={cn(
                         "text-[8px] md:text-[10px] px-2 md:px-3 py-0.5 md:py-1 rounded-full font-bold uppercase tracking-wider",
                         post.status === 'published' ? "bg-green-100 text-green-700" : 
-                        post.status === 'scheduled' ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-600"
+                        post.status === 'scheduled' ? "bg-blue-100 text-blue-700" : 
+                        post.status === 'recognized' ? "bg-purple-100 text-purple-700" : 
+                        "bg-gray-100 text-gray-600"
                       )}>
-                        {post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : '草稿'}
+                        {post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : post.status === 'recognized' ? '已認列' : '草稿'}
                       </span>
                     </div>
                   </div>
@@ -376,7 +378,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
                 <div key={post.id} className="p-3 md:p-4 border border-[#8B4513]/10 rounded-xl md:rounded-2xl bg-[#8B4513]/5 space-y-1 md:space-y-2">
                   <p className="text-[10px] md:text-xs font-bold truncate">{post.title}</p>
                   <div className="flex justify-between items-center">
-                    <span className="text-[8px] md:text-[10px] text-gray-400">{format(parseISO(post.scheduledAt), 'MM/dd HH:mm')}</span>
+                    <span className="text-[8px] md:text-[10px] text-gray-400">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'MM/dd HH:mm') : '-'}</span>
                     <button onClick={() => setActiveTab('posts')} className="text-[10px] md:text-xs text-[#8B4513] font-bold">
                       處理
                     </button>

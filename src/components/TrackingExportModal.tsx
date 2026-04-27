@@ -105,7 +105,7 @@ export default function TrackingExportModal({
       // 1. Check for posts on this day
       const dayPosts = posts.filter(p => 
         p.vendorId === vendor.id && 
-        isSameDay(parseISO(p.scheduledAt), day)
+        p.scheduledAt && isSameDay(parseISO(p.scheduledAt), day)
       );
 
       dayPosts.forEach(post => {
@@ -166,9 +166,9 @@ export default function TrackingExportModal({
           const isFulfilled = posts.some(p => 
             p.vendorId === vendor.id && 
             (
-              isSameDay(parseISO(p.scheduledAt), day) || 
-              isSameDay(parseISO(p.scheduledAt), subDays(day, 1)) ||
-              isSameDay(parseISO(p.scheduledAt), addDays(day, 1))
+              (p.scheduledAt && isSameDay(parseISO(p.scheduledAt), day)) || 
+              (p.scheduledAt && isSameDay(parseISO(p.scheduledAt), subDays(day, 1))) ||
+              (p.scheduledAt && isSameDay(parseISO(p.scheduledAt), addDays(day, 1)))
             )
           );
 
@@ -468,7 +468,7 @@ export default function TrackingExportModal({
                     <p className="text-sm opacity-60 uppercase tracking-widest mb-1">Timeframe</p>
                     <p className="text-2xl font-bold">
                       {exportMode === 'schedule' 
-                        ? `${format(parseISO(startDate), 'yyyy/MM/dd')} - ${format(parseISO(endDate), 'yyyy/MM/dd')}`
+                        ? `${startDate ? format(parseISO(startDate), 'yyyy/MM/dd') : '-'} - ${endDate ? format(parseISO(endDate), 'yyyy/MM/dd') : '-'}`
                         : `${format(selectedWeekStart, 'yyyy/MM/dd')} - ${format(weekEnd, 'yyyy/MM/dd')}`
                       }
                     </p>
@@ -497,7 +497,7 @@ export default function TrackingExportModal({
                       )}>
                         <td className="py-5 align-top">
                           <div className="text-sm font-bold text-[#5A5A40]">
-                            {item.scheduledAt ? format(parseISO(item.scheduledAt), 'MM/dd HH:mm') : format(item.date, 'MM/dd')}
+                            {item.scheduledAt ? format(parseISO(item.scheduledAt), 'MM/dd HH:mm') : '-'}
                           </div>
                           <div className="text-[10px] text-gray-400 font-medium uppercase">
                             {format(item.date, 'EEEE')}

@@ -238,10 +238,6 @@
       "schema": "BillingRecord",
       "description": "收款紀錄管理"
     },
-    "/line_users/{id}": {
-      "schema": "LineUser",
-      "description": "LINE 使用者資料集合"
-    },
     "/line_connections/{id}": {
       "schema": "LineConnection",
       "description": "LINE 串接管理集合"

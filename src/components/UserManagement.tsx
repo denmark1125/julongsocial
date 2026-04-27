@@ -422,21 +422,28 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                         <td className="p-4 font-bold text-[#5A5A40]">{displayName}</td>
                         <td className="p-4 text-xs text-gray-400 font-mono">{lineUid}</td>
                         <td className="p-4 text-xs text-gray-500">
-                          {createdAt ? (() => {
+                          {(() => {
+                            if (!createdAt) return '-';
                             try {
-                              // Handle Firestore Timestamp object
-                              if (typeof createdAt === 'object' && createdAt !== null && 'toDate' in createdAt) {
+                              // Handle Firestore Timestamp
+                              if (typeof createdAt !== 'string' && (createdAt as any)?.toDate) {
                                 return format((createdAt as any).toDate(), 'yyyy/MM/dd HH:mm');
                               }
-                              // Handle plain string
+                              // Handle JS Date
+                              if (createdAt instanceof Date) {
+                                return format(createdAt, 'yyyy/MM/dd HH:mm');
+                              }
+                              // Handle String
                               if (typeof createdAt === 'string') {
+                                if (createdAt.includes('年')) return createdAt;
                                 return format(parseISO(createdAt), 'yyyy/MM/dd HH:mm');
                               }
                               return '-';
-                            } catch {
+                            } catch (e) {
+                              console.error('Date formatting error:', e);
                               return '-';
                             }
-                          })() : '-'}
+                          })()}
                         </td>
                         <td className="p-4">
                           {linkedUser ? (

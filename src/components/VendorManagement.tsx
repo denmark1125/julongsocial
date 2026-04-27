@@ -38,7 +38,8 @@ export default function VendorManagement() {
     monthlyTargetPosts: 8,
     monthlyTargetVideos: 0,
     editorId: '',
-    editorName: ''
+    editorName: '',
+    selfPublishing: false
   });
 
   useEffect(() => {
@@ -174,7 +175,8 @@ export default function VendorManagement() {
         cooperationItems: [],
         monthlyTargetPosts: 8,
         monthlyTargetVideos: 0,
-        editorName: ''
+        editorName: '',
+        selfPublishing: false
       });
     } catch (error) {
       toast.error('儲存失敗');
@@ -219,7 +221,8 @@ export default function VendorManagement() {
                 monthlyTargetPosts: 8,
                 monthlyTargetVideos: 0,
                 editorId: '',
-                editorName: ''
+                editorName: '',
+                selfPublishing: false
               });
               setIsModalOpen(true);
             }}
@@ -246,7 +249,9 @@ export default function VendorManagement() {
                       cooperationItems: vendor.cooperationItems || [],
                       monthlyTargetPosts: vendor.monthlyTargetPosts || 0,
                       monthlyTargetVideos: vendor.monthlyTargetVideos || 0,
-                      editorName: vendor.editorName || ''
+                      editorId: vendor.editorId || '',
+                      editorName: vendor.editorName || '',
+                      selfPublishing: vendor.selfPublishing || false
                     });
                     setIsModalOpen(true);
                   }}
@@ -264,12 +269,19 @@ export default function VendorManagement() {
             </div>
             
             <div className="space-y-3">
-              {vendor.editorName && (
-                <div className="flex items-center text-xs font-bold text-[#5A5A40] bg-[#5A5A40]/5 px-2 py-1 rounded-lg border border-[#5A5A40]/10 w-fit">
-                  <span className="mr-1">剪輯師:</span>
-                  <span>{vendor.editorName}</span>
-                </div>
-              )}
+              <div className="flex flex-wrap gap-2 items-center">
+                {vendor.editorName && (
+                  <div className="flex items-center text-xs font-bold text-[#5A5A40] bg-[#5A5A40]/5 px-2 py-1 rounded-lg border border-[#5A5A40]/10 w-fit">
+                    <span className="mr-1">剪輯師:</span>
+                    <span>{vendor.editorName}</span>
+                  </div>
+                )}
+                {vendor.selfPublishing && (
+                  <div className="flex items-center text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded-lg border border-green-100 w-fit">
+                    <span>廠商自行發布</span>
+                  </div>
+                )}
+              </div>
               {vendor.cooperationItems && vendor.cooperationItems.length > 0 && (
                 <div className="flex flex-wrap gap-1 mb-2">
                   {vendor.cooperationItems.map(item => (
@@ -387,6 +399,21 @@ export default function VendorManagement() {
                       <option key={ed.id} value={ed.id}>{ed.name}</option>
                     ))}
                   </select>
+                </div>
+
+                <div className="bg-green-50/50 p-4 rounded-2xl border border-green-100/50">
+                  <label className="flex items-center space-x-3 cursor-pointer">
+                    <input 
+                      type="checkbox"
+                      checked={formData.selfPublishing}
+                      onChange={(e) => setFormData({ ...formData, selfPublishing: e.target.checked })}
+                      className="w-5 h-5 rounded border-green-300 text-green-600 focus:ring-green-500"
+                    />
+                    <div>
+                      <span className="block text-sm font-bold text-green-800">廠商自行發布</span>
+                      <span className="block text-xs text-green-600/70">勾選後，該廠商貼文可直接設為「服務次數認列」，不需強制排程日期。</span>
+                    </div>
+                  </label>
                 </div>
 
                 <div>
