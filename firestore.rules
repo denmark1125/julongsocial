@@ -82,16 +82,25 @@ service cloud.firestore {
     }
 
     function isValidPost(data) {
-      return data.keys().hasAll(['vendorId', 'title', 'status', 'createdBy']) &&
+      return data.keys().hasAll(['vendorId', 'title', 'status']) &&
              data.vendorId is string &&
-             isValidString(data.title, 200) &&
-             data.status in ['draft', 'scheduled', 'published', 'pending', 'recognized'] &&
-             data.createdBy is string &&
-             (!('assetId' in data) || data.assetId is string) &&
-             (!('content' in data) || data.content is string) &&
-             (!('clientConfirmed' in data) || data.clientConfirmed is bool) &&
-             (!('internalConfirmed' in data) || data.internalConfirmed is bool) &&
-             (!('isRecognized' in data) || data.isRecognized is bool);
+             (data.title is string && data.title.size() <= 1000) &&
+             data.status in ['draft', 'scheduled', 'published', 'pending'] &&
+             (!('createdBy' in data) || data.createdBy == null || data.createdBy is string) &&
+             (!('createdAt' in data) || data.createdAt == null || data.createdAt is string) &&
+             (!('updatedAt' in data) || data.updatedAt == null || data.updatedAt is string) &&
+             (!('assetId' in data) || data.assetId == null || data.assetId is string) &&
+             (!('content' in data) || data.content == null || data.content is string) &&
+             (!('clientConfirmed' in data) || data.clientConfirmed == null || data.clientConfirmed is bool) &&
+             (!('internalConfirmed' in data) || data.internalConfirmed == null || data.internalConfirmed is bool) &&
+             (!('isRecognized' in data) || data.isRecognized == null || data.isRecognized is bool) &&
+             (!('targetMonth' in data) || data.targetMonth == null || data.targetMonth is string) &&
+             (!('postUrl' in data) || data.postUrl == null || data.postUrl is string) &&
+             (!('platforms' in data) || data.platforms == null || data.platforms is list) &&
+             (!('publishedPlatforms' in data) || data.publishedPlatforms == null || data.publishedPlatforms is list) &&
+             (!('type' in data) || data.type == null || data.type is string) &&
+             (!('contentType' in data) || data.contentType == null || data.contentType is string) &&
+             (!('scheduledAt' in data) || data.scheduledAt == null || data.scheduledAt is string);
     }
 
     function isValidAsset(data) {
@@ -204,17 +213,17 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    match /billingRecords/{id} {
+    match /line_users/{id} {
       allow read: if isAuthenticated();
-      allow create: if isManager() && isValidBillingRecord(request.resource.data);
-      allow update: if isManager() && isValidBillingRecord(request.resource.data);
+      allow create: if true; 
+      allow update: if isManager() && isValidLineUser(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /line_connections/{id} {
       allow read: if isAuthenticated();
-      allow create: if true; // Allow creation from external webhooks (Make.com)
-      allow update: if isManager() && isValidLineUser(request.resource.data);
+      allow create: if true; 
+      allow update: if isManager();
       allow delete: if isAdmin();
     }
   }

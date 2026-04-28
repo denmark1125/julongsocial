@@ -53,10 +53,9 @@ export default function PostDetailModal({ post, vendor, asset, onClose }: PostDe
                 post.status === 'published' ? "text-green-600" : 
                 post.status === 'scheduled' ? "text-blue-600" : 
                 post.status === 'pending' ? "text-orange-600" :
-                post.status === 'recognized' ? "text-purple-600" :
                 "text-gray-600"
               )}>
-                {post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : post.status === 'pending' ? '待補中' : post.status === 'recognized' ? '已認列' : '草稿'}
+                {post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : post.status === 'pending' ? '待補中' : '草稿'}
               </div>
             </div>
             <div className="bg-gray-50 p-4 rounded-2xl border border-black/5">

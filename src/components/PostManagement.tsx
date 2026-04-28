@@ -187,8 +187,11 @@ export default function PostManagement() {
     try {
       const data = {
         ...formData,
+        scheduledAt: formData.scheduledAt || '',
+        targetMonth: formData.targetMonth || selectedMonth,
         createdBy: auth.currentUser.uid,
-        createdAt: new Date().toISOString()
+        createdAt: editingPost?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
 
       if (editingPost) {
@@ -391,7 +394,6 @@ export default function PostManagement() {
       case 'published': return <span onClick={onClick} className={cn(baseClasses, "bg-green-100 text-green-700 border-green-200")}><CheckCircle2 size={12} className="mr-1" /> 已發布 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
       case 'scheduled': return <span onClick={onClick} className={cn(baseClasses, "bg-blue-100 text-blue-700 border-blue-200")}><Clock size={12} className="mr-1" /> 已排程 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
       case 'pending': return <span onClick={onClick} className={cn(baseClasses, "bg-orange-100 text-orange-700 border-orange-200")}><BellRing size={12} className="mr-1" /> 待補中 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
-      case 'recognized': return <span onClick={onClick} className={cn(baseClasses, "bg-purple-100 text-purple-700 border-purple-200")}><CheckCircle2 size={12} className="mr-1" /> 已認列 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
       case 'draft': return <span onClick={onClick} className={cn(baseClasses, "bg-gray-100 text-gray-700 border-gray-200")}><FileEdit size={12} className="mr-1" /> 草稿 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
     }
   };
@@ -585,7 +587,6 @@ export default function PostManagement() {
           { id: 'draft', label: '草稿' },
           { id: 'scheduled', label: '已排程' },
           { id: 'published', label: '已發布' },
-          { id: 'recognized', label: '已認列' },
           { id: 'pending', label: '待補中' }
         ].map(status => (
           <button
@@ -601,7 +602,6 @@ export default function PostManagement() {
             {status.id === 'draft' && <FileEdit size={12} className="mr-1.5" />}
             {status.id === 'scheduled' && <Clock size={12} className="mr-1.5" />}
             {status.id === 'published' && <CheckCircle2 size={12} className="mr-1.5" />}
-            {status.id === 'recognized' && <CheckCircle2 size={12} className="mr-1.5" />}
             {status.label}
             <span className="ml-1.5 opacity-50 text-[10px]">
               ({posts.filter(p => {
@@ -772,7 +772,7 @@ export default function PostManagement() {
                                     post.status === s ? "font-bold text-[#5A5A40] bg-[#F5F5F0]" : "text-gray-600"
                                   )}
                                 >
-                                  {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : s === 'published' ? '已發布' : s === 'recognized' ? '已認列' : '待補中'}
+                                  {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : s === 'published' ? '已發布' : '待補中'}
                                 </button>
                               ))}
                             </div>
@@ -781,8 +781,16 @@ export default function PostManagement() {
                       </div>
                     </td>
                     <td className="p-4">
-                      <div className="text-sm font-medium">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'MM/dd') : '-'}</div>
-                      <div className="text-xs text-gray-400">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'HH:mm') : '-'}</div>
+                      <div className="text-sm font-medium">
+                        {post.scheduledAt ? format(parseISO(post.scheduledAt), 'MM/dd') : (
+                          <span className="text-gray-400 italic">未定</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        {post.scheduledAt ? format(parseISO(post.scheduledAt), 'HH:mm') : (
+                          <span className="text-[10px]">歸檔: {post.targetMonth}</span>
+                        )}
+                      </div>
                     </td>
                     <td className="p-4">
                       {post.postUrl ? (
@@ -928,7 +936,7 @@ export default function PostManagement() {
                                     post.status === s ? "font-bold text-[#5A5A40] bg-[#F5F5F0]" : "text-gray-600"
                                   )}
                                 >
-                                  {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : s === 'published' ? '已發布' : s === 'recognized' ? '已認列' : '待補中'}
+                                  {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : s === 'published' ? '已發布' : '待補中'}
                                 </button>
                               ))}
                             </div>
@@ -1107,7 +1115,7 @@ export default function PostManagement() {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">發布狀態</label>
                     <div className="flex flex-wrap gap-2">
-                      {(['draft', 'scheduled', 'published', 'recognized', 'pending'] as PostStatus[]).map(s => (
+                      {(['draft', 'scheduled', 'published', 'pending'] as PostStatus[]).map(s => (
                         <button
                           key={s}
                           type="button"
@@ -1119,7 +1127,7 @@ export default function PostManagement() {
                               : "bg-gray-50 text-gray-400 border-black/5 hover:border-gray-200"
                           )}
                         >
-                          {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : s === 'published' ? '已發布' : s === 'recognized' ? '已認列' : '待補中'}
+                          {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : s === 'published' ? '已發布' : '待補中'}
                         </button>
                       ))}
                     </div>
@@ -1168,8 +1176,17 @@ export default function PostManagement() {
                   </div>
                   <div>
                     <div className="flex justify-between items-center mb-1">
-                      <label className="block text-sm font-medium text-gray-700">預計發布時間</label>
+                      <label className="block text-sm font-medium text-gray-700">預計發布時間 (選填)</label>
                       <div className="flex gap-1">
+                        {formData.scheduledAt && (
+                          <button 
+                            type="button"
+                            onClick={() => setFormData({ ...formData, scheduledAt: '' })}
+                            className="text-[10px] text-red-500 hover:underline font-bold mr-2"
+                          >
+                            清除
+                          </button>
+                        )}
                         <button 
                           type="button" 
                           onClick={() => setQuickTime(20)}
@@ -1188,9 +1205,16 @@ export default function PostManagement() {
                     </div>
                     <input 
                       type="datetime-local" 
-                      required
-                      value={formData.scheduledAt}
-                      onChange={(e) => setFormData({ ...formData, scheduledAt: e.target.value })}
+                      value={formData.scheduledAt || ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const newTargetMonth = val ? format(parseISO(val), 'yyyy-MM') : formData.targetMonth;
+                        setFormData({ 
+                          ...formData, 
+                          scheduledAt: val,
+                          targetMonth: newTargetMonth
+                        });
+                      }}
                       className="w-full p-2 bg-[#F5F5F0] rounded-xl border-none mb-2"
                     />
                     
