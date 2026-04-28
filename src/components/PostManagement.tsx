@@ -608,7 +608,7 @@ export default function PostManagement() {
                 const matchesSearch = p.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                   vendors.find(v => v.id === p.vendorId)?.name.toLowerCase().includes(searchTerm.toLowerCase());
                 const matchesVendor = selectedVendorId === 'all' || p.vendorId === selectedVendorId;
-                const matchesMonth = (p.targetMonth || (p.scheduledAt ? format(parseISO(p.scheduledAt), 'yyyy-MM') : null)) === selectedMonth;
+                const matchesMonth = (p.targetMonth || (p.scheduledAt && p.scheduledAt.length > 0 ? format(parseISO(p.scheduledAt), 'yyyy-MM') : null)) === selectedMonth;
                 const matchesStatus = status.id === 'all' || p.status === status.id;
                 return matchesSearch && matchesVendor && matchesMonth && matchesStatus;
               }).length})
@@ -760,7 +760,7 @@ export default function PostManagement() {
                                 : "top-full mt-1 slide-in-from-top-2"
                             )}>
                               <div className="px-3 py-1 text-[9px] font-bold text-gray-400 uppercase tracking-widest border-b border-black/5 mb-1">變更狀態</div>
-                              {(['draft', 'scheduled', 'published', 'recognized', 'pending'] as PostStatus[]).map(s => (
+                              {(['draft', 'scheduled', 'published', 'pending'] as PostStatus[]).map(s => (
                                 <button 
                                   key={s}
                                   onClick={() => {
@@ -782,12 +782,12 @@ export default function PostManagement() {
                     </td>
                     <td className="p-4">
                       <div className="text-sm font-medium">
-                        {post.scheduledAt ? format(parseISO(post.scheduledAt), 'MM/dd') : (
+                        {post.scheduledAt && post.scheduledAt.length > 0 ? format(parseISO(post.scheduledAt), 'MM/dd') : (
                           <span className="text-gray-400 italic">未定</span>
                         )}
                       </div>
                       <div className="text-xs text-gray-400">
-                        {post.scheduledAt ? format(parseISO(post.scheduledAt), 'HH:mm') : (
+                        {post.scheduledAt && post.scheduledAt.length > 0 ? format(parseISO(post.scheduledAt), 'HH:mm') : (
                           <span className="text-[10px]">歸檔: {post.targetMonth}</span>
                         )}
                       </div>
@@ -924,7 +924,7 @@ export default function PostManagement() {
                                 : "bottom-full mb-1 slide-in-from-bottom-2"
                             )}>
                               <div className="px-3 py-1 text-[9px] font-bold text-gray-400 uppercase tracking-widest border-b border-black/5 mb-1">變更狀態</div>
-                              {(['draft', 'scheduled', 'published', 'recognized', 'pending'] as PostStatus[]).map(s => (
+                              {(['draft', 'scheduled', 'published', 'pending'] as PostStatus[]).map(s => (
                                 <button 
                                   key={s}
                                   onClick={() => {

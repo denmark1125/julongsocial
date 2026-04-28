@@ -166,6 +166,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
   const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
   const weekEnd = endOfWeek(new Date(), { weekStartsOn: 1 });
   const thisWeekPosts = posts.filter(p => {
+    if (!p.scheduledAt || p.scheduledAt.length === 0) return false;
     const d = parseISO(p.scheduledAt);
     return isAfter(d, weekStart) && isBefore(d, weekEnd);
   });
@@ -241,7 +242,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
                         <p className="font-bold truncate mb-0.5 md:mb-1">{p.title}</p>
                         <p className="text-gray-400 flex items-center">
                           <Clock size={8} md:size={10} className="mr-1" />
-                          {format(parseISO(p.scheduledAt), 'MM/dd HH:mm')}
+                          {p.scheduledAt && p.scheduledAt.length > 0 ? format(parseISO(p.scheduledAt), 'MM/dd HH:mm') : '未定'}
                         </p>
                       </div>
                     ))}
@@ -281,10 +282,10 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
                         "text-[8px] md:text-[10px] px-2 md:px-3 py-0.5 md:py-1 rounded-full font-bold uppercase tracking-wider",
                         post.status === 'published' ? "bg-green-100 text-green-700" : 
                         post.status === 'scheduled' ? "bg-blue-100 text-blue-700" : 
-                        post.status === 'recognized' ? "bg-purple-100 text-purple-700" : 
+                        post.status === 'pending' ? "bg-orange-100 text-orange-700" : 
                         "bg-gray-100 text-gray-600"
                       )}>
-                        {post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : post.status === 'recognized' ? '已認列' : '草稿'}
+                        {post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : post.status === 'pending' ? '待補中' : '草稿'}
                       </span>
                     </div>
                   </div>

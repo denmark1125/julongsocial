@@ -159,6 +159,9 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
         return;
       }
 
+      const controller = new AbortController();
+      const signal = controller.signal;
+
       const response = await fetch('/api/admin/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -166,7 +169,8 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
           idToken,
           targetUid: uid,
           newPassword: newPassword + PASSWORD_SUFFIX
-        })
+        }),
+        signal
       });
 
       const text = await response.text();
@@ -186,6 +190,10 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
         throw new Error(data.error || '重設失敗');
       }
     } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log('Password reset request was aborted');
+        return;
+      }
       console.error('Reset password error:', error);
       toast.error(`重設失敗: ${error.message}`);
     } finally {

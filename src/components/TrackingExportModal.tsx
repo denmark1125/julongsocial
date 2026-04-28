@@ -105,7 +105,7 @@ export default function TrackingExportModal({
       // 1. Check for posts on this day
       const dayPosts = posts.filter(p => 
         p.vendorId === vendor.id && 
-        p.scheduledAt && isSameDay(parseISO(p.scheduledAt), day)
+        p.scheduledAt && p.scheduledAt.length > 0 && isSameDay(parseISO(p.scheduledAt), day)
       );
 
       dayPosts.forEach(post => {
@@ -166,9 +166,9 @@ export default function TrackingExportModal({
           const isFulfilled = posts.some(p => 
             p.vendorId === vendor.id && 
             (
-              (p.scheduledAt && isSameDay(parseISO(p.scheduledAt), day)) || 
-              (p.scheduledAt && isSameDay(parseISO(p.scheduledAt), subDays(day, 1))) ||
-              (p.scheduledAt && isSameDay(parseISO(p.scheduledAt), addDays(day, 1)))
+              (p.scheduledAt && p.scheduledAt.length > 0 && isSameDay(parseISO(p.scheduledAt), day)) || 
+              (p.scheduledAt && p.scheduledAt.length > 0 && isSameDay(parseISO(p.scheduledAt), subDays(day, 1))) ||
+              (p.scheduledAt && p.scheduledAt.length > 0 && isSameDay(parseISO(p.scheduledAt), addDays(day, 1)))
             )
           );
 
@@ -497,7 +497,7 @@ export default function TrackingExportModal({
                       )}>
                         <td className="py-5 align-top">
                           <div className="text-sm font-bold text-[#5A5A40]">
-                            {item.scheduledAt ? format(parseISO(item.scheduledAt), 'MM/dd HH:mm') : '-'}
+                            {item.scheduledAt && item.scheduledAt.length > 0 ? format(parseISO(item.scheduledAt), 'MM/dd HH:mm') : '-'}
                           </div>
                           <div className="text-[10px] text-gray-400 font-medium uppercase">
                             {format(item.date, 'EEEE')}

@@ -169,7 +169,7 @@ export default function CalendarView() {
         '貼文標題': post.title,
         '內容類型': post.contentType === 'video' ? '短影音' : '圖文',
         '發布狀態': post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : post.status === 'pending' ? '待補中' : '草稿',
-        '預計發布時間': post.scheduledAt ? format(parseISO(post.scheduledAt), 'yyyy-MM-dd HH:mm') : '-',
+        '預計發布時間': (post.scheduledAt && post.scheduledAt.length > 0) ? format(parseISO(post.scheduledAt), 'yyyy-MM-dd HH:mm') : '-',
         '發布平台': post.platforms?.join(', ') || '',
         '業主審核': post.clientConfirmed ? '已確認' : '待確認',
         '內部檢核': post.internalConfirmed ? '已檢核' : '待檢核',
@@ -194,11 +194,11 @@ export default function CalendarView() {
   const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
 
   const filteredPosts = posts.filter(p => {
-    const postMonth = p.targetMonth || (p.scheduledAt ? format(parseISO(p.scheduledAt), 'yyyy-MM') : null);
+    const postMonth = p.targetMonth || (p.scheduledAt && p.scheduledAt.length > 0 ? format(parseISO(p.scheduledAt), 'yyyy-MM') : null);
     return postMonth === format(currentDate, 'yyyy-MM');
   }).sort((a, b) => {
-    if (!a.scheduledAt) return 1;
-    if (!b.scheduledAt) return -1;
+    if (!a.scheduledAt || a.scheduledAt.length === 0) return 1;
+    if (!b.scheduledAt || b.scheduledAt.length === 0) return -1;
     return parseISO(a.scheduledAt).getTime() - parseISO(b.scheduledAt).getTime();
   });
 
@@ -406,7 +406,7 @@ export default function CalendarView() {
                       <div className="sticky top-0 bg-white/90 backdrop-blur-sm py-2 z-10 flex items-center">
                         <div className="w-1 h-4 bg-[#5A5A40] rounded-full mr-2" />
                         <span className="text-xs font-bold text-gray-500">
-                          {post.scheduledAt ? `${format(parseISO(post.scheduledAt), 'MM月dd日')} (${weekDays[getDay(parseISO(post.scheduledAt))]})` : '未定日期 / 待排程'}
+                          {post.scheduledAt && post.scheduledAt.length > 0 ? `${format(parseISO(post.scheduledAt), 'MM月dd日')} (${weekDays[getDay(parseISO(post.scheduledAt))]})` : '未定日期 / 待排程'}
                         </span>
                       </div>
                     )}

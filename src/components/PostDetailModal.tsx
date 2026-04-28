@@ -63,7 +63,7 @@ export default function PostDetailModal({ post, vendor, asset, onClose }: PostDe
                 <Calendar size={12} className="mr-1" /> 預計時間
               </div>
               <div className="text-sm font-bold">
-                {post.scheduledAt ? format(parseISO(post.scheduledAt), 'yyyy/MM/dd HH:mm') : '未安排時間'}
+                {(post.scheduledAt && post.scheduledAt.length > 0) ? format(parseISO(post.scheduledAt), 'yyyy/MM/dd HH:mm') : '未安排日期 / ' + (post.targetMonth || '未設定年份')}
               </div>
             </div>
           </div>
