@@ -276,9 +276,9 @@ export default function CalendarView() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-auto">
         {viewMode === 'calendar' ? (
-          <div className="min-w-[700px] md:min-w-0">
+          <div className="min-w-[800px] xl:min-w-0">
             <div className="grid grid-cols-7 border-b border-black/5 bg-gray-50/50">
               {weekDays.map(day => (
                 <div key={day} className="p-4 text-center text-[10px] font-bold text-gray-400 uppercase tracking-widest">
@@ -406,7 +406,9 @@ export default function CalendarView() {
                       <div className="sticky top-0 bg-white/90 backdrop-blur-sm py-2 z-10 flex items-center">
                         <div className="w-1 h-4 bg-[#5A5A40] rounded-full mr-2" />
                         <span className="text-xs font-bold text-gray-500">
-                          {post.scheduledAt && post.scheduledAt.length > 0 ? `${format(parseISO(post.scheduledAt), 'MM月dd日')} (${weekDays[getDay(parseISO(post.scheduledAt))]})` : '未定日期 / 待排程'}
+                          {post.scheduledAt && post.scheduledAt.length > 0 
+                            ? `${format(parseISO(post.scheduledAt), 'MM月dd日')} (${weekDays[getDay(parseISO(post.scheduledAt))]})` 
+                            : `未定日期 / ${post.targetMonth || '本月'} 待排程`}
                         </span>
                       </div>
                     )}

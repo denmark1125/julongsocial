@@ -449,9 +449,9 @@ export default function TrackingExportModal({
         <div className="flex-1 overflow-auto p-0 bg-gray-100 custom-scrollbar">
           <div 
             ref={exportRef} 
-            className="bg-[#F5F5F0] flex justify-center w-full"
+            className="bg-[#F5F5F0] min-w-full p-4 sm:p-8"
           >
-            <div className="bg-[#F5F5F0] shadow-none border-none overflow-hidden w-full max-w-[800px]">
+            <div className="bg-[#F5F5F0] shadow-none border-none overflow-hidden w-full max-w-[800px] mx-auto">
               {/* JPG Header */}
               <div className="p-12 bg-[#5A5A40] text-white">
                 <div className="flex justify-between items-end">
@@ -497,7 +497,9 @@ export default function TrackingExportModal({
                       )}>
                         <td className="py-5 align-top">
                           <div className="text-sm font-bold text-[#5A5A40]">
-                            {item.scheduledAt && item.scheduledAt.length > 0 ? format(parseISO(item.scheduledAt), 'MM/dd HH:mm') : '-'}
+                            {item.scheduledAt && item.scheduledAt.length > 0 
+                              ? format(parseISO(item.scheduledAt), 'MM/dd HH:mm') 
+                              : format(item.date, 'MM/dd') + ' (待定)'}
                           </div>
                           <div className="text-[10px] text-gray-400 font-medium uppercase">
                             {format(item.date, 'EEEE')}
@@ -573,21 +575,21 @@ export default function TrackingExportModal({
         </div>
 
         {/* Footer */}
-        <div className="p-6 bg-[#F5F5F0]/50 border-t border-gray-100 flex justify-between items-center">
-          <p className="text-xs text-gray-400">
+        <div className="p-6 bg-[#F5F5F0]/50 border-t border-gray-100 flex flex-col sm:flex-row justify-between items-center gap-4">
+          <p className="text-xs text-gray-400 text-center sm:text-left">
             * 系統將自動彙整下周一至周日的排程與提醒
           </p>
-          <div className="flex space-x-3">
+          <div className="flex space-x-3 w-full sm:w-auto">
             <button 
               onClick={onClose}
-              className="px-6 py-3 rounded-2xl text-sm font-bold text-gray-500 hover:bg-gray-100 transition-all"
+              className="flex-1 sm:flex-none px-6 py-3 rounded-2xl text-sm font-bold text-gray-500 hover:bg-gray-100 transition-all"
             >
               取消
             </button>
             <button 
               onClick={handleExport}
               disabled={trackingData.length === 0}
-              className="px-8 py-3 bg-[#5A5A40] text-white rounded-2xl text-sm font-bold shadow-lg shadow-[#5A5A40]/20 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:hover:scale-100"
+              className="flex-1 sm:flex-none px-8 py-3 bg-[#5A5A40] text-white rounded-2xl text-sm font-bold shadow-lg shadow-[#5A5A40]/20 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:hover:scale-100 whitespace-nowrap"
             >
               導出 JPG 清單
             </button>
