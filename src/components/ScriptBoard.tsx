@@ -15,6 +15,8 @@ interface ScriptDetail {
   scenes?: ScriptScene[]; // 逐格導演分鏡
   cta?: string;         // 完播話術
   hashtags?: string[];
+  format?: string;      // video=影音腳本 / post=貼文
+  warnings?: string[];  // 事實查核：拍前要跟業主確認的主張
 }
 interface Script {
   id: string; ip_id: string; no: number | null;
@@ -39,10 +41,6 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   filmed:    { label: '已拍攝', cls: 'bg-blue-100 text-blue-700' },
   published: { label: '已發布', cls: 'bg-black text-white' },
   archived:  { label: '封存',   cls: 'bg-gray-100 text-gray-500' },
-};
-
-const SOURCE_META: Record<string, string> = {
-  ai: 'AI 生成', human: '人工手寫', ai_edited: 'AI 生成（已人工改稿）',
 };
 
 async function api(path: string, options: RequestInit = {}) {
@@ -228,8 +226,15 @@ export default function ScriptBoard() {
                     <div className="min-w-0 flex-1 cursor-pointer" onClick={() => setExpanded(isOpen ? null : s.id)}>
                       <div className="flex flex-wrap items-center gap-2 mb-2">
                         <span className={`px-3 py-1 rounded-full text-xs font-bold ${meta.cls}`}>{meta.label}</span>
+                        <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">
+                          {s.detail?.format === 'post' ? '📝 貼文' : '🎬 影音'}
+                        </span>
                         <span className="text-xs text-gray-400 font-mono">{ipName(s.ip_id)}{s.no != null ? ` · #${s.no}` : ''}</span>
-                        <span className="text-[10px] text-gray-300 font-mono">{SOURCE_META[s.source] || s.source}</span>
+                        {(s.detail?.warnings?.length ?? 0) > 0 && (
+                          <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">
+                            ⚠️ {s.detail!.warnings!.length} 項待跟業主確認
+                          </span>
+                        )}
                       </div>
                       <h4 className="font-bold serif text-lg truncate">{s.topic}</h4>
                       {s.hook && <p className="text-sm text-gray-500 mt-1 truncate">💥 {s.hook}</p>}
@@ -264,6 +269,19 @@ export default function ScriptBoard() {
                   </div>
                   {isOpen && (
                     <div className="mt-4 space-y-4">
+                      {/* 事實查核警示：拍/發之前要跟業主確認的主張 */}
+                      {(s.detail?.warnings?.length ?? 0) > 0 && (
+                        <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-amber-600 mb-2">
+                            ⚠️ 事實查核：以下說法在人物設定裡沒有依據，拍/發之前要跟業主確認
+                          </p>
+                          <ul className="space-y-1">
+                            {s.detail!.warnings!.map((w, i) => (
+                              <li key={i} className="text-sm text-amber-800">・{w}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                       {/* 黃金 Hook */}
                       {(s.detail?.hook || s.hook) && (
                         <div className="bg-black text-white p-5 rounded-2xl">
