@@ -186,6 +186,39 @@ app.get("/api/studio/scripts", requireStudioAuth, async (req, res) => {
   res.json(data);
 });
 
+// 對標名單（雨傘標每天自動找的候選帳號，?ip_id=）
+app.get("/api/studio/benchmarks", requireStudioAuth, async (req, res) => {
+  let q = studioDb!.from("benchmark_accounts").select("*")
+    .order("status", { ascending: false }).order("found_date", { ascending: false });
+  if (req.query.ip_id) q = q.eq("ip_id", String(req.query.ip_id));
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// IP 總攬（帳號總覽）：每個 IP 各狀態件數＋最新產出時間，前台依「待審庫存」急迫度排序
+app.get("/api/studio/scripts/overview", requireStudioAuth, async (req, res) => {
+  const [{ data: ips, error: e1 }, { data: scripts, error: e2 }] = await Promise.all([
+    studioDb!.from("ips").select("id,name").eq("active", true),
+    studioDb!.from("scripts").select("ip_id,status,created_at"),
+  ]);
+  if (e1) return res.status(500).json({ error: e1.message });
+  if (e2) return res.status(500).json({ error: e2.message });
+  const rows = (ips || []).map(ip => {
+    const mine = (scripts || []).filter(s => s.ip_id === ip.id);
+    const count = (st: string) => mine.filter(s => s.status === st).length;
+    const latest = mine.reduce((max: string | null, s: any) =>
+      !max || s.created_at > max ? s.created_at : max, null as string | null);
+    return {
+      ip_id: ip.id, name: ip.name,
+      pending: count("pending"), approved: count("approved"), rejected: count("rejected"),
+      filmed: count("filmed"), published: count("published"), archived: count("archived"),
+      total: mine.length, latest_created_at: latest,
+    };
+  });
+  res.json(rows);
+});
+
 // 手寫腳本貼上（source='human'）
 app.post("/api/studio/scripts", requireStudioAuth, async (req, res) => {
   const { ip_id, no, topic, content, hook, props_location, batch } = req.body;
@@ -218,6 +251,18 @@ app.post("/api/studio/scripts/:id/review", requireStudioAuth, async (req, res) =
       script_id: req.params.id, tag, note: note || null, created_by: by,
     });
   }
+  res.json({ ok: true });
+});
+
+// 狀態推進（已核准→已拍攝→已發布→封存；不走 6 標籤駁回流程，單純往前走）
+app.post("/api/studio/scripts/:id/advance", requireStudioAuth, async (req, res) => {
+  const { status } = req.body;
+  if (!["filmed", "published", "archived"].includes(status)) {
+    return res.status(400).json({ error: "status 需為 filmed / published / archived" });
+  }
+  const { error } = await studioDb!.from("scripts")
+    .update({ status, updated_at: new Date().toISOString() }).eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
 });
 

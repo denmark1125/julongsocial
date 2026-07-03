@@ -2,12 +2,17 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { auth } from '../firebase';
 import {
   Clapperboard, Check, X, Pencil, Plus, MessageSquareQuote,
-  ChevronDown, ChevronUp, Loader2, RefreshCw
+  ChevronDown, ChevronUp, Loader2, RefreshCw, LayoutGrid, ListFilter,
+  Video, FileEdit, Send, Archive, Trophy, Sparkles
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface StudioIp { id: string; name: string; }
 interface ScriptScene { time: string; visual: string; audio: string; }
+interface ScriptOrigin {
+  primary: 'own_data' | 'benchmark' | 'creative';
+  icon: string; label: string; feedback_applied?: boolean;
+}
 interface ScriptDetail {
   hook?: string;        // 0-3s 黃金鉤子
   strategy?: string;    // 導演行銷策略與心理學邏輯
@@ -17,12 +22,23 @@ interface ScriptDetail {
   hashtags?: string[];
   format?: string;      // video=影音腳本 / post=貼文
   warnings?: string[];  // 事實查核：拍前要跟業主確認的主張
+  origin?: ScriptOrigin; // 出處：這支怎麼來的
 }
 interface Script {
   id: string; ip_id: string; no: number | null;
   topic: string; content: string; hook: string | null; props_location: string | null;
   status: string; source: string; batch: string | null; created_at: string;
   detail: ScriptDetail | null;
+}
+interface IpOverview {
+  ip_id: string; name: string; pending: number; approved: number; rejected: number;
+  filmed: number; published: number; archived: number; total: number; latest_created_at: string | null;
+}
+interface BenchmarkAccount {
+  id: string; ip_id: string; handle: string; niche: string | null;
+  status: 'candidate' | 'verified' | 'dead' | 'promoted';
+  followers: number | null; avg_likes: number | null; source: string | null;
+  found_date: string; verified_at: string | null;
 }
 
 const REJECT_TAGS: { tag: string; label: string }[] = [
@@ -42,6 +58,15 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   published: { label: '已發布', cls: 'bg-black text-white' },
   archived:  { label: '封存',   cls: 'bg-gray-100 text-gray-500' },
 };
+
+// 生命週期直線：待審 → 已核准 → 已拍攝 → 已發布 → 封存（駁回是另一條岔路，不在這條線上）
+const NEXT_STATUS: Record<string, { status: string; label: string; icon: any }> = {
+  approved: { status: 'filmed',    label: '標記已拍攝', icon: Video },
+  filmed:   { status: 'published', label: '標記已發布', icon: Send },
+  published:{ status: 'archived',  label: '封存',       icon: Archive },
+};
+
+const ORIGIN_ICON: Record<string, any> = { own_data: Trophy, benchmark: ListFilter, creative: Sparkles };
 
 async function api(path: string, options: RequestInit = {}) {
   const token = await auth.currentUser?.getIdToken();
@@ -63,6 +88,9 @@ async function api(path: string, options: RequestInit = {}) {
 export default function ScriptBoard() {
   const [ips, setIps] = useState<StudioIp[]>([]);
   const [scripts, setScripts] = useState<Script[]>([]);
+  const [overview, setOverview] = useState<IpOverview[]>([]);
+  const [view, setView] = useState<'list' | 'overview' | 'benchmarks'>('list');
+  const [benchmarks, setBenchmarks] = useState<BenchmarkAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [ipFilter, setIpFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('pending');
@@ -85,18 +113,25 @@ export default function ScriptBoard() {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedbackForm, setFeedbackForm] = useState({ ip_id: '', said: '', kind: 'topic' });
 
-  const load = useCallback(async () => {
+const load = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (ipFilter) params.set('ip_id', ipFilter);
       if (statusFilter) params.set('status', statusFilter);
-      const [ipData, scriptData] = await Promise.all([
+      const benchParams = new URLSearchParams();
+      if (ipFilter) benchParams.set('ip_id', ipFilter);
+      const [ipData, scriptData, overviewData, benchData] = await Promise.all([
         api('/api/studio/ips'),
         api(`/api/studio/scripts?${params.toString()}`),
+        api('/api/studio/scripts/overview'),
+        api(`/api/studio/benchmarks?${benchParams.toString()}`),
       ]);
       setIps(ipData);
       setScripts(scriptData);
+      // 急迫度排序：待審庫存少的（快沒東西可審/快沒腳本可拍）排最前面，適合多 IP 同時盯進度
+      setOverview([...overviewData].sort((a, b) => a.pending - b.pending));
+      setBenchmarks(benchData);
     } catch (e: any) {
       toast.error(`載入失敗：${e.message}`);
     } finally {
@@ -107,6 +142,16 @@ export default function ScriptBoard() {
   useEffect(() => { load(); }, [load]);
 
   const ipName = (id: string) => ips.find(i => i.id === id)?.name || id;
+
+  const advance = async (s: Script) => {
+    const next = NEXT_STATUS[s.status];
+    if (!next) return;
+    try {
+      await api(`/api/studio/scripts/${s.id}/advance`, { method: 'POST', body: JSON.stringify({ status: next.status }) });
+      toast.success(`已標記「${STATUS_META[next.status].label}」`);
+      load();
+    } catch (e: any) { toast.error(e.message); }
+  };
 
   const approve = async (s: Script) => {
     try {
@@ -177,18 +222,38 @@ export default function ScriptBoard() {
       {/* 工具列 */}
       <div className="flex flex-wrap items-center gap-3 justify-between">
         <div className="flex flex-wrap items-center gap-3">
-          <select value={ipFilter} onChange={e => setIpFilter(e.target.value)} className="p-3 bg-white rounded-xl border border-black/10 text-sm">
-            <option value="">全部 IP</option>
-            {ips.map(ip => <option key={ip.id} value={ip.id}>{ip.name}</option>)}
-          </select>
           <div className="flex bg-white rounded-xl border border-black/10 overflow-hidden text-sm">
-            {['pending', 'approved', 'rejected', ''].map(s => (
-              <button key={s || 'all'} onClick={() => setStatusFilter(s)}
-                className={`px-4 py-3 font-bold transition-all ${statusFilter === s ? 'bg-black text-white' : 'hover:bg-gray-50'}`}>
-                {s ? STATUS_META[s].label : '全部'}
-              </button>
-            ))}
+            <button onClick={() => setView('list')}
+              className={`px-4 py-3 font-bold transition-all flex items-center gap-2 ${view === 'list' ? 'bg-black text-white' : 'hover:bg-gray-50'}`}>
+              <ListFilter size={14} /> 清單
+            </button>
+            <button onClick={() => setView('overview')}
+              className={`px-4 py-3 font-bold transition-all flex items-center gap-2 ${view === 'overview' ? 'bg-black text-white' : 'hover:bg-gray-50'}`}>
+              <LayoutGrid size={14} /> 帳號總攬
+            </button>
+            <button onClick={() => setView('benchmarks')}
+              className={`px-4 py-3 font-bold transition-all flex items-center gap-2 ${view === 'benchmarks' ? 'bg-black text-white' : 'hover:bg-gray-50'}`}>
+              <Trophy size={14} /> 對標名單
+            </button>
           </div>
+          {(view === 'list' || view === 'benchmarks') && (
+            <>
+              <select value={ipFilter} onChange={e => setIpFilter(e.target.value)} className="p-3 bg-white rounded-xl border border-black/10 text-sm">
+                <option value="">全部 IP</option>
+                {ips.map(ip => <option key={ip.id} value={ip.id}>{ip.name}</option>)}
+              </select>
+              {view === 'list' && (
+                <div className="flex bg-white rounded-xl border border-black/10 overflow-hidden text-sm">
+                  {['pending', 'approved', 'filmed', 'published', 'rejected', 'archived', ''].map(s => (
+                    <button key={s || 'all'} onClick={() => setStatusFilter(s)}
+                      className={`px-3 py-3 font-bold transition-all whitespace-nowrap ${statusFilter === s ? 'bg-black text-white' : 'hover:bg-gray-50'}`}>
+                      {s ? STATUS_META[s].label : '全部'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
           <button onClick={load} className="p-3 bg-white rounded-xl border border-black/10 hover:bg-gray-50" title="重新整理">
             <RefreshCw size={16} />
           </button>
@@ -205,8 +270,91 @@ export default function ScriptBoard() {
         </div>
       </div>
 
+      {/* 對標名單：雨傘標每天自動找的候選/已驗證帳號 */}
+      {view === 'benchmarks' && (
+        loading ? (
+          <div className="flex justify-center py-20 text-gray-400"><Loader2 className="animate-spin" size={32} /></div>
+        ) : benchmarks.length === 0 ? (
+          <div className="bg-white rounded-3xl border border-black/5 p-16 text-center text-gray-400">
+            <Trophy size={40} className="mx-auto mb-4 opacity-30" />
+            <p className="font-bold">這個 IP 還沒有對標名單</p>
+            <p className="text-xs mt-2">雨傘標每天 10:00 自動搜尋並補進來，誠信鐵則：只列真實搜尋結果，找不到就是沒有</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-xs text-gray-400">🟡 候選＝雨傘標搜尋找到但還沒驗證是否為活帳號（常見原因：IG 暫時限流）；🟢 已驗證＝確認活著並抓到真實粉絲/互動數據</p>
+            <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {benchmarks.map(b => (
+                <div key={b.id} className="bg-white rounded-3xl border border-black/5 shadow-sm p-5">
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <h4 className="font-bold serif truncate">@{b.handle}</h4>
+                    <span className={`shrink-0 px-2 py-1 rounded-full text-[10px] font-bold ${
+                      b.status === 'verified' ? 'bg-green-100 text-green-700' :
+                      b.status === 'dead' ? 'bg-gray-100 text-gray-400' :
+                      b.status === 'promoted' ? 'bg-indigo-100 text-indigo-600' :
+                      'bg-amber-100 text-amber-700'}`}>
+                      {b.status === 'verified' ? '🟢 已驗證' : b.status === 'dead' ? '⚫ 已失效' :
+                       b.status === 'promoted' ? '⭐ 種子池' : '🟡 候選'}
+                    </span>
+                  </div>
+                  {b.niche && <p className="text-xs text-gray-400 mb-2">賽道：{b.niche}</p>}
+                  {b.status === 'verified' && (
+                    <p className="text-sm text-gray-600 mb-2">
+                      粉絲 {b.followers?.toLocaleString() ?? '?'}
+                      {b.avg_likes != null && ` ｜ 平均讚 ${b.avg_likes.toLocaleString()}`}
+                    </p>
+                  )}
+                  {b.source && <p className="text-xs text-gray-400 truncate" title={b.source}>{b.source}</p>}
+                  <p className="text-[10px] text-gray-300 mt-2">發現於 {b.found_date}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      )}
+
+      {/* 帳號總攬：依「待審庫存」急迫度排序，庫存少的排最前面 */}
+      {view === 'overview' && (
+        loading ? (
+          <div className="flex justify-center py-20 text-gray-400"><Loader2 className="animate-spin" size={32} /></div>
+        ) : overview.length === 0 ? (
+          <div className="bg-white rounded-3xl border border-black/5 p-16 text-center text-gray-400">
+            <LayoutGrid size={40} className="mx-auto mb-4 opacity-30" />
+            <p className="font-bold">還沒有任何 IP 的腳本紀錄</p>
+          </div>
+        ) : (
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {overview.map(o => (
+              <div key={o.ip_id}
+                onClick={() => { setIpFilter(o.ip_id); setStatusFilter(''); setView('list'); }}
+                className={`bg-white rounded-3xl border p-6 cursor-pointer hover:shadow-md transition-all ${
+                  o.pending === 0 && o.total > 0 ? 'border-red-200' : 'border-black/5'}`}>
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="font-bold serif text-lg">{o.name}</h4>
+                  {o.pending === 0 && o.total > 0 && (
+                    <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-red-100 text-red-600">🔥 庫存見底</span>
+                  )}
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  {(['pending', 'approved', 'filmed'] as const).map(st => (
+                    <div key={st} className={`rounded-xl py-3 ${STATUS_META[st].cls}`}>
+                      <div className="text-2xl font-black">{o[st]}</div>
+                      <div className="text-[10px] font-bold">{STATUS_META[st].label}</div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400 mt-3">
+                  已發布 {o.published}／封存 {o.archived}／駁回 {o.rejected}
+                  {o.latest_created_at && ` · 最新產出 ${new Date(o.latest_created_at).toLocaleDateString('zh-TW')}`}
+                </p>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+
       {/* 腳本卡片列表 */}
-      {loading ? (
+      {view === 'list' && (loading ? (
         <div className="flex justify-center py-20 text-gray-400"><Loader2 className="animate-spin" size={32} /></div>
       ) : scripts.length === 0 ? (
         <div className="bg-white rounded-3xl border border-black/5 p-16 text-center text-gray-400">
@@ -229,6 +377,12 @@ export default function ScriptBoard() {
                         <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-gray-100 text-gray-500">
                           {s.detail?.format === 'post' ? '📝 貼文' : '🎬 影音'}
                         </span>
+                        {s.detail?.origin && (
+                          <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-600" title="這支腳本的靈感出處">
+                            {s.detail.origin.icon} {s.detail.origin.label}
+                            {s.detail.origin.feedback_applied ? '＋回饋進化' : ''}
+                          </span>
+                        )}
                         <span className="text-xs text-gray-400 font-mono">{ipName(s.ip_id)}{s.no != null ? ` · #${s.no}` : ''}</span>
                         {(s.detail?.warnings?.length ?? 0) > 0 && (
                           <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">
@@ -256,6 +410,16 @@ export default function ScriptBoard() {
                           </button>
                         </>
                       )}
+                      {NEXT_STATUS[s.status] && (() => {
+                        const next = NEXT_STATUS[s.status];
+                        const Icon = next.icon;
+                        return (
+                          <button onClick={() => advance(s)} title={next.label}
+                            className="px-3 py-3 rounded-xl bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-all flex items-center gap-1 text-xs font-bold">
+                            <Icon size={16} /> {next.label}
+                          </button>
+                        );
+                      })()}
                       {s.status !== 'pending' && (
                         <button onClick={() => openEdit(s)} title="改稿"
                           className="p-3 rounded-xl bg-gray-50 text-gray-500 hover:bg-gray-200 transition-all">
@@ -361,7 +525,7 @@ export default function ScriptBoard() {
             );
           })}
         </div>
-      )}
+      ))}
 
       {/* 駁回 modal：6 標籤一鍵 */}
       {rejecting && (
