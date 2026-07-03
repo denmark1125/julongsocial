@@ -259,6 +259,15 @@ app.post("/api/studio/client-feedback", requireStudioAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// ip-nexus 數據帳號清單（廠商管理「數據帳號配對」下拉用）
+app.get("/api/studio/ipprofiles", requireStudioAuth, async (_req, res) => {
+  const { data, error } = await studioDb!.schema("public").from("ip_profiles")
+    .select("fb_page_id,ig_user_id,brand_name,active,token_status")
+    .order("brand_name");
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
 // 爆款靈感牆（雨傘標每日爬蟲推上來）
 app.get("/api/studio/inspirations", requireStudioAuth, async (req, res) => {
   let q = studioDb!.from("inspirations").select("*")

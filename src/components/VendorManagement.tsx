@@ -30,6 +30,7 @@ export default function VendorManagement() {
   const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
   const [visibleFormPasswords, setVisibleFormPasswords] = useState<Record<number, boolean>>({});
+  const [ipProfiles, setIpProfiles] = useState<{ fb_page_id: string; ig_user_id: string | null; brand_name: string; token_status?: string }[]>([]);
   const [formData, setFormData] = useState({
     name: '',
     socialAccounts: [{ platform: 'IG', username: '', password: '' }],
@@ -42,8 +43,20 @@ export default function VendorManagement() {
     selfPublishing: false,
     aiBenchmark: false,
     aiScript: false,
-    aiPersona: ''
+    aiPersona: '',
+    dataFbPageId: ''
   });
+
+  // ip-nexus 數據帳號清單（配對下拉；抓不到就留空，不影響其他功能）
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = await auth.currentUser?.getIdToken();
+        const res = await fetch('/api/studio/ipprofiles', { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) setIpProfiles(await res.json());
+      } catch { /* 數據庫暫時連不上也沒關係 */ }
+    })();
+  }, []);
 
   useEffect(() => {
     const q = query(collection(db, 'vendors'));
@@ -182,7 +195,8 @@ export default function VendorManagement() {
         selfPublishing: false,
         aiBenchmark: false,
         aiScript: false,
-        aiPersona: ''
+        aiPersona: '',
+        dataFbPageId: ''
       });
     } catch (error) {
       toast.error('儲存失敗');
@@ -260,7 +274,8 @@ export default function VendorManagement() {
                       selfPublishing: vendor.selfPublishing || false,
                       aiBenchmark: vendor.aiBenchmark || false,
                       aiScript: vendor.aiScript || false,
-                      aiPersona: vendor.aiPersona || ''
+                      aiPersona: vendor.aiPersona || '',
+                      dataFbPageId: (vendor as any).dataFbPageId || ''
                     });
                     setIsModalOpen(true);
                   }}
@@ -461,6 +476,22 @@ export default function VendorManagement() {
                       <span className="block text-xs text-purple-600/70">依下方人物設定自動產腳本，送到「腳本審核」等核准。需先填人物設定。</span>
                     </div>
                   </label>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">📊 數據帳號配對（ip-nexus）</label>
+                    <select
+                      value={formData.dataFbPageId}
+                      onChange={(e) => setFormData({ ...formData, dataFbPageId: e.target.value })}
+                      className="w-full p-3 bg-white rounded-xl border border-purple-100 text-sm"
+                    >
+                      <option value="">未配對（沒有 Meta 數據也能跑，AI 只用對標＋人設）</option>
+                      {ipProfiles.map(p => (
+                        <option key={p.fb_page_id} value={p.fb_page_id}>
+                          {p.brand_name}{p.token_status && p.token_status !== 'ok' ? '（token 異常）' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-400 mt-1">配對後 AI 會參考這家自己的成效數據（哪支片最會跑）來想題材。</p>
+                  </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">人物設定檔</label>
                     <textarea
