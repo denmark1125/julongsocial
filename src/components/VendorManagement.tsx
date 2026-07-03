@@ -12,7 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Vendor, SocialAccount, OperationType, Editor } from '../types';
-import { Plus, Trash2, Edit2, ExternalLink, Shield, X, Eye, EyeOff, Users } from 'lucide-react';
+import { Plus, Trash2, Edit2, ExternalLink, Shield, X, Eye, EyeOff, Users, ChevronDown, ChevronUp, Settings2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -234,16 +234,21 @@ export default function VendorManagement() {
           <button 
             onClick={() => {
               setEditingVendor(null);
-              setFormData({ 
-                name: '', 
-                socialAccounts: [{ platform: 'IG', username: '', password: '' }], 
+              setShowAdvanced(false);
+              setFormData({
+                name: '',
+                socialAccounts: [{ platform: 'IG', username: '', password: '' }],
                 postingHabits: [],
                 cooperationItems: [],
                 monthlyTargetPosts: 8,
                 monthlyTargetVideos: 0,
                 editorId: '',
                 editorName: '',
-                selfPublishing: false
+                selfPublishing: false,
+                aiBenchmark: false,
+                aiScript: false,
+                aiPersona: '',
+                dataFbPageId: ''
               });
               setIsModalOpen(true);
             }}
@@ -263,8 +268,8 @@ export default function VendorManagement() {
                 <button 
                   onClick={() => {
                     setEditingVendor(vendor);
-                    setFormData({ 
-                      name: vendor.name, 
+                    setFormData({
+                      name: vendor.name,
                       socialAccounts: vendor.socialAccounts,
                       postingHabits: vendor.postingHabits || [],
                       cooperationItems: vendor.cooperationItems || [],
@@ -276,8 +281,12 @@ export default function VendorManagement() {
                       aiBenchmark: vendor.aiBenchmark || false,
                       aiScript: vendor.aiScript || false,
                       aiPersona: vendor.aiPersona || '',
-                      dataFbPageId: (vendor as any).dataFbPageId || ''
+                      dataFbPageId: vendor.dataFbPageId || ''
                     });
+                    setShowAdvanced(Boolean(
+                      vendor.selfPublishing || vendor.aiBenchmark || vendor.aiScript ||
+                      vendor.aiPersona || vendor.dataFbPageId
+                    ));
                     setIsModalOpen(true);
                   }}
                   className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg"
@@ -436,73 +445,91 @@ export default function VendorManagement() {
                   </select>
                 </div>
 
-                <div className="bg-green-50/50 p-4 rounded-2xl border border-green-100/50">
-                  <label className="flex items-center space-x-3 cursor-pointer">
-                    <input 
-                      type="checkbox"
-                      checked={formData.selfPublishing}
-                      onChange={(e) => setFormData({ ...formData, selfPublishing: e.target.checked })}
-                      className="w-5 h-5 rounded border-green-300 text-green-600 focus:ring-green-500"
-                    />
-                    <div>
-                      <span className="block text-sm font-bold text-green-800">廠商自行發布</span>
-                      <span className="block text-xs text-green-600/70">勾選後，該廠商貼文可直接設為「服務次數認列」，不需強制排程日期。</span>
-                    </div>
-                  </label>
-                </div>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvanced(!showAdvanced)}
+                    className="w-full flex items-center justify-between p-4 bg-[#F5F5F0] rounded-2xl hover:bg-gray-100 transition-all"
+                  >
+                    <span className="flex items-center text-sm font-bold text-gray-600">
+                      <Settings2 size={16} className="mr-2" /> 進階設定
+                      <span className="ml-2 text-xs font-normal text-gray-400">自行發布・AI 員工・人物設定</span>
+                    </span>
+                    {showAdvanced ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                  </button>
 
-                <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100/50 space-y-4">
-                  <p className="text-xs font-black uppercase tracking-widest text-purple-400">🤖 AI 員工設定</p>
-                  <label className="flex items-center space-x-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.aiBenchmark}
-                      onChange={(e) => setFormData({ ...formData, aiBenchmark: e.target.checked })}
-                      className="w-5 h-5 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <div>
-                      <span className="block text-sm font-bold text-indigo-800">🌂 雨傘標對標研究</span>
-                      <span className="block text-xs text-indigo-600/70">每天自動找這個廠商賽道的對標帳號與爆款片，推到「爆款靈感」。</span>
+                  {showAdvanced && (
+                    <div className="mt-4 space-y-4">
+                      <div className="bg-green-50/50 p-4 rounded-2xl border border-green-100/50">
+                        <label className="flex items-center space-x-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={formData.selfPublishing}
+                            onChange={(e) => setFormData({ ...formData, selfPublishing: e.target.checked })}
+                            className="w-5 h-5 rounded border-green-300 text-green-600 focus:ring-green-500"
+                          />
+                          <div>
+                            <span className="block text-sm font-bold text-green-800">廠商自行發布</span>
+                            <span className="block text-xs text-green-600/70">勾選後，該廠商貼文可直接設為「服務次數認列」，不需強制排程日期。</span>
+                          </div>
+                        </label>
+                      </div>
+
+                      <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100/50 space-y-4">
+                        <p className="text-xs font-black uppercase tracking-widest text-purple-400">🤖 AI 員工設定</p>
+                        <label className="flex items-center space-x-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={formData.aiBenchmark}
+                            onChange={(e) => setFormData({ ...formData, aiBenchmark: e.target.checked })}
+                            className="w-5 h-5 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <div>
+                            <span className="block text-sm font-bold text-indigo-800">🌂 雨傘標對標研究</span>
+                            <span className="block text-xs text-indigo-600/70">每天自動找這個廠商賽道的對標帳號與爆款片，推到「爆款靈感」。</span>
+                          </div>
+                        </label>
+                        <label className="flex items-center space-x-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={formData.aiScript}
+                            onChange={(e) => setFormData({ ...formData, aiScript: e.target.checked })}
+                            className="w-5 h-5 rounded border-purple-300 text-purple-600 focus:ring-purple-500"
+                          />
+                          <div>
+                            <span className="block text-sm font-bold text-purple-800">🎬 AI 腳本生成</span>
+                            <span className="block text-xs text-purple-600/70">依下方人物設定自動產腳本，送到「腳本審核」等核准。需先填人物設定。</span>
+                          </div>
+                        </label>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">📊 數據帳號配對（ip-nexus）</label>
+                          <select
+                            value={formData.dataFbPageId}
+                            onChange={(e) => setFormData({ ...formData, dataFbPageId: e.target.value })}
+                            className="w-full p-3 bg-white rounded-xl border border-purple-100 text-sm"
+                          >
+                            <option value="">未配對（沒有 Meta 數據也能跑，AI 只用對標＋人設）</option>
+                            {ipProfiles.map(p => (
+                              <option key={p.fb_page_id} value={p.fb_page_id}>
+                                {p.brand_name}{p.token_status && p.token_status !== 'ok' ? '（token 異常）' : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-xs text-gray-400 mt-1">配對後 AI 會參考這家自己的成效數據（哪支片最會跑）來想題材。</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">人物設定檔</label>
+                          <textarea
+                            rows={6}
+                            value={formData.aiPersona}
+                            onChange={(e) => setFormData({ ...formData, aiPersona: e.target.value })}
+                            className="w-full p-3 bg-white rounded-xl border border-purple-100 text-sm resize-none"
+                            placeholder={"AI 寫腳本的依據，寫得越像本人越好。建議包含：\n・人設：口頭禪、說話風格、角色關係（誰跟誰對戲）\n・產品事實：只能用的真數字（例：3.5倍效率、316L、終身保修）\n・紅線：絕對不能說/不能拍的事\n・可拍資源：場地、道具、出鏡的人"}
+                          />
+                        </div>
+                      </div>
                     </div>
-                  </label>
-                  <label className="flex items-center space-x-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.aiScript}
-                      onChange={(e) => setFormData({ ...formData, aiScript: e.target.checked })}
-                      className="w-5 h-5 rounded border-purple-300 text-purple-600 focus:ring-purple-500"
-                    />
-                    <div>
-                      <span className="block text-sm font-bold text-purple-800">🎬 AI 腳本生成</span>
-                      <span className="block text-xs text-purple-600/70">依下方人物設定自動產腳本，送到「腳本審核」等核准。需先填人物設定。</span>
-                    </div>
-                  </label>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">📊 數據帳號配對（ip-nexus）</label>
-                    <select
-                      value={formData.dataFbPageId}
-                      onChange={(e) => setFormData({ ...formData, dataFbPageId: e.target.value })}
-                      className="w-full p-3 bg-white rounded-xl border border-purple-100 text-sm"
-                    >
-                      <option value="">未配對（沒有 Meta 數據也能跑，AI 只用對標＋人設）</option>
-                      {ipProfiles.map(p => (
-                        <option key={p.fb_page_id} value={p.fb_page_id}>
-                          {p.brand_name}{p.token_status && p.token_status !== 'ok' ? '（token 異常）' : ''}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-gray-400 mt-1">配對後 AI 會參考這家自己的成效數據（哪支片最會跑）來想題材。</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">人物設定檔</label>
-                    <textarea
-                      rows={6}
-                      value={formData.aiPersona}
-                      onChange={(e) => setFormData({ ...formData, aiPersona: e.target.value })}
-                      className="w-full p-3 bg-white rounded-xl border border-purple-100 text-sm resize-none"
-                      placeholder={"AI 寫腳本的依據，寫得越像本人越好。建議包含：\n・人設：口頭禪、說話風格、角色關係（誰跟誰對戲）\n・產品事實：只能用的真數字（例：3.5倍效率、316L、終身保修）\n・紅線：絕對不能說/不能拍的事\n・可拍資源：場地、道具、出鏡的人"}
-                    />
-                  </div>
+                  )}
                 </div>
 
                 <div>
