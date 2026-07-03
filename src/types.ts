@@ -102,6 +102,9 @@ export interface Vendor {
   editorId?: string;
   editorName?: string; // Keep for display/fallback
   selfPublishing?: boolean; // Vendor publishes by themselves
+  aiBenchmark?: boolean;    // AI 員工（雨傘標）每日對標研究開關
+  aiScript?: boolean;       // AI 員工（會攝攝）腳本生成開關
+  aiPersona?: string;       // 人物設定檔（AI 寫腳本依據，同事可編輯）
   createdBy: string;
   createdAt: string;
 }

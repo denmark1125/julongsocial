@@ -39,7 +39,10 @@ export default function VendorManagement() {
     monthlyTargetVideos: 0,
     editorId: '',
     editorName: '',
-    selfPublishing: false
+    selfPublishing: false,
+    aiBenchmark: false,
+    aiScript: false,
+    aiPersona: ''
   });
 
   useEffect(() => {
@@ -176,7 +179,10 @@ export default function VendorManagement() {
         monthlyTargetPosts: 8,
         monthlyTargetVideos: 0,
         editorName: '',
-        selfPublishing: false
+        selfPublishing: false,
+        aiBenchmark: false,
+        aiScript: false,
+        aiPersona: ''
       });
     } catch (error) {
       toast.error('儲存失敗');
@@ -251,7 +257,10 @@ export default function VendorManagement() {
                       monthlyTargetVideos: vendor.monthlyTargetVideos || 0,
                       editorId: vendor.editorId || '',
                       editorName: vendor.editorName || '',
-                      selfPublishing: vendor.selfPublishing || false
+                      selfPublishing: vendor.selfPublishing || false,
+                      aiBenchmark: vendor.aiBenchmark || false,
+                      aiScript: vendor.aiScript || false,
+                      aiPersona: vendor.aiPersona || ''
                     });
                     setIsModalOpen(true);
                   }}
@@ -279,6 +288,16 @@ export default function VendorManagement() {
                 {vendor.selfPublishing && (
                   <div className="flex items-center text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded-lg border border-green-100 w-fit">
                     <span>廠商自行發布</span>
+                  </div>
+                )}
+                {vendor.aiBenchmark && (
+                  <div className="flex items-center text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-lg border border-indigo-100 w-fit">
+                    <span>🌂 AI 對標</span>
+                  </div>
+                )}
+                {vendor.aiScript && (
+                  <div className="flex items-center text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded-lg border border-purple-100 w-fit">
+                    <span>🎬 AI 腳本{vendor.aiPersona ? '' : '（缺人設）'}</span>
                   </div>
                 )}
               </div>
@@ -414,6 +433,44 @@ export default function VendorManagement() {
                       <span className="block text-xs text-green-600/70">勾選後，該廠商貼文可直接設為「服務次數認列」，不需強制排程日期。</span>
                     </div>
                   </label>
+                </div>
+
+                <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100/50 space-y-4">
+                  <p className="text-xs font-black uppercase tracking-widest text-purple-400">🤖 AI 員工設定</p>
+                  <label className="flex items-center space-x-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.aiBenchmark}
+                      onChange={(e) => setFormData({ ...formData, aiBenchmark: e.target.checked })}
+                      className="w-5 h-5 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <div>
+                      <span className="block text-sm font-bold text-indigo-800">🌂 雨傘標對標研究</span>
+                      <span className="block text-xs text-indigo-600/70">每天自動找這個廠商賽道的對標帳號與爆款片，推到「爆款靈感」。</span>
+                    </div>
+                  </label>
+                  <label className="flex items-center space-x-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.aiScript}
+                      onChange={(e) => setFormData({ ...formData, aiScript: e.target.checked })}
+                      className="w-5 h-5 rounded border-purple-300 text-purple-600 focus:ring-purple-500"
+                    />
+                    <div>
+                      <span className="block text-sm font-bold text-purple-800">🎬 AI 腳本生成</span>
+                      <span className="block text-xs text-purple-600/70">依下方人物設定自動產腳本，送到「腳本審核」等核准。需先填人物設定。</span>
+                    </div>
+                  </label>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">人物設定檔</label>
+                    <textarea
+                      rows={6}
+                      value={formData.aiPersona}
+                      onChange={(e) => setFormData({ ...formData, aiPersona: e.target.value })}
+                      className="w-full p-3 bg-white rounded-xl border border-purple-100 text-sm resize-none"
+                      placeholder={"AI 寫腳本的依據，寫得越像本人越好。建議包含：\n・人設：口頭禪、說話風格、角色關係（誰跟誰對戲）\n・產品事實：只能用的真數字（例：3.5倍效率、316L、終身保修）\n・紅線：絕對不能說/不能拍的事\n・可拍資源：場地、道具、出鏡的人"}
+                    />
+                  </div>
                 </div>
 
                 <div>
