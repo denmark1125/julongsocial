@@ -270,7 +270,7 @@ app.post("/api/studio/scripts/:id/advance", requireStudioAuth, async (req, res) 
 app.put("/api/studio/scripts/:id", requireStudioAuth, async (req, res) => {
   const by = (req as any).studioUser.email || (req as any).studioUser.uid;
   const { data: before, error: e0 } = await studioDb!.from("scripts")
-    .select("topic,content,hook,props_location,source").eq("id", req.params.id).single();
+    .select("topic,content,hook,props_location,source,detail").eq("id", req.params.id).single();
   if (e0) return res.status(500).json({ error: e0.message });
   const after = {
     topic: req.body.topic ?? before.topic,
@@ -278,8 +278,14 @@ app.put("/api/studio/scripts/:id", requireStudioAuth, async (req, res) => {
     hook: req.body.hook ?? before.hook,
     props_location: req.body.props_location ?? before.props_location,
   };
+  // 卡片展開時若有 detail.scenes（分鏡表）會優先顯示分鏡表、蓋過 content 純文字，
+  // 導致老闆改了 content 卻在畫面上看起來像沒改到。就地改稿後分鏡表跟原文脫鉤，
+  // 清掉 scenes 讓畫面改用剛存的 content，其餘 detail 欄位（hook/策略/CTA/出處…）保留。
+  const detail = { ...(before.detail || {}) };
+  if (after.content !== before.content) delete detail.scenes;
   const { error } = await studioDb!.from("scripts").update({
     ...after,
+    detail,
     source: before.source === "ai" ? "ai_edited" : before.source,
     updated_at: new Date().toISOString(),
   }).eq("id", req.params.id);
