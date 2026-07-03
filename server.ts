@@ -5,8 +5,10 @@ import cookieParser from "cookie-parser";
 import session from "express-session";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
-import * as admin from "firebase-admin";
+import { getApps, initializeApp as initializeAdminApp } from "firebase-admin/app";
+import { getAuth as getAdminAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
+import { createClient } from "@supabase/supabase-js";
 import firebaseConfig from "./firebase-applet-config.json";
 
 dotenv.config();
@@ -17,14 +19,14 @@ let adminDb: any;
 // Initialize Firebase Admin
 function initializeFirebaseAdmin() {
   try {
-    if (admin.apps.length === 0) {
+    if (getApps().length === 0) {
       console.log("Initializing Firebase Admin for project:", firebaseConfig.projectId);
-      admin.initializeApp({
+      initializeAdminApp({
         projectId: firebaseConfig.projectId,
       });
     }
-    adminAuth = admin.auth();
-    adminDb = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
+    adminAuth = getAdminAuth(getApps()[0]);
+    adminDb = getFirestore(getApps()[0], firebaseConfig.firestoreDatabaseId);
     console.log("Using Firestore database:", firebaseConfig.firestoreDatabaseId);
   } catch (e) {
     console.error("Firebase Admin Initialization Error:", e);
@@ -54,7 +56,7 @@ app.get("/api/debug", (req, res) => {
     port: PORT,
     firebaseProjectId: firebaseConfig.projectId,
     firebaseDatabaseId: firebaseConfig.firestoreDatabaseId,
-    appsInitialized: admin.apps.length
+    appsInitialized: getApps().length
   });
 });
 
@@ -138,6 +140,123 @@ app.post("/api/webhook/make", async (req, res) => {
     console.error("Webhook error:", error);
     res.status(500).json({ error: "Failed to trigger webhook" });
   }
+});
+
+// ===============================================================
+// Studio 腳本系統 API（Supabase Julangmeta / schema: studio）
+// service key 只活在後端 env；前端一律經過這裡，並先驗 Firebase 登入
+// ===============================================================
+const studioDb = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY
+  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY, {
+      db: { schema: "studio" },
+      auth: { persistSession: false },
+    })
+  : null;
+
+async function requireStudioAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (!studioDb) {
+    return res.status(500).json({ error: "Studio 未設定（缺 SUPABASE_URL / SUPABASE_SERVICE_KEY）" });
+  }
+  if (!adminAuth) {
+    return res.status(500).json({ error: "Firebase Admin not initialized" });
+  }
+  try {
+    const token = (req.headers.authorization || "").replace("Bearer ", "");
+    (req as any).studioUser = await adminAuth.verifyIdToken(token);
+    next();
+  } catch {
+    res.status(401).json({ error: "unauthorized" });
+  }
+}
+
+// IP 清單（下拉用）
+app.get("/api/studio/ips", requireStudioAuth, async (req, res) => {
+  const { data, error } = await studioDb!.from("ips").select("*").eq("active", true).order("id");
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// 腳本列表（?ip_id=&status=）
+app.get("/api/studio/scripts", requireStudioAuth, async (req, res) => {
+  let q = studioDb!.from("scripts").select("*").order("created_at", { ascending: false }).limit(200);
+  if (req.query.ip_id) q = q.eq("ip_id", String(req.query.ip_id));
+  if (req.query.status) q = q.eq("status", String(req.query.status));
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// 手寫腳本貼上（source='human'）
+app.post("/api/studio/scripts", requireStudioAuth, async (req, res) => {
+  const { ip_id, no, topic, content, hook, props_location, batch } = req.body;
+  if (!ip_id || !topic || !content) {
+    return res.status(400).json({ error: "缺 ip_id / topic / content" });
+  }
+  const { data, error } = await studioDb!.from("scripts").insert({
+    ip_id, no: no ?? null, topic, content,
+    hook: hook || null, props_location: props_location || null,
+    batch: batch || null, source: "human",
+    created_by: (req as any).studioUser.email || (req as any).studioUser.uid,
+  }).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// 核准 / 駁回（駁回帶 6 標籤 + 選填備註）
+app.post("/api/studio/scripts/:id/review", requireStudioAuth, async (req, res) => {
+  const { action, tag, note } = req.body; // action: 'approve' | 'reject'
+  if (action !== "approve" && action !== "reject") {
+    return res.status(400).json({ error: "action 需為 approve / reject" });
+  }
+  const by = (req as any).studioUser.email || (req as any).studioUser.uid;
+  const { error } = await studioDb!.from("scripts")
+    .update({ status: action === "approve" ? "approved" : "rejected", updated_at: new Date().toISOString() })
+    .eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  if (action === "reject" && tag) {
+    await studioDb!.from("script_feedback").insert({
+      script_id: req.params.id, tag, note: note || null, created_by: by,
+    });
+  }
+  res.json({ ok: true });
+});
+
+// 就地改稿（自動存 diff＝最誠實的回饋）
+app.put("/api/studio/scripts/:id", requireStudioAuth, async (req, res) => {
+  const by = (req as any).studioUser.email || (req as any).studioUser.uid;
+  const { data: before, error: e0 } = await studioDb!.from("scripts")
+    .select("topic,content,hook,props_location,source").eq("id", req.params.id).single();
+  if (e0) return res.status(500).json({ error: e0.message });
+  const after = {
+    topic: req.body.topic ?? before.topic,
+    content: req.body.content ?? before.content,
+    hook: req.body.hook ?? before.hook,
+    props_location: req.body.props_location ?? before.props_location,
+  };
+  const { error } = await studioDb!.from("scripts").update({
+    ...after,
+    source: before.source === "ai" ? "ai_edited" : before.source,
+    updated_at: new Date().toISOString(),
+  }).eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  await studioDb!.from("script_feedback").insert({
+    script_id: req.params.id,
+    diff: { before: { topic: before.topic, content: before.content, hook: before.hook, props_location: before.props_location }, after },
+    created_by: by,
+  });
+  res.json({ ok: true });
+});
+
+// 業主回饋登記（開會後 30 秒填）
+app.post("/api/studio/client-feedback", requireStudioAuth, async (req, res) => {
+  const { ip_id, said, kind } = req.body;
+  if (!ip_id || !said) return res.status(400).json({ error: "缺 ip_id / said" });
+  const { error } = await studioDb!.from("client_feedback").insert({
+    ip_id, said, kind: kind || null,
+    created_by: (req as any).studioUser.email || (req as any).studioUser.uid,
+  });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
 });
 
 // Vite middleware for development

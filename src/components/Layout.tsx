@@ -18,7 +18,8 @@ import {
   BellRing,
   Clock,
   Lock,
-  CreditCard
+  CreditCard,
+  Clapperboard
 } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
@@ -184,6 +185,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     { id: 'dashboard', label: '儀表板', icon: LayoutDashboard, roles: ['engineer', 'manager', 'employee'] },
     { id: 'vendors', label: '廠商管理', icon: Users, roles: ['engineer', 'manager', 'employee'] },
     { id: 'posts', label: '貼文管理', icon: FileText, roles: ['engineer', 'manager', 'employee'] },
+    { id: 'scripts', label: '腳本審核', icon: Clapperboard, roles: ['engineer', 'manager', 'employee'] },
     { id: 'videos', label: '素材資料庫', icon: Video, roles: ['engineer', 'manager', 'employee'] },
     { id: 'calendar', label: '社群日曆', icon: CalendarIcon, roles: ['engineer', 'manager', 'employee'] },
     { id: 'billing', label: '帳務管理', icon: CreditCard, roles: ['engineer', 'manager'] },

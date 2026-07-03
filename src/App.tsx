@@ -13,6 +13,7 @@ import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
 import VendorManagement from './components/VendorManagement';
 import PostManagement from './components/PostManagement';
+import ScriptBoard from './components/ScriptBoard';
 import CalendarView from './components/CalendarView';
 import AssetDatabase from './components/AssetDatabase';
 import UserManagement from './components/UserManagement';
@@ -233,6 +234,7 @@ export default function App() {
       case 'dashboard': return <Dashboard setActiveTab={setActiveTab} />;
       case 'vendors': return <VendorManagement />;
       case 'posts': return <PostManagement />;
+      case 'scripts': return <ScriptBoard />;
       case 'calendar': return <CalendarView />;
       case 'videos': return <AssetDatabase />;
       case 'billing': return <BillingManagement />;
