@@ -91,6 +91,7 @@ export default function ScriptBoard() {
   const [overview, setOverview] = useState<IpOverview[]>([]);
   const [view, setView] = useState<'list' | 'overview' | 'benchmarks'>('list');
   const [benchmarks, setBenchmarks] = useState<BenchmarkAccount[]>([]);
+  const [benchForm, setBenchForm] = useState({ ip_id: '', handle: '', niche: '' });
   const [loading, setLoading] = useState(true);
   const [ipFilter, setIpFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('pending');
@@ -177,6 +178,15 @@ const load = useCallback(async () => {
   const openEdit = (s: Script) => {
     setEditing(s);
     setEditForm({ topic: s.topic, content: s.content, hook: s.hook || '', props_location: s.props_location || '' });
+  };
+
+  const submitBenchmark = async () => {
+    try {
+      await api('/api/studio/benchmarks', { method: 'POST', body: JSON.stringify(benchForm) });
+      toast.success(`@${benchForm.handle.replace(/^@/, '')} 已加入對標名單（老闆指定）`);
+      setBenchForm(f => ({ ...f, handle: '', niche: '' }));
+      load();
+    } catch (e: any) { toast.error(e.message); }
   };
 
   const submitEdit = async () => {
@@ -270,9 +280,28 @@ const load = useCallback(async () => {
         </div>
       </div>
 
-      {/* 對標名單：雨傘標每天自動找的候選/已驗證帳號 */}
+      {/* 對標名單：雨傘標每天自動找的候選/已驗證帳號＋老闆手動指定 */}
       {view === 'benchmarks' && (
-        loading ? (
+        <div className="space-y-4">
+          {/* 老闆手動指定（補充管道；主力是雨傘標自動找） */}
+          <div className="bg-white rounded-2xl border border-black/10 p-4 flex flex-wrap items-center gap-3">
+            <span className="text-sm font-bold shrink-0">⭐ 手動指定對標</span>
+            <select value={benchForm.ip_id} onChange={e => setBenchForm(f => ({ ...f, ip_id: e.target.value }))}
+              className="p-2 bg-gray-50 rounded-lg border border-black/10 text-sm">
+              <option value="">選 IP</option>
+              {ips.map(ip => <option key={ip.id} value={ip.id}>{ip.name}</option>)}
+            </select>
+            <input value={benchForm.handle} onChange={e => setBenchForm(f => ({ ...f, handle: e.target.value }))}
+              placeholder="@帳號（IG）" className="p-2 bg-gray-50 rounded-lg border border-black/10 text-sm w-44" />
+            <input value={benchForm.niche} onChange={e => setBenchForm(f => ({ ...f, niche: e.target.value }))}
+              placeholder="賽道（選填）" className="p-2 bg-gray-50 rounded-lg border border-black/10 text-sm w-36" />
+            <button onClick={submitBenchmark} disabled={!benchForm.ip_id || !benchForm.handle.trim()}
+              className="bg-black text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-30">
+              加入名單
+            </button>
+            <span className="text-[11px] text-gray-400">你指定的直接進 AI 取材（標⭐老闆指定）；雨傘標每天 10:00 仍會自己找</span>
+          </div>
+        {loading ? (
           <div className="flex justify-center py-20 text-gray-400"><Loader2 className="animate-spin" size={32} /></div>
         ) : benchmarks.length === 0 ? (
           <div className="bg-white rounded-3xl border border-black/5 p-16 text-center text-gray-400">
@@ -282,7 +311,7 @@ const load = useCallback(async () => {
           </div>
         ) : (
           <div className="space-y-4">
-            <p className="text-xs text-gray-400">🟡 候選＝雨傘標搜尋找到但還沒驗證是否為活帳號（常見原因：IG 暫時限流）；🟢 已驗證＝確認活著並抓到真實粉絲/互動數據</p>
+            <p className="text-xs text-gray-400">🟡 候選＝雨傘標搜尋找到但還沒驗證是否為活帳號（常見原因：IG 暫時限流）；🟢 已驗證＝確認活著並抓到真實粉絲/互動數據；⭐ 老闆指定＝直接進 AI 取材</p>
             <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
               {benchmarks.map(b => (
                 <div key={b.id} className="bg-white rounded-3xl border border-black/5 shadow-sm p-5">
@@ -310,7 +339,8 @@ const load = useCallback(async () => {
               ))}
             </div>
           </div>
-        )
+        )}
+        </div>
       )}
 
       {/* 帳號總攬：依「待審庫存」急迫度排序，庫存少的排最前面 */}

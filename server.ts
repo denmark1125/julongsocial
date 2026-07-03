@@ -196,6 +196,21 @@ app.get("/api/studio/benchmarks", requireStudioAuth, async (req, res) => {
   res.json(data);
 });
 
+// 老闆手動指定對標（補充管道；主力仍是雨傘標每日自動找）
+app.post("/api/studio/benchmarks", requireStudioAuth, async (req, res) => {
+  const { ip_id, handle, niche } = req.body;
+  if (!ip_id || !handle) return res.status(400).json({ error: "缺 ip_id / handle" });
+  const clean = String(handle).trim().replace(/^@/, "").toLowerCase();
+  if (!/^[a-z0-9._]{2,30}$/.test(clean)) return res.status(400).json({ error: "IG 帳號格式不對" });
+  const { error } = await studioDb!.from("benchmark_accounts").upsert({
+    ip_id, handle: clean, niche: niche || null,
+    status: "promoted", source: "老闆手動指定",
+    found_date: new Date().toISOString().slice(0, 10),
+  }, { onConflict: "ip_id,handle" });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true, handle: clean });
+});
+
 // IP 總攬（帳號總覽）：每個 IP 各狀態件數＋最新產出時間，前台依「待審庫存」急迫度排序
 app.get("/api/studio/scripts/overview", requireStudioAuth, async (req, res) => {
   const [{ data: ips, error: e1 }, { data: scripts, error: e2 }] = await Promise.all([
