@@ -31,6 +31,7 @@ export default function VendorManagement() {
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
   const [visibleFormPasswords, setVisibleFormPasswords] = useState<Record<number, boolean>>({});
   const [ipProfiles, setIpProfiles] = useState<{ fb_page_id: string; ig_user_id: string | null; brand_name: string; token_status?: string }[]>([]);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     socialAccounts: [{ platform: 'IG', username: '', password: '' }],
