@@ -7,10 +7,20 @@ import {
 import toast from 'react-hot-toast';
 
 interface StudioIp { id: string; name: string; }
+interface ScriptScene { time: string; visual: string; audio: string; }
+interface ScriptDetail {
+  hook?: string;        // 0-3s 黃金鉤子
+  strategy?: string;    // 導演行銷策略與心理學邏輯
+  pacing?: string;      // 節奏、BGM、字卡建議
+  scenes?: ScriptScene[]; // 逐格導演分鏡
+  cta?: string;         // 完播話術
+  hashtags?: string[];
+}
 interface Script {
   id: string; ip_id: string; no: number | null;
   topic: string; content: string; hook: string | null; props_location: string | null;
   status: string; source: string; batch: string | null; created_at: string;
+  detail: ScriptDetail | null;
 }
 
 const REJECT_TAGS: { tag: string; label: string }[] = [
@@ -253,11 +263,79 @@ export default function ScriptBoard() {
                     </div>
                   </div>
                   {isOpen && (
-                    <div className="mt-4 space-y-3">
-                      <div className="bg-[#F5F5F0] p-4 rounded-2xl text-sm whitespace-pre-wrap leading-relaxed">{s.content}</div>
+                    <div className="mt-4 space-y-4">
+                      {/* 黃金 Hook */}
+                      {(s.detail?.hook || s.hook) && (
+                        <div className="bg-black text-white p-5 rounded-2xl">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-amber-400 mb-2">爆款黃金 Hook（0-3s）</p>
+                          <p className="serif text-lg leading-relaxed">“{s.detail?.hook || s.hook}”</p>
+                        </div>
+                      )}
+                      {/* 策略邏輯 + 節奏建議 */}
+                      {(s.detail?.strategy || s.detail?.pacing) && (
+                        <div className="grid md:grid-cols-2 gap-3">
+                          {s.detail?.strategy && (
+                            <div className="bg-[#F5F5F0] p-4 rounded-2xl">
+                              <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">導演行銷策略與心理學邏輯</p>
+                              <p className="text-sm leading-relaxed">{s.detail.strategy}</p>
+                            </div>
+                          )}
+                          {s.detail?.pacing && (
+                            <div className="bg-[#F5F5F0] p-4 rounded-2xl">
+                              <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">節奏、BGM 與字卡建議</p>
+                              <p className="text-sm leading-relaxed">💡 {s.detail.pacing}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {/* 逐格分鏡表 */}
+                      {s.detail?.scenes && s.detail.scenes.length > 0 ? (
+                        <div className="border border-black/5 rounded-2xl overflow-hidden">
+                          <div className="grid grid-cols-12 bg-black text-white text-[10px] font-black uppercase tracking-widest px-4 py-3">
+                            <div className="col-span-2">鏡頭時間</div>
+                            <div className="col-span-5">畫面視覺與字幕壓字</div>
+                            <div className="col-span-5">口播語音與音效</div>
+                          </div>
+                          {s.detail.scenes.map((sc, i) => (
+                            <div key={i} className={`grid grid-cols-12 px-4 py-3 text-sm gap-2 ${i % 2 ? 'bg-[#FAFAF7]' : 'bg-white'}`}>
+                              <div className="col-span-2 font-mono font-bold">{sc.time}</div>
+                              <div className="col-span-5 leading-relaxed">{sc.visual}</div>
+                              <div className="col-span-5 leading-relaxed text-gray-600">{sc.audio}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="bg-[#F5F5F0] p-4 rounded-2xl text-sm whitespace-pre-wrap leading-relaxed">{s.content}</div>
+                      )}
+                      {/* CTA + Hashtags */}
+                      {s.detail?.cta && (
+                        <div className="bg-green-50 p-4 rounded-2xl">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-green-600 mb-1">收尾 CTA 完播話術</p>
+                          <p className="text-sm">{s.detail.cta}</p>
+                        </div>
+                      )}
+                      {s.detail?.hashtags && s.detail.hashtags.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {s.detail.hashtags.map(h => (
+                            <span key={h} className="px-3 py-1 bg-[#F5F5F0] rounded-full text-xs font-bold text-gray-600">
+                              #{h.replace(/^#/, '')}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       {s.props_location && (
                         <p className="text-xs text-gray-500">🎬 道具／地點：{s.props_location}</p>
                       )}
+                      {/* 複製完整腳本 */}
+                      <button onClick={() => {
+                        const d = s.detail;
+                        const scenes = d?.scenes?.map(sc => `[${sc.time}]\n畫面：${sc.visual}\n口播：${sc.audio}`).join('\n\n') || s.content;
+                        const text = `【🎬 ${ipName(s.ip_id)}｜${s.topic}】\n\n[🔥 黃金Hook]: ${d?.hook || s.hook || ''}\n${d?.pacing ? `\n[🎧 節奏音效]: ${d.pacing}\n` : ''}\n${scenes}\n\n[🎯 CTA]: ${d?.cta || ''}\n${d?.hashtags?.length ? `\n[🏷️] ${d.hashtags.map(h => '#' + h.replace(/^#/, '')).join(' ')}` : ''}${s.props_location ? `\n[🎬 道具/地點]: ${s.props_location}` : ''}`;
+                        navigator.clipboard.writeText(text);
+                        toast.success('完整腳本已複製');
+                      }} className="text-xs font-bold text-gray-400 hover:text-black transition-all">
+                        📋 複製完整腳本
+                      </button>
                     </div>
                   )}
                 </div>

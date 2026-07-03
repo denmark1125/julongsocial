@@ -259,6 +259,29 @@ app.post("/api/studio/client-feedback", requireStudioAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// 爆款靈感牆（雨傘標每日爬蟲推上來）
+app.get("/api/studio/inspirations", requireStudioAuth, async (req, res) => {
+  let q = studioDb!.from("inspirations").select("*")
+    .neq("status", "dismissed")
+    .order("found_date", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (req.query.status) q = q.eq("status", String(req.query.status));
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post("/api/studio/inspirations/:id/status", requireStudioAuth, async (req, res) => {
+  const { status } = req.body; // starred / used / dismissed / new
+  if (!["new", "starred", "used", "dismissed"].includes(status)) {
+    return res.status(400).json({ error: "status 不合法" });
+  }
+  const { error } = await studioDb!.from("inspirations").update({ status }).eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
 // Vite middleware for development
 async function setupServer() {
   console.log("Starting setupServer...");
