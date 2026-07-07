@@ -10,6 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Post, Vendor, Asset, DismissedHabit } from '../types';
+import { visibleVendors, trackedVendors } from '../lib/vendorStatus';
 import PostDetailModal from './PostDetailModal';
 import { 
   format, 
@@ -294,8 +295,8 @@ export default function CalendarView() {
                 const dayPosts = posts.filter(p => p.scheduledAt && isSameDay(parseISO(p.scheduledAt), day));
                 const dayOfWeek = getDay(day);
                 
-                // Find habits for this day
-                const dayHabits = vendors.flatMap(v => 
+                // Find habits for this day（排除冷凍中/已終止的廠商，避免提醒誤發）
+                const dayHabits = trackedVendors(vendors).flatMap(v =>
                   (v.postingHabits || [])
                     .filter(h => h.daysOfWeek.includes(dayOfWeek))
                     .map(h => ({ ...h, vendorName: v.name, vendorId: v.id }))
@@ -476,7 +477,7 @@ export default function CalendarView() {
         isOpen={isTrackingModalOpen}
         onClose={() => setIsTrackingModalOpen(false)}
         posts={posts}
-        vendors={vendors}
+        vendors={visibleVendors(vendors)}
         assets={assets}
         dismissedHabits={dismissedHabits}
       />

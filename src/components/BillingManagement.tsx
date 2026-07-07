@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Vendor, BillingContract, BillingRecord, BillingService } from '../types';
+import { visibleVendors } from '../lib/vendorStatus';
 import { format, parseISO, startOfMonth, endOfMonth, addMonths, subMonths, isSameMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import { 
   Plus, 
@@ -686,7 +687,7 @@ export default function BillingManagement() {
                   required
                 >
                   <option value="">請選擇廠商...</option>
-                  {vendors.map(v => (
+                  {visibleVendors(vendors).map(v => (
                     <option key={v.id} value={v.id}>{v.name}</option>
                   ))}
                 </select>

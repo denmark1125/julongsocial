@@ -28,6 +28,7 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { UserProfile, Post, Vendor, Asset, DismissedHabit } from '../types';
+import { trackedVendors } from '../lib/vendorStatus';
 import { format, parseISO, isBefore, addDays, isAfter, getDay, isSameDay, subDays } from 'date-fns';
 import Logo from './Logo';
 import { motion, AnimatePresence } from 'motion/react';
@@ -122,10 +123,10 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
       const dayOfWeek = getDay(checkDate);
       const dateStr = format(checkDate, 'yyyy-MM-dd');
       
-      vendors.forEach(vendor => {
+      trackedVendors(vendors).forEach(vendor => {
         const habits = vendor.postingHabits || [];
         const dayHabits = habits.filter(h => h.daysOfWeek.includes(dayOfWeek));
-        
+
         dayHabits.forEach(habit => {
           const isDismissed = dismissedHabits.some(d => d.vendorId === vendor.id && d.habitTime === habit.time && d.date === dateStr);
           if (isDismissed) return;
@@ -153,7 +154,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     }
 
     // 3. Low Stock
-    vendors.forEach(v => {
+    trackedVendors(vendors).forEach(v => {
       const stock = assets.filter(a => a.vendorId === v.id && a.type === 'video' && a.status === 'available').length;
       if (stock < 2) {
         list.push({

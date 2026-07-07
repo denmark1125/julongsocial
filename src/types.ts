@@ -106,6 +106,8 @@ export interface Vendor {
   aiScript?: boolean;       // AI 員工（會攝攝）腳本生成開關
   aiPersona?: string;       // 人物設定檔（AI 寫腳本依據，同事可編輯）
   dataFbPageId?: string;    // 配對的 ip-nexus 數據帳號（ip_profiles.fb_page_id）
+  status?: 'active' | 'paused' | 'ended'; // 不填視同 active
+  pausedUntil?: string;     // YYYY-MM-DD，冷凍期預計恢復日（僅 status='paused' 時有意義）
   createdBy: string;
   createdAt: string;
 }

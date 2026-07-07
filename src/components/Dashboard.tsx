@@ -8,6 +8,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Post, Vendor, Asset, DismissedHabit, BillingRecord, BillingContract } from '../types';
+import { visibleVendors, trackedVendors } from '../lib/vendorStatus';
 import { 
   format, 
   isPast, 
@@ -93,14 +94,14 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
   }, []);
 
   const stats = [
-    { label: '合作廠商', value: vendors.length, icon: PartnerIcon, color: 'text-[#5A5A40]', bg: 'bg-[#5A5A40]/10' },
+    { label: '合作廠商', value: visibleVendors(vendors).length, icon: PartnerIcon, color: 'text-[#5A5A40]', bg: 'bg-[#5A5A40]/10' },
     { label: '本月貼文', value: posts.length, icon: GrowthIcon, color: 'text-[#8B7355]', bg: 'bg-[#8B7355]/10' },
     { label: '已發布', value: posts.filter(p => p.status === 'published').length, icon: SuccessIcon, color: 'text-[#8A8A6A]', bg: 'bg-[#8A8A6A]/10' },
     { label: '素材庫存', value: assets.filter(a => a.status === 'available').length, icon: InventoryIcon, color: 'text-[#A67C52]', bg: 'bg-[#A67C52]/10' },
   ];
 
-  // Low Video Stock Alert (fewer than 2 videos)
-  const lowStockVendors = vendors.map(vendor => {
+  // Low Video Stock Alert (fewer than 2 videos)（排除冷凍中/已終止的廠商）
+  const lowStockVendors = trackedVendors(vendors).map(vendor => {
     const stock = assets.filter(a => a.vendorId === vendor.id && a.type === 'video' && a.status === 'available').length;
     return { ...vendor, stock };
   }).filter(v => v.stock < 2);
@@ -127,10 +128,10 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
     const dayOfWeek = getDay(checkDate);
     const dateStr = format(checkDate, 'yyyy-MM-dd');
     
-    vendors.forEach(vendor => {
+    trackedVendors(vendors).forEach(vendor => {
       const habits = vendor.postingHabits || [];
       const dayHabits = habits.filter(h => h.daysOfWeek.includes(dayOfWeek));
-      
+
       dayHabits.forEach(habit => {
         // Check if dismissed
         const isDismissed = dismissedHabits.some(d => 
