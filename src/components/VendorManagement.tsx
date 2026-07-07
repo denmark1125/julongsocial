@@ -12,14 +12,17 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Vendor, SocialAccount, OperationType, Editor } from '../types';
-import { Plus, Trash2, Edit2, ExternalLink, Shield, X, Eye, EyeOff, Users } from 'lucide-react';
+import { Plus, Trash2, Edit2, ExternalLink, Shield, X, Eye, EyeOff, Users, Snowflake, RotateCcw, PowerOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { getEffectiveVendorStatus } from '../lib/vendorStatus';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+type StatusTab = 'active' | 'paused' | 'ended';
 
 export default function VendorManagement() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -30,6 +33,9 @@ export default function VendorManagement() {
   const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
   const [visibleFormPasswords, setVisibleFormPasswords] = useState<Record<number, boolean>>({});
+  const [statusTab, setStatusTab] = useState<StatusTab>('active');
+  const [pauseModalVendor, setPauseModalVendor] = useState<Vendor | null>(null);
+  const [pauseUntilInput, setPauseUntilInput] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     socialAccounts: [{ platform: 'IG', username: '', password: '' }],
@@ -183,11 +189,50 @@ export default function VendorManagement() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('確定要刪除此廠商嗎？')) {
+  const handleEndCooperation = async (id: string) => {
+    if (!window.confirm('確定要終止與此廠商的合作嗎？資料會保留在資料庫，但不會再出現在其他頁面的選單與追蹤中。')) return;
+    try {
+      await updateDoc(doc(db, 'vendors', id), { status: 'ended' });
+      toast.success('已終止合作');
+    } catch (error) {
+      toast.error('操作失敗');
+    }
+  };
+
+  const handleResume = async (id: string) => {
+    try {
+      await updateDoc(doc(db, 'vendors', id), { status: 'active', pausedUntil: '' });
+      toast.success('已恢復合作');
+    } catch (error) {
+      toast.error('操作失敗');
+    }
+  };
+
+  const openPauseModal = (vendor: Vendor) => {
+    setPauseModalVendor(vendor);
+    setPauseUntilInput(vendor.pausedUntil || '');
+  };
+
+  const handleConfirmPause = async () => {
+    if (!pauseModalVendor?.id) return;
+    try {
+      await updateDoc(doc(db, 'vendors', pauseModalVendor.id), {
+        status: 'paused',
+        pausedUntil: pauseUntilInput || ''
+      });
+      toast.success('已設為冷凍中');
+      setPauseModalVendor(null);
+      setPauseUntilInput('');
+    } catch (error) {
+      toast.error('操作失敗');
+    }
+  };
+
+  const handleHardDelete = async (id: string) => {
+    if (window.confirm('此操作將永久刪除該廠商資料，無法復原，確定要繼續嗎？')) {
       try {
         await deleteDoc(doc(db, 'vendors', id));
-        toast.success('已刪除');
+        toast.success('已永久刪除');
       } catch (error) {
         toast.error('刪除失敗');
       }
@@ -195,6 +240,13 @@ export default function VendorManagement() {
   };
 
   const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
+
+  const statusTabs: { id: StatusTab; label: string }[] = [
+    { id: 'active', label: '進行中' },
+    { id: 'paused', label: '冷凍中' },
+    { id: 'ended', label: '已終止' }
+  ];
+  const displayedVendors = vendors.filter(v => getEffectiveVendorStatus(v) === statusTab);
 
   return (
     <div className="space-y-6">
@@ -233,8 +285,34 @@ export default function VendorManagement() {
         </div>
       </div>
 
+      <div className="flex gap-2">
+        {statusTabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setStatusTab(tab.id)}
+            className={cn(
+              "px-4 py-2 rounded-xl text-sm font-bold transition-all",
+              statusTab === tab.id
+                ? "bg-[#5A5A40] text-white shadow-sm"
+                : "bg-white text-gray-500 border border-black/5 hover:bg-gray-50"
+            )}
+          >
+            {tab.label}
+            <span className="ml-1.5 text-xs font-normal opacity-70">
+              {vendors.filter(v => getEffectiveVendorStatus(v) === tab.id).length}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {displayedVendors.length === 0 && (
+        <div className="text-center py-16 text-gray-400 text-sm italic">
+          {statusTab === 'ended' ? '目前沒有已終止合作的廠商' : statusTab === 'paused' ? '目前沒有冷凍中的廠商' : '目前沒有進行中的廠商'}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-        {vendors.map((vendor) => (
+        {displayedVendors.map((vendor) => (
           <div key={vendor.id} className="bg-white p-6 rounded-2xl shadow-sm border border-black/5 hover:shadow-md transition-all group">
             <div className="flex justify-between items-start mb-4">
               <h3 className="text-lg font-bold serif">{vendor.name}</h3>
@@ -259,17 +337,68 @@ export default function VendorManagement() {
                 >
                   <Edit2 size={16} />
                 </button>
-                <button 
-                  onClick={() => handleDelete(vendor.id!)}
-                  className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
-                >
-                  <Trash2 size={16} />
-                </button>
+                {statusTab === 'active' && (
+                  <button
+                    onClick={() => openPauseModal(vendor)}
+                    className="p-2 text-cyan-600 hover:bg-cyan-50 rounded-lg"
+                    title="設為冷凍中"
+                  >
+                    <Snowflake size={16} />
+                  </button>
+                )}
+                {statusTab === 'paused' && (
+                  <button
+                    onClick={() => handleResume(vendor.id!)}
+                    className="p-2 text-green-600 hover:bg-green-50 rounded-lg"
+                    title="恢復合作"
+                  >
+                    <RotateCcw size={16} />
+                  </button>
+                )}
+                {statusTab !== 'ended' && (
+                  <button
+                    onClick={() => handleEndCooperation(vendor.id!)}
+                    className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                    title="終止合作"
+                  >
+                    <PowerOff size={16} />
+                  </button>
+                )}
+                {statusTab === 'ended' && (
+                  <>
+                    <button
+                      onClick={() => handleResume(vendor.id!)}
+                      className="p-2 text-green-600 hover:bg-green-50 rounded-lg"
+                      title="恢復合作"
+                    >
+                      <RotateCcw size={16} />
+                    </button>
+                    <button
+                      onClick={() => handleHardDelete(vendor.id!)}
+                      className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                      title="永久刪除"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
-            
+
             <div className="space-y-3">
               <div className="flex flex-wrap gap-2 items-center">
+                {statusTab === 'paused' && (
+                  <div className="flex items-center text-xs font-bold text-cyan-700 bg-cyan-50 px-2 py-1 rounded-lg border border-cyan-100 w-fit">
+                    <Snowflake size={12} className="mr-1" />
+                    <span>冷凍中{vendor.pausedUntil ? `（預計 ${vendor.pausedUntil} 恢復）` : ''}</span>
+                  </div>
+                )}
+                {statusTab === 'ended' && (
+                  <div className="flex items-center text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-lg border border-gray-200 w-fit">
+                    <PowerOff size={12} className="mr-1" />
+                    <span>已終止合作</span>
+                  </div>
+                )}
                 {vendor.editorName && (
                   <div className="flex items-center text-xs font-bold text-[#5A5A40] bg-[#5A5A40]/5 px-2 py-1 rounded-lg border border-[#5A5A40]/10 w-fit">
                     <span className="mr-1">剪輯師:</span>
@@ -643,6 +772,50 @@ export default function VendorManagement() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Pause (冷凍期) Modal */}
+      {pauseModalVendor && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-cyan-50/50">
+              <h3 className="text-xl font-bold serif text-cyan-700 flex items-center">
+                <Snowflake size={20} className="mr-2" /> 設為冷凍中
+              </h3>
+              <button onClick={() => setPauseModalVendor(null)} className="p-2 hover:bg-white rounded-full transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-600">
+                <span className="font-bold">{pauseModalVendor.name}</span> 進入冷凍期，本月目標與欠片追蹤會排除這家廠商，但排片選單仍可正常使用。
+              </p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">預計恢復日期（選填）</label>
+                <input
+                  type="date"
+                  value={pauseUntilInput}
+                  onChange={(e) => setPauseUntilInput(e.target.value)}
+                  className="w-full p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-cyan-500"
+                />
+                <p className="text-xs text-gray-400 mt-1">留空的話就是無限期冷凍，之後要手動按「恢復合作」。日期一到系統會自動視為恢復，不用再手動處理。</p>
+              </div>
+              <div className="flex justify-end space-x-3 pt-2">
+                <button
+                  onClick={() => setPauseModalVendor(null)}
+                  className="px-6 py-2 text-gray-500 font-medium"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleConfirmPause}
+                  className="bg-cyan-600 text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-cyan-700"
+                >
+                  確定冷凍
+                </button>
+              </div>
             </div>
           </div>
         </div>

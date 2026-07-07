@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor } from '../types';
+import { visibleVendors, trackedVendors } from '../lib/vendorStatus';
 import { 
   Video, 
   Plus, 
@@ -234,7 +235,7 @@ export default function AssetDatabase() {
     return post && (post.status === 'draft' || post.status === 'scheduled');
   }).length;
 
-  const vendorStocks = vendors.map(vendor => {
+  const vendorStocks = trackedVendors(vendors).map(vendor => {
     const availableVideos = assets.filter(a => a.vendorId === vendor.id && a.type === 'video' && a.status === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
     const availablePosts = assets.filter(a => a.vendorId === vendor.id && a.type === 'post' && a.status === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
     
@@ -477,7 +478,7 @@ export default function AssetDatabase() {
                   {assets.filter(a => a.type === activeTab && a.status === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length}
                 </span>
               </button>
-              {vendors
+              {visibleVendors(vendors)
                 .filter(v => v.name.toLowerCase().includes(vendorSearchTerm.toLowerCase()))
                 .map(vendor => {
                 const count = assets.filter(a => a.vendorId === vendor.id && a.type === activeTab && a.status === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
@@ -790,7 +791,7 @@ export default function AssetDatabase() {
                   }}
                 >
                   <option value="">選擇廠商</option>
-                  {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                  {visibleVendors(vendors).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
                 </select>
               </div>
 
@@ -1125,7 +1126,7 @@ export default function AssetDatabase() {
                       className="w-full p-3 bg-white rounded-xl border border-gray-200 text-sm font-bold focus:ring-2 focus:ring-[#5A5A40]"
                     >
                       <option value="">-- 請選擇廠商 --</option>
-                      {vendors.map(v => (
+                      {visibleVendors(vendors).map(v => (
                         <option key={v.id} value={v.id}>{v.name}</option>
                       ))}
                     </select>

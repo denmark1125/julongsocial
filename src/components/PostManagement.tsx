@@ -39,6 +39,7 @@ import { format, isPast, isToday, addDays, parseISO, getDay, setHours, setMinute
 import toast from 'react-hot-toast';
 import TrackingExportModal from './TrackingExportModal';
 import { DismissedHabit } from '../types';
+import { visibleVendors, trackedVendors } from '../lib/vendorStatus';
 
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -398,8 +399,8 @@ export default function PostManagement() {
     }
   };
 
-  // Statistics calculation
-  const vendorStats = vendors.map(vendor => {
+  // Statistics calculation（排除冷凍中/已終止的廠商，避免被誤判欠片）
+  const vendorStats = trackedVendors(vendors).map(vendor => {
     const vendorMonthPosts = posts.filter(p => {
       if (p.vendorId !== vendor.id) return false;
       const month = p.targetMonth || (p.scheduledAt ? format(parseISO(p.scheduledAt), 'yyyy-MM') : null);
@@ -518,7 +519,7 @@ export default function PostManagement() {
             onClick={() => {
               setEditingPost(null);
               setFormData({
-                vendorId: vendors[0]?.id || '',
+                vendorId: visibleVendors(vendors)[0]?.id || '',
                 title: '',
                 content: '',
                 status: 'draft',
@@ -630,7 +631,7 @@ export default function PostManagement() {
         >
           全部廠商
         </button>
-        {vendors.map(vendor => (
+        {visibleVendors(vendors).map(vendor => (
           <button
             key={vendor.id}
             onClick={() => setSelectedVendorId(vendor.id!)}
@@ -1065,7 +1066,7 @@ export default function PostManagement() {
                       className="w-full p-2 bg-[#F5F5F0] rounded-xl border-none"
                     >
                       <option value="">請選擇廠商</option>
-                      {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                      {visibleVendors(vendors).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
                     </select>
                   </div>
                   <div>
@@ -1361,7 +1362,7 @@ export default function PostManagement() {
         isOpen={isTrackingModalOpen}
         onClose={() => setIsTrackingModalOpen(false)}
         posts={posts}
-        vendors={vendors}
+        vendors={visibleVendors(vendors)}
         assets={assets}
         dismissedHabits={dismissedHabits}
       />

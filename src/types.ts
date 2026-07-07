@@ -102,6 +102,8 @@ export interface Vendor {
   editorId?: string;
   editorName?: string; // Keep for display/fallback
   selfPublishing?: boolean; // Vendor publishes by themselves
+  status?: 'active' | 'paused' | 'ended'; // 不填視同 active
+  pausedUntil?: string;     // YYYY-MM-DD，冷凍期預計恢復日（僅 status='paused' 時有意義）
   createdBy: string;
   createdAt: string;
 }
