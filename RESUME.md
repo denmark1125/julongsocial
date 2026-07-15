@@ -1,7 +1,13 @@
 # RESUME — 腳本生成系統（julongsocial × julang-company）
-> 最後更新：2026-07-06（週一收工）。下次開工直接從「下週待辦」開始。
+> 最後更新：2026-07-15。下次開工直接從「下週待辦」開始。
 
 ---
+
+## ⚠️ 2026-07-15 地雷記錄：正式網站跟的是 main，不是 feature/script-board
+- **現象**：在 `AssetDatabase.tsx`（素材資料庫）加了「完成／取消完成」按鈕，本機 `npm run dev`（localhost:3000）測試全過，但使用者打開正式網址 julongsocial.vercel.app 完全找不到這顆按鈕。
+- **原因**：Vercel 正式站是跟著 `main` 分支自動部署；改動當時是在 `feature/script-board`（腳本審核功能，還沒 merge、Vercel env 也還沒補齊）上做的。**本機 dev server 測試得過，不等於正式站會更新**——兩者是不同 branch 的程式碼。
+- **解法**：先用 `git diff` 把單一檔案的改動存成 patch（或 `git stash push -- <file>`），確認該檔案在 `main` 和 `feature/script-board` 上內容一致（`git diff main feature/script-board -- <file>`）沒有牽動未完成功能，再切到 `main` 套用、commit、push，才會真正觸發 Vercel 部署。
+- **下次撿查清單**：改完某頁的功能，先問「使用者平常打開的網址是不是這條分支正在部署的」，別預設 dev server 測過 = 使用者看得到。
 
 ## 一句話現況
 腳本生成系統已能跑通全流程（ERP 開關 → 會攝攝產腳本 → 網站審核 → 回饋學習）。今天完成「手動指定對標實測通過＋會攝攝掛每日排程＋班表補跑漏洞修復＋IG 斷路器」，但發現本機對外 IP 被 IG API 級限流（非帳號問題），卡在等使用者重開數據機換 IP。
