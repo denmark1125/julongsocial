@@ -185,6 +185,20 @@ export default function AssetDatabase() {
     }
   };
 
+  const toggleManualComplete = async (asset: Asset) => {
+    try {
+      if (asset.status === 'used') {
+        await updateDoc(doc(db, 'assets', asset.id!), { status: 'available' });
+        toast.success('已解鎖，重新可使用');
+      } else {
+        await updateDoc(doc(db, 'assets', asset.id!), { status: 'used' });
+        toast.success('已標記完成');
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `assets/${asset.id}`);
+    }
+  };
+
   const toggleArchive = async (asset: Asset) => {
     try {
       const newStatus = asset.status === 'archived' ? 'available' : 'archived';
@@ -694,6 +708,19 @@ export default function AssetDatabase() {
                       )}
                     >
                       {asset.approved ? '已審核' : '待審核'}
+                    </button>
+                  )}
+                  {asset.stage === 'finished' && (asset.status === 'available' || (asset.status === 'used' && !asset.usedInPostId)) && (
+                    <button
+                      onClick={() => toggleManualComplete(asset)}
+                      title={asset.status === 'used' ? '取消完成，解鎖回可使用' : '標記完成（不排日期直接視為已使用）'}
+                      className={cn(
+                        "px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1",
+                        asset.status === 'used' ? "bg-gray-200 text-gray-500" : "bg-[#5A5A40]/10 text-[#5A5A40]"
+                      )}
+                    >
+                      <CheckCircle2 size={12} />
+                      <span>{asset.status === 'used' ? '取消完成' : '完成'}</span>
                     </button>
                   )}
                   <span className="text-[10px] text-gray-400">{new Date(asset.createdAt).toLocaleDateString()}</span>
