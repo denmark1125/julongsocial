@@ -91,6 +91,11 @@ export interface Editor {
   createdAt: string;
 }
 
+export interface PauseRecord {
+  from: string;      // YYYY-MM-DD 該次冷凍起始日
+  until?: string;     // YYYY-MM-DD 該次冷凍實際/預計恢復日，留空＝尚未恢復（仍在冷凍中）
+}
+
 export interface Vendor {
   id?: string;
   name: string;
@@ -99,6 +104,8 @@ export interface Vendor {
   cooperationItems: CooperationItem[];
   monthlyTargetPosts?: number;
   monthlyTargetVideos?: number;
+  excludeFromStats?: boolean; // 勾選後不列入本月發文/欠片統計與提醒（內部帳號等不需追蹤進度）
+  pauseHistory?: PauseRecord[]; // 歷次冷凍期紀錄（可多次），用來判斷「某個月」是否該排除該廠商的目標/欠片計算
   manualDeficitBaseline?: number;   // 手動輸入的「起始累積欠片數」，週報結算後由主管回填校正
   manualDeficitUpdatedAt?: string;  // 上次校正時間，用來提醒這個數字是不是太久沒更新
   editorId?: string;

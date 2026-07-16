@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  collection, 
-  query, 
-  onSnapshot, 
-  addDoc, 
-  updateDoc, 
-  deleteDoc, 
-  doc, 
+import { format } from 'date-fns';
+import {
+  collection,
+  query,
+  onSnapshot,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
   serverTimestamp,
   orderBy
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Vendor, SocialAccount, OperationType, Editor } from '../types';
+import { Vendor, SocialAccount, OperationType, Editor, PauseRecord } from '../types';
 import { Plus, Trash2, Edit2, ExternalLink, Shield, X, Eye, EyeOff, Users, ChevronDown, ChevronUp, Settings2, Snowflake, RotateCcw, PowerOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { clsx, type ClassValue } from 'clsx';
@@ -37,6 +38,7 @@ export default function VendorManagement() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [statusTab, setStatusTab] = useState<StatusTab>('active');
   const [pauseModalVendor, setPauseModalVendor] = useState<Vendor | null>(null);
+  const [pauseFromInput, setPauseFromInput] = useState('');
   const [pauseUntilInput, setPauseUntilInput] = useState('');
   const [formData, setFormData] = useState({
     name: '',
@@ -45,6 +47,8 @@ export default function VendorManagement() {
     cooperationItems: [] as string[],
     monthlyTargetPosts: 8,
     monthlyTargetVideos: 0,
+    excludeFromStats: false,
+    pauseHistory: [] as PauseRecord[],
     editorId: '',
     editorName: '',
     selfPublishing: false,
@@ -176,8 +180,19 @@ export default function VendorManagement() {
     if (!auth.currentUser) return;
 
     try {
+      // 冷凍紀錄可能在這個表單裡被直接改過（例如刪掉誤加的一筆），
+      // 所以即時的 status/pausedUntil 要跟著重新推算，不然刪除紀錄後畫面還是卡在冷凍中
+      const statusFields: Partial<Vendor> = {};
+      if (editingVendor && editingVendor.status !== 'ended') {
+        const today = format(new Date(), 'yyyy-MM-dd');
+        const openRecord = formData.pauseHistory.find(r => r.from <= today && (!r.until || r.until > today));
+        statusFields.status = openRecord ? 'paused' : 'active';
+        statusFields.pausedUntil = openRecord?.until || '';
+      }
+
       const data = {
         ...formData,
+        ...statusFields,
         createdBy: auth.currentUser.uid,
         createdAt: new Date().toISOString()
       };
@@ -198,6 +213,8 @@ export default function VendorManagement() {
         cooperationItems: [],
         monthlyTargetPosts: 8,
         monthlyTargetVideos: 0,
+        excludeFromStats: false,
+        pauseHistory: [],
         editorName: '',
         selfPublishing: false,
         aiBenchmark: false,
@@ -222,7 +239,14 @@ export default function VendorManagement() {
 
   const handleResume = async (id: string) => {
     try {
-      await updateDoc(doc(db, 'vendors', id), { status: 'active', pausedUntil: '' });
+      const vendor = vendors.find(v => v.id === id);
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const history = vendor?.pauseHistory || [];
+      // 如果最後一筆冷凍紀錄還沒填恢復日，順手補上今天，讓歷史紀錄保持完整
+      const closedHistory = history.length > 0 && !history[history.length - 1].until
+        ? history.map((rec, i) => i === history.length - 1 ? { ...rec, until: today } : rec)
+        : history;
+      await updateDoc(doc(db, 'vendors', id), { status: 'active', pausedUntil: '', pauseHistory: closedHistory });
       toast.success('已恢復合作');
     } catch (error) {
       toast.error('操作失敗');
@@ -231,18 +255,37 @@ export default function VendorManagement() {
 
   const openPauseModal = (vendor: Vendor) => {
     setPauseModalVendor(vendor);
-    setPauseUntilInput(vendor.pausedUntil || '');
+    const history = vendor.pauseHistory || [];
+    // 目前正在冷凍中的話，一律把最後一筆紀錄當成「這次冷凍」來預填修正，
+    // 不能只看 until 是否留空——已經填了預計恢復日、但還沒真的恢復，也算目前這筆
+    const currentRecord = vendor.status === 'paused' && history.length > 0 ? history[history.length - 1] : null;
+    setPauseFromInput(currentRecord?.from || format(new Date(), 'yyyy-MM-dd'));
+    setPauseUntilInput(vendor.pausedUntil || currentRecord?.until || '');
   };
 
   const handleConfirmPause = async () => {
     if (!pauseModalVendor?.id) return;
+    if (!pauseFromInput) {
+      toast.error('請輸入冷凍起始日期');
+      return;
+    }
     try {
+      const history = pauseModalVendor.pauseHistory || [];
+      const wasAlreadyPaused = pauseModalVendor.status === 'paused';
+      const newRecord: PauseRecord = { from: pauseFromInput, until: pauseUntilInput || undefined };
+      // 如果本來就是冷凍中，這次視為修正同一段紀錄的日期；否則是開一段新的冷凍期（支援多次冷凍）
+      const newHistory = wasAlreadyPaused && history.length > 0
+        ? history.map((rec, i) => i === history.length - 1 ? newRecord : rec)
+        : [...history, newRecord];
+
       await updateDoc(doc(db, 'vendors', pauseModalVendor.id), {
         status: 'paused',
-        pausedUntil: pauseUntilInput || ''
+        pausedUntil: pauseUntilInput || '',
+        pauseHistory: newHistory
       });
       toast.success('已設為冷凍中');
       setPauseModalVendor(null);
+      setPauseFromInput('');
       setPauseUntilInput('');
     } catch (error) {
       toast.error('操作失敗');
@@ -294,6 +337,8 @@ export default function VendorManagement() {
                 cooperationItems: [],
                 monthlyTargetPosts: 8,
                 monthlyTargetVideos: 0,
+                excludeFromStats: false,
+                pauseHistory: [],
                 editorId: '',
                 editorName: '',
                 selfPublishing: false,
@@ -353,6 +398,8 @@ export default function VendorManagement() {
                       cooperationItems: vendor.cooperationItems || [],
                       monthlyTargetPosts: vendor.monthlyTargetPosts || 0,
                       monthlyTargetVideos: vendor.monthlyTargetVideos || 0,
+                      excludeFromStats: vendor.excludeFromStats || false,
+                      pauseHistory: vendor.pauseHistory || [],
                       editorId: vendor.editorId || '',
                       editorName: vendor.editorName || '',
                       selfPublishing: vendor.selfPublishing || false,
@@ -381,13 +428,22 @@ export default function VendorManagement() {
                   </button>
                 )}
                 {statusTab === 'paused' && (
-                  <button
-                    onClick={() => handleResume(vendor.id!)}
-                    className="p-2 text-green-600 hover:bg-green-50 rounded-lg"
-                    title="恢復合作"
-                  >
-                    <RotateCcw size={16} />
-                  </button>
+                  <>
+                    <button
+                      onClick={() => openPauseModal(vendor)}
+                      className="p-2 text-cyan-600 hover:bg-cyan-50 rounded-lg"
+                      title="修改冷凍日期"
+                    >
+                      <Snowflake size={16} />
+                    </button>
+                    <button
+                      onClick={() => handleResume(vendor.id!)}
+                      className="p-2 text-green-600 hover:bg-green-50 rounded-lg"
+                      title="恢復合作"
+                    >
+                      <RotateCcw size={16} />
+                    </button>
+                  </>
                 )}
                 {statusTab !== 'ended' && (
                   <button
@@ -437,6 +493,11 @@ export default function VendorManagement() {
                   <div className="flex items-center text-xs font-bold text-[#5A5A40] bg-[#5A5A40]/5 px-2 py-1 rounded-lg border border-[#5A5A40]/10 w-fit">
                     <span className="mr-1">剪輯師:</span>
                     <span>{vendor.editorName}</span>
+                  </div>
+                )}
+                {vendor.excludeFromStats && (
+                  <div className="flex items-center text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-lg border border-gray-200 w-fit">
+                    <span>不列入統計</span>
                   </div>
                 )}
                 {vendor.selfPublishing && (
@@ -711,6 +772,79 @@ export default function VendorManagement() {
                   </div>
                 </div>
 
+                <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200">
+                  <label className="flex items-center space-x-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.excludeFromStats}
+                      onChange={(e) => setFormData({ ...formData, excludeFromStats: e.target.checked })}
+                      className="w-5 h-5 rounded border-gray-300 text-gray-600 focus:ring-gray-500"
+                    />
+                    <div>
+                      <span className="block text-sm font-bold text-gray-700">不列入本月發文統計</span>
+                      <span className="block text-xs text-gray-500">勾選後，此廠商不會出現在貼文管理的進度計數器、拍攝進度、庫存提醒等統計畫面（適用內部帳號等不需追蹤發文量的對象）。</span>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="bg-cyan-50/40 p-4 rounded-2xl border border-cyan-100 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <span className="block text-sm font-bold text-cyan-800">冷凍／暫停合作紀錄</span>
+                      <span className="block text-xs text-cyan-600/70">日期打錯了嗎？直接改下面現有那一列的日期欄位就好；不要點右邊的「新增一筆」——那顆按鈕是給「這段恢復合作之後，未來又要另外暫停一次」用的，跟修正現有這段的日期是兩件事，點了會多出一段沒用到的紀錄。</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setFormData({
+                        ...formData,
+                        pauseHistory: [...formData.pauseHistory, { from: format(new Date(), 'yyyy-MM-dd'), until: undefined }]
+                      })}
+                      className="text-xs text-cyan-700 font-bold flex items-center hover:underline whitespace-nowrap"
+                    >
+                      <Plus size={14} className="mr-1" /> 新增下一段冷凍期
+                    </button>
+                  </div>
+                  {formData.pauseHistory.length === 0 && (
+                    <p className="text-xs text-gray-400 italic">尚無冷凍紀錄</p>
+                  )}
+                  {formData.pauseHistory.map((rec, i) => (
+                    <div key={i} className="flex items-center gap-2 bg-white p-2 rounded-xl border border-cyan-100/70">
+                      <input
+                        type="date"
+                        value={rec.from}
+                        onChange={(e) => {
+                          const next = [...formData.pauseHistory];
+                          next[i] = { ...next[i], from: e.target.value };
+                          setFormData({ ...formData, pauseHistory: next });
+                        }}
+                        className="flex-1 p-2 bg-[#F5F5F0] rounded-lg border-none text-sm focus:ring-2 focus:ring-cyan-500"
+                      />
+                      <span className="text-gray-400 text-sm">～</span>
+                      <input
+                        type="date"
+                        value={rec.until || ''}
+                        onChange={(e) => {
+                          const next = [...formData.pauseHistory];
+                          next[i] = { ...next[i], until: e.target.value || undefined };
+                          setFormData({ ...formData, pauseHistory: next });
+                        }}
+                        className="flex-1 p-2 bg-[#F5F5F0] rounded-lg border-none text-sm focus:ring-2 focus:ring-cyan-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setFormData({
+                          ...formData,
+                          pauseHistory: formData.pauseHistory.filter((_, idx) => idx !== i)
+                        })}
+                        className="p-2 text-red-400 hover:bg-red-50 rounded-lg"
+                        title="刪除這筆紀錄"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
                 {/* Social Accounts Section */}
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
@@ -906,8 +1040,18 @@ export default function VendorManagement() {
             </div>
             <div className="p-6 space-y-4">
               <p className="text-sm text-gray-600">
-                <span className="font-bold">{pauseModalVendor.name}</span> 進入冷凍期，本月目標與欠片追蹤會排除這家廠商，但排片選單仍可正常使用。
+                <span className="font-bold">{pauseModalVendor.name}</span> 進入冷凍期，冷凍區間涵蓋到的月份，該月目標與欠片統計都會排除這家廠商，但排片選單仍可正常使用。
               </p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">冷凍起始日期</label>
+                <input
+                  type="date"
+                  value={pauseFromInput}
+                  onChange={(e) => setPauseFromInput(e.target.value)}
+                  className="w-full p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-cyan-500"
+                />
+                <p className="text-xs text-gray-400 mt-1">可以填之前的日期回溯（例如本來就從 6/1 開始沒合作），系統會用這個日期判斷哪些月份要排除統計。</p>
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">預計恢復日期（選填）</label>
                 <input
@@ -918,6 +1062,16 @@ export default function VendorManagement() {
                 />
                 <p className="text-xs text-gray-400 mt-1">留空的話就是無限期冷凍，之後要手動按「恢復合作」。日期一到系統會自動視為恢復，不用再手動處理。</p>
               </div>
+              {pauseModalVendor.pauseHistory && pauseModalVendor.pauseHistory.length > 0 && (
+                <div className="bg-gray-50 rounded-xl p-3 space-y-1">
+                  <p className="text-xs font-bold text-gray-500">歷次冷凍紀錄</p>
+                  {pauseModalVendor.pauseHistory.map((rec, i) => (
+                    <p key={i} className="text-xs text-gray-600">
+                      {rec.from} ～ {rec.until || '（尚未恢復）'}
+                    </p>
+                  ))}
+                </div>
+              )}
               <div className="flex justify-end space-x-3 pt-2">
                 <button
                   onClick={() => setPauseModalVendor(null)}

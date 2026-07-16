@@ -39,7 +39,7 @@ import { format, isPast, isToday, addDays, parseISO, getDay, setHours, setMinute
 import toast from 'react-hot-toast';
 import TrackingExportModal from './TrackingExportModal';
 import { DismissedHabit } from '../types';
-import { visibleVendors, trackedVendors } from '../lib/vendorStatus';
+import { visibleVendors, trackedVendorsForMonth } from '../lib/vendorStatus';
 
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -399,8 +399,8 @@ export default function PostManagement() {
     }
   };
 
-  // Statistics calculation（排除冷凍中/已終止的廠商，避免被誤判欠片）
-  const vendorStats = trackedVendors(vendors).map(vendor => {
+  // Statistics calculation（排除該月落在冷凍區間內/已終止的廠商，避免被誤判欠片）
+  const vendorStats = trackedVendorsForMonth(vendors, selectedMonth).map(vendor => {
     const vendorMonthPosts = posts.filter(p => {
       if (p.vendorId !== vendor.id) return false;
       const month = p.targetMonth || (p.scheduledAt ? format(parseISO(p.scheduledAt), 'yyyy-MM') : null);
