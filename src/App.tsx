@@ -17,6 +17,7 @@ import ScriptBoard from './components/ScriptBoard';
 import InspirationWall from './components/InspirationWall';
 import CalendarView from './components/CalendarView';
 import AssetDatabase from './components/AssetDatabase';
+import ShootBookings from './components/ShootBookings';
 import UserManagement from './components/UserManagement';
 import BillingManagement from './components/BillingManagement';
 import VersionLogView from './components/VersionLog';
@@ -239,6 +240,7 @@ export default function App() {
       case 'inspirations': return <InspirationWall />;
       case 'calendar': return <CalendarView />;
       case 'videos': return <AssetDatabase />;
+      case 'shootBookings': return <ShootBookings />;
       case 'billing': return <BillingManagement />;
       case 'users': return <UserManagement currentUserRole={userProfile?.role || 'employee'} />;
       case 'version': return <VersionLogView />;

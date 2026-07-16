@@ -99,6 +99,8 @@ export interface Vendor {
   cooperationItems: CooperationItem[];
   monthlyTargetPosts?: number;
   monthlyTargetVideos?: number;
+  manualDeficitBaseline?: number;   // 手動輸入的「起始累積欠片數」，週報結算後由主管回填校正
+  manualDeficitUpdatedAt?: string;  // 上次校正時間，用來提醒這個數字是不是太久沒更新
   editorId?: string;
   editorName?: string; // Keep for display/fallback
   selfPublishing?: boolean; // Vendor publishes by themselves
@@ -160,6 +162,23 @@ export interface DismissedHabit {
   habitTime: string;
   date: string; // YYYY-MM-DD
   createdAt: string;
+}
+
+export type BookingStatus = 'booked' | 'completed' | 'postponed' | 'cancelled';
+export type BookingReason = 'client' | 'internal' | 'other';
+
+export interface ShootBooking {
+  id?: string;
+  vendorId: string;
+  scheduledDate: string; // YYYY-MM-DD
+  status: BookingStatus;
+  bookedByUid: string;
+  bookedByName: string;
+  reason?: BookingReason; // set when postponed/cancelled
+  deliveredCount?: number; // set when completed
+  previousBookingId?: string; // links to the booking this one rescheduled from
+  createdAt: string;
+  resolvedAt?: string;
 }
 
 export enum OperationType {

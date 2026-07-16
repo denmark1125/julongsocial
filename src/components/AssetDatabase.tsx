@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  collection, 
-  addDoc, 
-  onSnapshot, 
-  query, 
-  orderBy, 
-  deleteDoc, 
+import {
+  collection,
+  addDoc,
+  onSnapshot,
+  query,
+  orderBy,
+  deleteDoc,
   doc,
-  updateDoc
+  updateDoc,
+  where,
+  getDocs
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor } from '../types';
+import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking } from '../types';
 import { visibleVendors, trackedVendors } from '../lib/vendorStatus';
 import { 
   Video, 
@@ -126,6 +128,39 @@ export default function AssetDatabase() {
     };
   }, []);
 
+  // 藏鏡人上傳素材＝拍攝真的完成了；不能靠他們額外記得回「拍攝進度」頁按完成，
+  // 直接在這裡自動核銷該廠商目前有效的預約，交件數跟著這批上傳累加。
+  const autoResolveBooking = async (vendorId: string) => {
+    const today = new Date().toISOString().split('T')[0];
+    try {
+      const bookedSnap = await getDocs(query(
+        collection(db, 'shootBookings'),
+        where('vendorId', '==', vendorId),
+        where('status', '==', 'booked')
+      ));
+      if (!bookedSnap.empty) {
+        await updateDoc(doc(db, 'shootBookings', bookedSnap.docs[0].id), {
+          status: 'completed',
+          deliveredCount: 1,
+          resolvedAt: new Date().toISOString()
+        });
+        return;
+      }
+      const completedSnap = await getDocs(query(
+        collection(db, 'shootBookings'),
+        where('vendorId', '==', vendorId),
+        where('status', '==', 'completed')
+      ));
+      const sameDay = completedSnap.docs.find(d => (d.data() as ShootBooking).resolvedAt?.startsWith(today));
+      if (sameDay) {
+        const cur = (sameDay.data() as ShootBooking).deliveredCount || 0;
+        await updateDoc(doc(db, 'shootBookings', sameDay.id), { deliveredCount: cur + 1 });
+      }
+    } catch (error) {
+      console.error('autoResolveBooking failed', error);
+    }
+  };
+
   const handleAddAsset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAsset.title || !newAsset.vendorId) {
@@ -143,6 +178,9 @@ export default function AssetDatabase() {
         createdAt: new Date().toISOString(),
         createdBy: auth.currentUser?.uid
       });
+      if (newAsset.type === 'video') {
+        await autoResolveBooking(newAsset.vendorId);
+      }
       toast.success(newAsset.stage === 'raw' ? '原始素材已建檔' : '素材已上架');
       setNewAsset({ 
         title: '', 

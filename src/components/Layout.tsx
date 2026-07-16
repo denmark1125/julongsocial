@@ -20,7 +20,8 @@ import {
   Lock,
   CreditCard,
   Clapperboard,
-  Flame
+  Flame,
+  Film
 } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
@@ -190,6 +191,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     { id: 'scripts', label: '腳本審核', icon: Clapperboard, roles: ['engineer'] },
     { id: 'inspirations', label: '爆款靈感', icon: Flame, roles: ['engineer'] },
     { id: 'videos', label: '素材資料庫', icon: Video, roles: ['engineer', 'manager', 'employee'] },
+    { id: 'shootBookings', label: '拍攝進度', icon: Film, roles: ['engineer', 'manager', 'employee'] },
     { id: 'calendar', label: '社群日曆', icon: CalendarIcon, roles: ['engineer', 'manager', 'employee'] },
     { id: 'billing', label: '帳務管理', icon: CreditCard, roles: ['engineer', 'manager'] },
     { id: 'users', label: '員工管理', icon: ShieldCheck, roles: ['engineer', 'manager'] },
