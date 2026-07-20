@@ -159,8 +159,11 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if true; // Allow public read for first-user detection and internal use
-      allow create: if (isAuthenticated() && request.auth.uid == uid) || isManager() || !exists(/databases/$(database)/documents/users/$(uid)); 
+      // Own profile is always readable (needed to resolve role at login);
+      // reading other users' docs or listing the whole collection requires manager/engineer.
+      allow get: if isAuthenticated() && (isOwner(uid) || isManager());
+      allow list: if isManager();
+      allow create: if (isAuthenticated() && request.auth.uid == uid) || isManager() || !exists(/databases/$(database)/documents/users/$(uid));
       allow update: if isManager();
       allow delete: if isAdmin();
     }

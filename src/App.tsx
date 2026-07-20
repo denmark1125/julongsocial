@@ -231,7 +231,27 @@ export default function App() {
     );
   }
 
+  // Mirrors Layout.tsx's menuItems roles — the sidebar only hides links, it doesn't
+  // stop this switch from rendering a restricted tab if activeTab is set some other way.
+  const TAB_ROLES: Record<string, UserRole[]> = {
+    dashboard: ['engineer', 'manager', 'employee'],
+    vendors: ['engineer', 'manager', 'employee'],
+    posts: ['engineer', 'manager', 'employee'],
+    scripts: ['engineer'],
+    inspirations: ['engineer'],
+    videos: ['engineer', 'manager', 'employee'],
+    shootBookings: ['engineer', 'manager', 'employee'],
+    calendar: ['engineer', 'manager', 'employee'],
+    billing: ['engineer', 'manager'],
+    users: ['engineer', 'manager'],
+    version: ['engineer'],
+  };
+
   const renderContent = () => {
+    const allowedRoles = TAB_ROLES[activeTab];
+    if (allowedRoles && !allowedRoles.includes(userProfile?.role || 'employee')) {
+      return <Dashboard setActiveTab={setActiveTab} />;
+    }
     switch (activeTab) {
       case 'dashboard': return <Dashboard setActiveTab={setActiveTab} />;
       case 'vendors': return <VendorManagement />;
