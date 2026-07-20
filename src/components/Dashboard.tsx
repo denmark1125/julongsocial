@@ -264,7 +264,11 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
               </button>
             </div>
             <div className="space-y-2 md:space-y-4">
-              {posts.slice(0, 5).map(post => {
+              {[...posts]
+                .filter(p => p.scheduledAt)
+                .sort((a, b) => (b.scheduledAt || '').localeCompare(a.scheduledAt || ''))
+                .slice(0, 5)
+                .map(post => {
                 const vendor = vendors.find(v => v.id === post.vendorId);
                 return (
                   <div key={post.id} className="flex items-center justify-between p-3 md:p-4 rounded-2xl md:rounded-3xl hover:bg-[#F5F5F0] transition-colors group">
