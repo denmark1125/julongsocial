@@ -9,9 +9,9 @@ import {
   query
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Vendor, Asset, Post, ShootBooking, BookingReason, UserProfile } from '../types';
-import { trackedVendors } from '../lib/vendorStatus';
-import { Film, Plus, Check, CalendarClock, AlertTriangle, Pencil, X } from 'lucide-react';
+import { Vendor, Asset, Post, ShootBooking, BookingReason, UserProfile, DeficitEntry } from '../types';
+import { getDeficitBreakdown, getEffectiveMonthlyTarget, getAvailableVideoAssets, hasVideoTrackingScope, isVendorTrackedInMonth } from '../lib/vendorStatus';
+import { Film, Plus, Check, CalendarClock, AlertTriangle, Pencil, X, Trash2 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import toast from 'react-hot-toast';
@@ -29,6 +29,14 @@ const SEV_STYLES: Record<Severity, { chip: string; bar: string; label: string }>
   good: { chip: 'bg-green-100 text-green-700 border border-green-200', bar: 'bg-green-500', label: '正常' },
 };
 
+// 回填欠片明細通常是針對已結束的月份，預設帶上個月，減少每次都要手動改月份
+function currentMonthDefault(): string {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 export default function ShootBookings() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -40,8 +48,10 @@ export default function ShootBookings() {
   const [pendingReason, setPendingReason] = useState<BookingReason | null>(null);
   const [dateInput, setDateInput] = useState(new Date().toISOString().split('T')[0]);
   const [countInput, setCountInput] = useState(1);
-  const [editingBaselineId, setEditingBaselineId] = useState<string | null>(null);
-  const [baselineInput, setBaselineInput] = useState(0);
+  const [deficitModalVendor, setDeficitModalVendor] = useState<Vendor | null>(null);
+  const [deficitMonth, setDeficitMonth] = useState(currentMonthDefault());
+  const [deficitOwed, setDeficitOwed] = useState(1);
+  const [deficitNote, setDeficitNote] = useState('');
 
   useEffect(() => {
     const vU = onSnapshot(collection(db, 'vendors'), (s) => setVendors(s.docs.map(d => ({ id: d.id, ...d.data() } as Vendor))));
@@ -62,28 +72,33 @@ export default function ShootBookings() {
   const today = new Date().toISOString().split('T')[0];
   const currentMonth = today.slice(0, 7);
 
-  const rows = trackedVendors(vendors)
-    .filter(v => (v.monthlyTargetVideos || 0) > 0)
+  const rows = vendors
+    // 要不要出現在這個清單，用 hasVideoTrackingScope（本來有沒有在拍影音+合作開始了沒+沒終止/排除統計）判斷，
+    // 故意不用 trackedVendors——那個會用即時 status 把「還在冷凍中、還沒解凍」的廠商整批擋掉，
+    // 但冷凍中如果之前留有欠片，卡片還是要在，才能繼續管理/沖銷；這個月本身不會疊加新短缺的邏輯在 getDeficitBreakdown 內部處理
+    .filter(v => hasVideoTrackingScope(v, currentMonth))
     .map(v => {
-      const target = v.monthlyTargetVideos || 0;
+      const target = getEffectiveMonthlyTarget(v, currentMonth);
       const delivered = posts.filter(p =>
         p.vendorId === v.id && p.contentType === 'video' &&
         (p.status === 'published' || p.status === 'scheduled') &&
         (p.targetMonth ? p.targetMonth === currentMonth : (p.scheduledAt || '').slice(0, 7) === currentMonth)
       ).length;
-      const stock = assets.filter(a => a.vendorId === v.id && a.type === 'video' && a.status === 'available').length;
-      const baseline = v.manualDeficitBaseline || 0;
-      const monthDelta = target - delivered; // 本月還沒交的量，交超過會是負數(倒扣)
-      const owed = Math.max(0, baseline + monthDelta - stock);
+      const stock = getAvailableVideoAssets(v.id!, assets, posts).length;
+      const breakdown = getDeficitBreakdown(v, posts, currentMonth);
+      const owed = Math.max(0, breakdown.totalShortfall - stock);
       const active = bookings
         .filter(b => b.vendorId === v.id && b.status === 'booked')
         .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate))[0] || null;
       const overdue = !!active && active.scheduledDate < today;
+      // 這個廠商本來就在追蹤範圍內(hasVideoTrackingScope)，但這個月本身可能因為冷凍期而不計入新短缺——
+      // 用來讓畫面清楚標示「這個月冷凍中」，不要讓人誤會本月的target/delivered是真的有在要求
+      const frozenThisMonth = !isVendorTrackedInMonth(v, currentMonth);
       let sev: Severity = 'good';
       if (overdue) sev = 'crit';
       else if (owed > 0 && !active) sev = owed >= 4 ? 'crit' : 'warn';
       else if (owed > 0) sev = 'warn';
-      return { vendor: v, target, delivered, stock, baseline, owed, active, overdue, sev };
+      return { vendor: v, target, delivered, stock, baseline: breakdown.baseline, breakdown, owed, active, overdue, frozenThisMonth, sev };
     })
     .sort((a, b) => (b.sev === 'crit' ? 2 : b.sev === 'warn' ? 1 : 0) - (a.sev === 'crit' ? 2 : a.sev === 'warn' ? 1 : 0) || b.owed - a.owed);
 
@@ -95,16 +110,52 @@ export default function ShootBookings() {
     .filter(b => b.status !== 'booked' && b.resolvedAt?.slice(0, 7) === currentMonth)
     .sort((a, b) => (b.resolvedAt || '').localeCompare(a.resolvedAt || ''));
 
-  async function saveBaseline(vendorId: string) {
+  function openDeficitModal(vendor: Vendor) {
+    setDeficitModalVendor(vendor);
+    setDeficitMonth(currentMonthDefault());
+    setDeficitOwed(1);
+    setDeficitNote('');
+  }
+
+  async function addDeficitEntry() {
+    if (!deficitModalVendor?.id) return;
+    if (!deficitMonth) {
+      toast.error('請選擇月份');
+      return;
+    }
+    if (deficitOwed == null) {
+      toast.error('請輸入支數（沒有欠可以填0，要沖銷可以填負數）');
+      return;
+    }
     try {
-      await updateDoc(doc(db, 'vendors', vendorId), {
-        manualDeficitBaseline: baselineInput,
-        manualDeficitUpdatedAt: new Date().toISOString()
+      const entry: DeficitEntry = {
+        month: deficitMonth,
+        owed: deficitOwed,
+        createdAt: new Date().toISOString(),
+        ...(deficitNote.trim() ? { note: deficitNote.trim() } : {})
+      };
+      // deficitModalVendor 是開彈窗當下拍的快照，存過一次之後就過期了；改抓 vendors 這份即時資料才不會覆蓋掉剛存的紀錄
+      const liveVendor = vendors.find(v => v.id === deficitModalVendor.id) || deficitModalVendor;
+      const history = liveVendor.deficitEntries || [];
+      await updateDoc(doc(db, 'vendors', deficitModalVendor.id), {
+        deficitEntries: [...history, entry]
       });
-      toast.success('已更新起始欠片');
-      setEditingBaselineId(null);
+      toast.success('已新增該月積欠紀錄');
+      setDeficitOwed(1);
+      setDeficitNote('');
     } catch (e) {
-      toast.error('更新失敗');
+      toast.error('新增失敗');
+    }
+  }
+
+  async function deleteDeficitEntry(vendor: Vendor, index: number) {
+    if (!vendor.id) return;
+    try {
+      const history = (vendor.deficitEntries || []).filter((_, i) => i !== index);
+      await updateDoc(doc(db, 'vendors', vendor.id), { deficitEntries: history });
+      toast.success('已刪除該筆紀錄');
+    } catch (e) {
+      toast.error('刪除失敗');
     }
   }
 
@@ -238,8 +289,17 @@ export default function ShootBookings() {
               <div className="p-6 space-y-4">
                 <div className="flex justify-between items-start">
                   <div>
-                    <h3 className="text-lg font-bold">{row.vendor.name}</h3>
-                    <p className="text-[11px] text-gray-400 mt-0.5">本月 {row.delivered}/{row.target} 支・庫存 {row.stock}</p>
+                    <h3 className="text-lg font-bold flex items-center gap-1.5">
+                      {row.vendor.name}
+                      {row.frozenThisMonth && (
+                        <span className="text-[10px] font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded-full border border-cyan-100">冷凍中</span>
+                      )}
+                    </h3>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      {row.frozenThisMonth
+                        ? `本月冷凍中，不列入新短缺・已交 ${row.delivered} 支・庫存 ${row.stock}`
+                        : `本月 ${row.delivered}/${row.target} 支・庫存 ${row.stock}`}
+                    </p>
                   </div>
                   <span className={cn('px-3 py-1 rounded-full text-[10px] font-bold', s.chip)}>{s.label}</span>
                 </div>
@@ -251,28 +311,32 @@ export default function ShootBookings() {
                   </p>
                   <p className="text-[10.5px] text-gray-400 mt-1.5">
                     起始欠 {row.baseline}
-                    {' '}{row.target - row.delivered >= 0 ? '+' : '−'} 本月未達標 {Math.abs(row.target - row.delivered)}
+                    {row.breakdown.monthlyShortfalls.map(ms => (
+                      <span key={ms.month}>
+                        {' '}{ms.delta >= 0 ? '+' : '−'} {ms.month.slice(5)}月{row.breakdown.monthlyShortfalls.length === 1 ? '未達標' : ''} {Math.abs(ms.delta)}
+                      </span>
+                    ))}
                     {' '}− 已有庫存 {row.stock}
-                    {row.vendor.manualDeficitUpdatedAt && (
-                      <span className="ml-1 text-gray-300">・起始校正於 {row.vendor.manualDeficitUpdatedAt.slice(0, 10)}</span>
+                    {(row.vendor.deficitEntries?.length || row.vendor.manualDeficitUpdatedAt) && (
+                      <span className="ml-1 text-gray-300">
+                        ・{row.vendor.deficitEntries?.length
+                          ? `已回填 ${row.vendor.deficitEntries.length} 個月`
+                          : `起始校正於 ${row.vendor.manualDeficitUpdatedAt!.slice(0, 10)}`}
+                      </span>
                     )}
                   </p>
-                  {me && me.role !== 'employee' && (
-                    editingBaselineId === row.vendor.id ? (
-                      <div className="flex items-center gap-2 mt-2">
-                        <input type="number" value={baselineInput} onChange={e => setBaselineInput(Number(e.target.value))}
-                          className="w-20 px-2 py-1 rounded-lg border border-black/10 text-xs font-mono" autoFocus />
-                        <button onClick={() => saveBaseline(row.vendor.id!)} className="text-[11px] font-bold text-[#5A5A40]">儲存</button>
-                        <button onClick={() => setEditingBaselineId(null)} className="text-[11px] text-gray-400">取消</button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => { setEditingBaselineId(row.vendor.id!); setBaselineInput(row.baseline); }}
-                        className="flex items-center gap-1 mt-2 text-[11px] font-bold text-gray-400 hover:text-[#5A5A40]"
-                      >
-                        <Pencil size={11} />校正起始欠片
-                      </button>
-                    )
+                  {row.breakdown.gapMonths.length > 0 && (
+                    <p className="text-[10px] text-amber-600 mt-1">
+                      ⚠ {row.breakdown.gapMonths.join('、')} 尚未回填，暫不計入合計
+                    </p>
+                  )}
+                  {me && (me.role === 'engineer' || me.canEditDeficitBaseline) && (
+                    <button
+                      onClick={() => openDeficitModal(row.vendor)}
+                      className="flex items-center gap-1 mt-2 text-[11px] font-bold text-gray-400 hover:text-[#5A5A40]"
+                    >
+                      <Pencil size={11} />校正起始欠片
+                    </button>
                   )}
                 </div>
 
@@ -418,6 +482,116 @@ export default function ShootBookings() {
           )}
         </div>
       </div>
+
+      {/* 校正起始欠片：逐月回填明細，系統自動加總 */}
+      {deficitModalVendor && (() => {
+        const liveVendor = vendors.find(v => v.id === deficitModalVendor.id) || deficitModalVendor;
+        const entries = [...(liveVendor.deficitEntries || [])].sort((a, b) => b.month.localeCompare(a.month));
+        const total = entries.reduce((s, e) => s + (e.owed || 0), 0);
+        const gapMonths = getDeficitBreakdown(liveVendor, posts, currentMonth).gapMonths;
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-3xl w-full max-w-md max-h-[90vh] overflow-auto shadow-2xl">
+              <div className="p-6">
+                <div className="flex justify-between items-center mb-1">
+                  <h3 className="text-lg font-bold serif">{liveVendor.name}・校正起始欠片</h3>
+                  <button onClick={() => setDeficitModalVendor(null)} className="p-2 hover:bg-gray-100 rounded-full">
+                    <X size={20} />
+                  </button>
+                </div>
+                <p className="text-xs text-gray-400 mb-5">
+                  逐月填寫已確定積欠的支數，系統自動加總成起始欠片，不用再猜一個總數；要沖銷/抵銷欠片也是填負數在這裡，不要跑去用「本月加贈/扣片」——那個只會改當月目標，不會動到這裡的起始欠片。
+                  {entries.length === 0 && liveVendor.manualDeficitBaseline
+                    ? `目前沿用舊版數字：${liveVendor.manualDeficitBaseline}（校正於 ${liveVendor.manualDeficitUpdatedAt?.slice(0, 10) || '未知'}）。新增任何一筆之後就會改用這裡的逐月明細。`
+                    : ''}
+                </p>
+                {gapMonths.length > 0 && (
+                  <p className="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 mb-4">
+                    ⚠ {gapMonths.join('、')} 還沒填，目前不計入合計（沒有欠也要填0，系統不會幫你猜）
+                  </p>
+                )}
+
+                <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-100 space-y-3 mb-5">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-amber-800 mb-1">月份</label>
+                      <input
+                        type="month"
+                        value={deficitMonth}
+                        onChange={(e) => setDeficitMonth(e.target.value)}
+                        className="w-full p-3 bg-white rounded-xl border border-amber-200 focus:ring-2 focus:ring-amber-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-amber-800 mb-1">支數（欠填正數，沖銷填負數）</label>
+                      <input
+                        type="number"
+                        value={deficitOwed}
+                        onChange={(e) => setDeficitOwed(parseInt(e.target.value) || 0)}
+                        className="w-full p-3 bg-white rounded-xl border border-amber-200 focus:ring-2 focus:ring-amber-400"
+                        placeholder="欠3支填3，沖銷2支填-2"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-amber-800 mb-1">備註（選填）</label>
+                    <input
+                      type="text"
+                      value={deficitNote}
+                      onChange={(e) => setDeficitNote(e.target.value)}
+                      className="w-full p-3 bg-white rounded-xl border border-amber-200 focus:ring-2 focus:ring-amber-400"
+                      placeholder="例如：客戶因素延誤"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addDeficitEntry}
+                    className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold text-sm shadow hover:bg-amber-600 transition-all"
+                  >
+                    新增這筆紀錄
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-bold text-gray-400 uppercase tracking-wider">逐月明細</div>
+                  <div className="text-xs font-bold text-[#5A5A40]">加總 {total} 支</div>
+                </div>
+                {entries.length === 0 ? (
+                  <p className="text-sm text-gray-400 italic">目前沒有任何回填紀錄</p>
+                ) : (
+                  <div className="space-y-2">
+                    {entries.map((e, idx) => {
+                      const originalIndex = (liveVendor.deficitEntries || []).indexOf(e);
+                      return (
+                        <div key={idx} className="flex items-start justify-between gap-2 p-3 bg-[#F5F5F0] rounded-xl text-sm">
+                          <div>
+                            <div className="font-bold">
+                              {e.month}
+                              {e.owed >= 0 ? (
+                                <span className="ml-2 text-red-500">欠 {e.owed} 支</span>
+                              ) : (
+                                <span className="ml-2 text-green-600">沖銷 {Math.abs(e.owed)} 支</span>
+                              )}
+                            </div>
+                            {e.note && <div className="text-xs text-gray-500 mt-0.5">{e.note}</div>}
+                          </div>
+                          <button
+                            onClick={() => deleteDeficitEntry(liveVendor, originalIndex)}
+                            className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors shrink-0"
+                            title="刪除這筆"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

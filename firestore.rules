@@ -66,6 +66,24 @@ service cloud.firestore {
       return isAuthenticated() && (getUserData().role == 'manager' || isAdmin());
     }
 
+    // 「校正起始欠片」是比一般廠商編輯更敏感的財務類數字，預設只有工程師能改；
+    // 工程師可以個別在 users/{uid}.canEditDeficitBaseline 開權限給特定人（不需要是 manager）
+    function canEditDeficitBaseline() {
+      return isAuthenticated() && (isAdmin() || getUserData().get('canEditDeficitBaseline', false) == true);
+    }
+
+    function touchesDeficitBaseline() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasAny(['manualDeficitBaseline', 'manualDeficitUpdatedAt', 'deficitEntries']);
+    }
+
+    function touchesOnlyDeficitBaseline() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['manualDeficitBaseline', 'manualDeficitUpdatedAt', 'deficitEntries']);
+    }
+
+    function touchesDeficitPermission() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasAny(['canEditDeficitBaseline']);
+    }
+
     function isValidString(val, maxLen) {
       return val is string && val.size() > 0 && val.size() <= maxLen;
     }
@@ -164,7 +182,7 @@ service cloud.firestore {
       allow get: if isAuthenticated() && (isOwner(uid) || isManager());
       allow list: if isManager();
       allow create: if (isAuthenticated() && request.auth.uid == uid) || isManager() || !exists(/databases/$(database)/documents/users/$(uid));
-      allow update: if isManager();
+      allow update: if (isManager() && !touchesDeficitPermission()) || isAdmin();
       allow delete: if isAdmin();
     }
 
@@ -176,7 +194,10 @@ service cloud.firestore {
     match /vendors/{vendorId} {
       allow read: if isAuthenticated();
       allow create: if isManager() && isValidVendor(request.resource.data);
-      allow update: if isManager() && isValidVendor(request.resource.data);
+      allow update: if isValidVendor(request.resource.data) && (
+        (isManager() && !touchesDeficitBaseline()) ||
+        (canEditDeficitBaseline() && touchesOnlyDeficitBaseline())
+      );
       allow delete: if isAdmin();
     }
 

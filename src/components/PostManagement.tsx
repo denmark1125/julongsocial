@@ -32,14 +32,15 @@ import {
   ChevronRight,
   BellRing,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  Gift
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { format, isPast, isToday, addDays, parseISO, getDay, setHours, setMinutes, startOfDay, isSameDay, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths, addMonths } from 'date-fns';
 import toast from 'react-hot-toast';
 import TrackingExportModal from './TrackingExportModal';
-import { DismissedHabit } from '../types';
-import { visibleVendors, trackedVendorsForMonth } from '../lib/vendorStatus';
+import { DismissedHabit, MonthlyAdjustment } from '../types';
+import { visibleVendors, trackedVendorsForMonth, getEffectiveMonthlyTarget } from '../lib/vendorStatus';
 
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -62,7 +63,10 @@ export default function PostManagement() {
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [openStatusId, setOpenStatusId] = useState<string | null>(null);
   const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
-  
+  const [adjustModalVendor, setAdjustModalVendor] = useState<Vendor | null>(null);
+  const [adjustDelta, setAdjustDelta] = useState<number>(1);
+  const [adjustReason, setAdjustReason] = useState('');
+
   const [sortConfig, setSortConfig] = useState<{
     field: 'platforms' | 'contentType' | 'status' | 'scheduledAt' | 'title' | 'vendorName' | 'clientConfirmed' | 'internalConfirmed' | 'createdAt';
     direction: 'asc' | 'desc';
@@ -179,6 +183,54 @@ export default function PostManagement() {
     }).catch(() => {
       toast.error('複製失敗');
     });
+  };
+
+  const openAdjustModal = (vendor: Vendor) => {
+    setAdjustModalVendor(vendor);
+    setAdjustDelta(1);
+    setAdjustReason('');
+  };
+
+  const handleAddAdjustment = async () => {
+    if (!adjustModalVendor?.id) return;
+    if (!adjustDelta) {
+      toast.error('請輸入要調整的支數');
+      return;
+    }
+    if (!adjustReason.trim()) {
+      toast.error('請輸入原因，方便之後回查');
+      return;
+    }
+    try {
+      const newRecord: MonthlyAdjustment = {
+        month: selectedMonth,
+        videoDelta: adjustDelta,
+        reason: adjustReason.trim(),
+        createdAt: new Date().toISOString()
+      };
+      // adjustModalVendor 是開彈窗當下拍的快照，存過一次之後就過期了；改抓 vendors 這份即時資料才不會覆蓋掉剛存的紀錄
+      const liveVendor = vendors.find(v => v.id === adjustModalVendor.id) || adjustModalVendor;
+      const history = liveVendor.monthlyAdjustments || [];
+      await updateDoc(doc(db, 'vendors', adjustModalVendor.id), {
+        monthlyAdjustments: [...history, newRecord]
+      });
+      toast.success('已新增本月調整');
+      setAdjustDelta(1);
+      setAdjustReason('');
+    } catch (error) {
+      toast.error('新增失敗');
+    }
+  };
+
+  const handleDeleteAdjustment = async (vendor: Vendor, index: number) => {
+    if (!vendor.id) return;
+    try {
+      const history = (vendor.monthlyAdjustments || []).filter((_, i) => i !== index);
+      await updateDoc(doc(db, 'vendors', vendor.id), { monthlyAdjustments: history });
+      toast.success('已刪除該筆調整');
+    } catch (error) {
+      toast.error('刪除失敗');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -411,17 +463,24 @@ export default function PostManagement() {
     const videoCount = vendorMonthPosts.filter(p => p.contentType === 'video').length;
     
     const targetPosts = vendor.monthlyTargetPosts || 0;
-    const targetVideos = vendor.monthlyTargetVideos || 0;
-    const totalTarget = targetPosts + targetVideos || 8; // Fallback to 8 if no target set
-    
+    const targetVideos = getEffectiveMonthlyTarget(vendor, selectedMonth);
+    // 只有廠商從來沒設定過任何基本目標時才 fallback 成8；如果基本目標有設定、只是這個月被加贈/扣片調整打到0，
+    // 要如實顯示0，不能被fallback蓋掉——否則會跟拍攝進度頁算出來的「這個月目標其實是0」互相矛盾
+    const hasBaseTarget = (vendor.monthlyTargetPosts || 0) > 0 || (vendor.monthlyTargetVideos || 0) > 0;
+    const totalTarget = hasBaseTarget ? (targetPosts + targetVideos) : 8;
+
     const totalCount = vendorMonthPosts.length;
-    const percentage = Math.min(Math.round((totalCount / totalTarget) * 100), 100);
-    
+    // totalTarget 現在有可能真的是0（被扣片調整打到0，不是fallback漏接），除以0要另外處理避免出現 Infinity/NaN
+    const percentage = totalTarget > 0 ? Math.min(Math.round((totalCount / totalTarget) * 100), 100) : (totalCount > 0 ? 100 : 0);
+
     const hasPosts = vendor.cooperationItems?.includes('graphic_post');
     const hasVideos = vendor.cooperationItems?.includes('short_video');
-    
+
+    const monthAdjustments = (vendor.monthlyAdjustments || []).filter(a => a.month === selectedMonth);
+
     return {
       id: vendor.id,
+      vendor,
       name: vendor.name,
       count: totalCount,
       postCount,
@@ -431,7 +490,8 @@ export default function PostManagement() {
       targetVideos,
       percentage,
       hasPosts,
-      hasVideos
+      hasVideos,
+      monthAdjustments
     };
   });
 
@@ -443,7 +503,23 @@ export default function PostManagement() {
           <div key={stat.id} className="bg-white p-4 rounded-3xl border border-black/5 shadow-sm">
             <div className="flex justify-between items-start mb-2">
               <div className="font-bold text-sm truncate pr-2">{stat.name}</div>
-              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">本月進度</div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {stat.monthAdjustments.length > 0 && (
+                  <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-100">
+                    {stat.monthAdjustments.reduce((s, a) => s + a.videoDelta, 0) > 0 ? '+' : ''}
+                    {stat.monthAdjustments.reduce((s, a) => s + a.videoDelta, 0)}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => openAdjustModal(stat.vendor)}
+                  className="p-1 text-gray-300 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                  title="本月加贈／扣片調整"
+                >
+                  <Gift size={13} />
+                </button>
+                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">本月進度</div>
+              </div>
             </div>
             <div className="flex items-end justify-between mb-1">
               <div className="text-2xl font-bold serif">{stat.count} <span className="text-xs text-gray-400 font-sans">/ {stat.target}</span></div>
@@ -1030,6 +1106,88 @@ export default function PostManagement() {
           </div>
         </div>
       )}
+
+      {/* 本月加贈／扣片調整 Modal */}
+      {adjustModalVendor && (() => {
+        const liveVendor = vendors.find(v => v.id === adjustModalVendor.id) || adjustModalVendor;
+        const history = [...(liveVendor.monthlyAdjustments || [])].sort((a, b) => b.month.localeCompare(a.month) || b.createdAt.localeCompare(a.createdAt));
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-3xl w-full max-w-md max-h-[90vh] overflow-auto shadow-2xl">
+              <div className="p-6">
+                <div className="flex justify-between items-center mb-1">
+                  <h3 className="text-lg font-bold serif flex items-center"><Gift size={18} className="mr-2 text-amber-500" />{liveVendor.name}</h3>
+                  <button onClick={() => setAdjustModalVendor(null)} className="p-2 hover:bg-gray-100 rounded-full">
+                    <X size={20} />
+                  </button>
+                </div>
+                <p className="text-xs text-gray-400 mb-5">套用月份：{format(parseISO(`${selectedMonth}-01`), 'yyyy年 MM月')}（只調整這個月自己的目標數字，月份一過自動失效；不會動到已經回填的起始欠片，要沖銷/抵銷欠片請去拍攝進度頁的「校正起始欠片」填負數）</p>
+
+                <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-100 space-y-3 mb-5">
+                  <div>
+                    <label className="block text-xs font-medium text-amber-800 mb-1">影音支數調整（加贈填正數，扣片填負數）</label>
+                    <input
+                      type="number"
+                      value={adjustDelta}
+                      onChange={(e) => setAdjustDelta(parseInt(e.target.value) || 0)}
+                      className="w-full p-3 bg-white rounded-xl border border-amber-200 focus:ring-2 focus:ring-amber-400"
+                      placeholder="例如：3"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-amber-800 mb-1">原因</label>
+                    <input
+                      type="text"
+                      value={adjustReason}
+                      onChange={(e) => setAdjustReason(e.target.value)}
+                      className="w-full p-3 bg-white rounded-xl border border-amber-200 focus:ring-2 focus:ring-amber-400"
+                      placeholder="例如：開會決議加贈3支"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddAdjustment}
+                    className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold text-sm shadow hover:bg-amber-600 transition-all"
+                  >
+                    新增這筆調整
+                  </button>
+                </div>
+
+                <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">歷史調整紀錄</div>
+                {history.length === 0 ? (
+                  <p className="text-sm text-gray-400 italic">目前沒有任何調整紀錄</p>
+                ) : (
+                  <div className="space-y-2">
+                    {history.map((adj, idx) => {
+                      const originalIndex = (liveVendor.monthlyAdjustments || []).indexOf(adj);
+                      return (
+                        <div key={idx} className="flex items-start justify-between gap-2 p-3 bg-[#F5F5F0] rounded-xl text-sm">
+                          <div>
+                            <div className="font-bold">
+                              {format(parseISO(`${adj.month}-01`), 'yyyy/MM')}
+                              <span className={cn("ml-2", adj.videoDelta >= 0 ? "text-green-600" : "text-red-500")}>
+                                {adj.videoDelta > 0 ? '+' : ''}{adj.videoDelta} 支
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-500 mt-0.5">{adj.reason}</div>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteAdjustment(liveVendor, originalIndex)}
+                            className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors shrink-0"
+                            title="刪除這筆"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

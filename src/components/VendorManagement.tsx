@@ -47,6 +47,8 @@ export default function VendorManagement() {
     cooperationItems: [] as string[],
     monthlyTargetPosts: 8,
     monthlyTargetVideos: 0,
+    cooperationStartMonth: '',
+    weeklyPattern: null as number[] | null,
     excludeFromStats: false,
     pauseHistory: [] as PauseRecord[],
     editorId: '',
@@ -213,6 +215,8 @@ export default function VendorManagement() {
         cooperationItems: [],
         monthlyTargetPosts: 8,
         monthlyTargetVideos: 0,
+        cooperationStartMonth: '',
+        weeklyPattern: null,
         excludeFromStats: false,
         pauseHistory: [],
         editorName: '',
@@ -337,6 +341,8 @@ export default function VendorManagement() {
                 cooperationItems: [],
                 monthlyTargetPosts: 8,
                 monthlyTargetVideos: 0,
+                cooperationStartMonth: '',
+                weeklyPattern: null,
                 excludeFromStats: false,
                 pauseHistory: [],
                 editorId: '',
@@ -398,6 +404,8 @@ export default function VendorManagement() {
                       cooperationItems: vendor.cooperationItems || [],
                       monthlyTargetPosts: vendor.monthlyTargetPosts || 0,
                       monthlyTargetVideos: vendor.monthlyTargetVideos || 0,
+                      cooperationStartMonth: vendor.cooperationStartMonth || '',
+                      weeklyPattern: vendor.weeklyPattern && vendor.weeklyPattern.length === 4 ? vendor.weeklyPattern : null,
                       excludeFromStats: vendor.excludeFromStats || false,
                       pauseHistory: vendor.pauseHistory || [],
                       editorId: vendor.editorId || '',
@@ -498,6 +506,11 @@ export default function VendorManagement() {
                 {vendor.excludeFromStats && (
                   <div className="flex items-center text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-lg border border-gray-200 w-fit">
                     <span>不列入統計</span>
+                  </div>
+                )}
+                {vendor.cooperationStartMonth && vendor.cooperationStartMonth > format(new Date(), 'yyyy-MM') && (
+                  <div className="flex items-center text-xs font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded-lg border border-amber-100 w-fit">
+                    <span>{vendor.cooperationStartMonth} 起才開始追蹤</span>
                   </div>
                 )}
                 {vendor.selfPublishing && (
@@ -770,6 +783,69 @@ export default function VendorManagement() {
                       placeholder="例如: 4"
                     />
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">合作起始月（選填）</label>
+                  <input
+                    type="month"
+                    value={formData.cooperationStartMonth}
+                    onChange={(e) => setFormData({ ...formData, cooperationStartMonth: e.target.value })}
+                    className="w-full p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-[#5A5A40]"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">新客戶簽約但還沒正式開始拍的話填這個；設定後，這個月之前完全不列入目標/欠片/庫存追蹤，不會提早冒出欠片</p>
+                </div>
+
+                <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-100 space-y-3">
+                  <label className="flex items-center space-x-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.weeklyPattern !== null}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          const even = Math.round((formData.monthlyTargetVideos || 0) / 4);
+                          setFormData({ ...formData, weeklyPattern: [even, even, even, Math.max(0, (formData.monthlyTargetVideos || 0) - even * 3)] });
+                        } else {
+                          setFormData({ ...formData, weeklyPattern: null });
+                        }
+                      }}
+                      className="w-5 h-5 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                    />
+                    <div>
+                      <span className="block text-sm font-bold text-amber-800">自訂每週發片節奏</span>
+                      <span className="block text-xs text-amber-600/70">月支數不是平均分佈時才需要設定（例如每週2支、最後一週1支）。不勾選就用月目標平均攤提，庫存警示照樣會依此換算「還能撐幾天」。</span>
+                    </div>
+                  </label>
+                  {formData.weeklyPattern !== null && (
+                    <div>
+                      <div className="grid grid-cols-4 gap-2">
+                        {formData.weeklyPattern.map((val, i) => (
+                          <div key={i}>
+                            <label className="block text-[10px] text-amber-600/70 mb-1">
+                              {i < 3 ? `第${i + 1}週` : '最後一週'}
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={val}
+                              onChange={(e) => {
+                                const next = [...formData.weeklyPattern!];
+                                next[i] = parseInt(e.target.value) || 0;
+                                setFormData({ ...formData, weeklyPattern: next });
+                              }}
+                              className="w-full p-2 bg-white rounded-lg border border-amber-100 text-sm text-center"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-amber-600/70 mt-2">
+                        4週加總：{formData.weeklyPattern.reduce((a, b) => a + b, 0)} 支
+                        {formData.weeklyPattern.reduce((a, b) => a + b, 0) !== (formData.monthlyTargetVideos || 0)
+                          ? `（跟上面月目標 ${formData.monthlyTargetVideos || 0} 支對不上，記得回頭調整月目標）`
+                          : '（跟月目標一致）'}
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200">
