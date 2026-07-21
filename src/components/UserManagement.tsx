@@ -132,6 +132,15 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
     }
   };
 
+  const handleToggleDeficitPermission = async (uid: string, allowed: boolean) => {
+    try {
+      await updateDoc(doc(db, 'users', uid), { canEditDeficitBaseline: allowed });
+      toast.success(allowed ? '已開放校正起始欠片權限' : '已收回校正起始欠片權限');
+    } catch (error) {
+      toast.error('更新失敗');
+    }
+  };
+
   const handleDeleteUser = async (uid: string) => {
     if (window.confirm('確定要刪除此使用者嗎？')) {
       try {
@@ -307,6 +316,9 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">電子郵件</th>
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">LINE 狀態</th>
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">目前權限</th>
+                {currentUserRole === 'engineer' && (
+                  <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">校正起始欠片</th>
+                )}
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">操作</th>
               </tr>
             </thead>
@@ -352,9 +364,26 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                         <option value="engineer">工程師</option>
                       </select>
                     </td>
+                    {currentUserRole === 'engineer' && (
+                      <td className="p-4">
+                        {user.role === 'engineer' ? (
+                          <span className="text-xs text-gray-300">工程師預設可改</span>
+                        ) : (
+                          <label className="inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={!!user.canEditDeficitBaseline}
+                              onChange={(e) => handleToggleDeficitPermission(user.uid, e.target.checked)}
+                              className="w-4 h-4 rounded border-gray-300 text-[#5A5A40] focus:ring-[#5A5A40]"
+                            />
+                            <span className="ml-2 text-xs text-gray-500">{user.canEditDeficitBaseline ? '已開放' : '未開放'}</span>
+                          </label>
+                        )}
+                      </td>
+                    )}
                     <td className="p-4">
                       <div className="flex items-center space-x-2">
-                        <button 
+                        <button
                           onClick={() => setResettingUid(user.uid)}
                           className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
                           title="重設密碼"
