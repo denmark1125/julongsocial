@@ -123,6 +123,19 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
     }
   };
 
+  const handleClearAllLineBindings = async () => {
+    if (!window.confirm('確定要清空所有 LINE 綁定資料嗎？這會解除所有成員的 LINE 綁定、並刪除目前的待綁定清單，之後靠新版 webhook 重新加好友即可重新產生。')) return;
+    try {
+      const boundUsers = users.filter(u => u.lineUserId);
+      await Promise.all(boundUsers.map(u => updateDoc(doc(db, 'users', u.uid), { lineUserId: '' })));
+      await Promise.all(lineConnections.map(lc => deleteDoc(doc(db, 'line_connections', lc.id!))));
+      toast.success('已清空所有 LINE 綁定資料');
+    } catch (error) {
+      console.error('Clear all LINE bindings error:', error);
+      toast.error('清空失敗');
+    }
+  };
+
   const handleUpdateRole = async (uid: string, newRole: UserRole) => {
     try {
       await updateDoc(doc(db, 'users', uid), { role: newRole });
@@ -434,9 +447,20 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
         </div>
       ) : (
         <div className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
-          <div className="p-6 border-b border-black/5 bg-[#F5F5F0]/50">
-            <h3 className="text-lg font-bold serif text-[#5A5A40]">待綁定 LINE 使用者</h3>
-            <p className="text-xs text-gray-500 mt-1">當員工加入官方 LINE 後，系統會在此顯示其資訊，請將其與系統帳號進行綁定。</p>
+          <div className="p-6 border-b border-black/5 bg-[#F5F5F0]/50 flex items-center justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-bold serif text-[#5A5A40]">待綁定 LINE 使用者</h3>
+              <p className="text-xs text-gray-500 mt-1">當員工加入官方 LINE 後，系統會在此顯示其資訊，請將其與系統帳號進行綁定。</p>
+            </div>
+            {currentUserRole === 'engineer' && (users.some(u => u.lineUserId) || lineConnections.length > 0) && (
+              <button
+                onClick={handleClearAllLineBindings}
+                className="shrink-0 flex items-center space-x-1 text-red-500 hover:text-red-700 text-xs font-bold px-3 py-2 rounded-xl hover:bg-red-50 transition-colors"
+              >
+                <Unlink size={14} />
+                <span>清空所有綁定</span>
+              </button>
+            )}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
