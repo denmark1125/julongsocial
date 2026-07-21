@@ -655,7 +655,7 @@ export default function VendorManagement() {
                       );
                     })}
                   </div>
-                  <p className="text-xs text-gray-400 mt-1">庫存/欠片警示通知只會發給這裡指派的人；沒指派任何人時，engineer/manager 一律看得到全部。之後LINE通知也會依這裡發送。</p>
+                  <p className="text-xs text-gray-400 mt-1">系統內的告警/鈴鐺不分派任何人都看得到全部；這裡指派的人是之後LINE推播通知的對象。</p>
                 </div>
 
                 <div>
