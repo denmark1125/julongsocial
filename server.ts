@@ -5,8 +5,13 @@ import cookieParser from "cookie-parser";
 import session from "express-session";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
-import * as admin from "firebase-admin";
+// 用subpath模組化API而不是 `import * as admin from "firebase-admin"`——
+// 後者在tsx/Node的ESM載入器下，CJS命名空間互通有問題，admin.apps會是undefined整個爆掉；
+// firebase-admin/app 等子路徑是原生ESM，不會有這個互通問題
+import { getApps, initializeApp as initializeAdminApp } from "firebase-admin/app";
+import { getAuth as getAdminAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
+import * as crypto from "crypto";
 import firebaseConfig from "./firebase-applet-config.json";
 
 dotenv.config();
@@ -17,14 +22,14 @@ let adminDb: any;
 // Initialize Firebase Admin
 function initializeFirebaseAdmin() {
   try {
-    if (admin.apps.length === 0) {
+    if (getApps().length === 0) {
       console.log("Initializing Firebase Admin for project:", firebaseConfig.projectId);
-      admin.initializeApp({
+      initializeAdminApp({
         projectId: firebaseConfig.projectId,
       });
     }
-    adminAuth = admin.auth();
-    adminDb = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
+    adminAuth = getAdminAuth(getApps()[0]);
+    adminDb = getFirestore(getApps()[0], firebaseConfig.firestoreDatabaseId);
     console.log("Using Firestore database:", firebaseConfig.firestoreDatabaseId);
   } catch (e) {
     console.error("Firebase Admin Initialization Error:", e);
@@ -39,7 +44,13 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server is listening on port ${PORT}`);
 });
 
-app.use(express.json());
+// LINE webhook 簽章驗證需要原始bytes，JSON.stringify(req.body)不保證跟LINE原始送來的一致，
+// 所以在解析當下順便留一份原始buffer，只有LINE webhook那支API會用到，其他路由不受影響
+app.use(express.json({
+  verify: (req: any, _res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 app.use(cookieParser());
 
 // Health Check
@@ -54,7 +65,7 @@ app.get("/api/debug", (req, res) => {
     port: PORT,
     firebaseProjectId: firebaseConfig.projectId,
     firebaseDatabaseId: firebaseConfig.firestoreDatabaseId,
-    appsInitialized: admin.apps.length
+    appsInitialized: getApps().length
   });
 });
 
@@ -137,6 +148,64 @@ app.post("/api/webhook/make", async (req, res) => {
   } catch (error) {
     console.error("Webhook error:", error);
     res.status(500).json({ error: "Failed to trigger webhook" });
+  }
+});
+
+// ===============================================================
+// LINE Messaging API Webhook（取代原本掛掉的Make.com中繼：LINE加好友事件直接打這支）
+// ===============================================================
+function verifyLineSignature(rawBody: Buffer, signature: string | undefined, channelSecret: string): boolean {
+  if (!signature) return false;
+  const hash = crypto.createHmac("SHA256", channelSecret).update(rawBody).digest("base64");
+  return hash === signature;
+}
+
+app.post("/api/webhook/line", async (req: any, res) => {
+  const channelSecret = process.env.LINE_CHANNEL_SECRET;
+  const accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!channelSecret || !accessToken) {
+    console.error("LINE webhook called but LINE_CHANNEL_SECRET / LINE_CHANNEL_ACCESS_TOKEN not configured");
+    return res.status(500).json({ error: "LINE not configured" });
+  }
+
+  const signature = req.headers["x-line-signature"] as string | undefined;
+  if (!verifyLineSignature(req.rawBody, signature, channelSecret)) {
+    console.error("LINE webhook signature verification failed");
+    return res.status(401).json({ error: "invalid signature" });
+  }
+
+  // 先回200給LINE（避免逾時被LINE判定失敗重送），事件處理用背景方式進行
+  res.status(200).json({ ok: true });
+
+  const events = req.body?.events || [];
+  for (const event of events) {
+    if (event?.type !== "follow" || event?.source?.type !== "user") continue;
+    const lineUserId = event.source.userId;
+    try {
+      const profileRes = await fetch(`https://api.line.me/v2/bot/profile/${lineUserId}`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const profile: any = profileRes.ok ? await profileRes.json() : {};
+
+      if (!adminDb) continue;
+      const existingSnap = await adminDb.collection("line_connections").where("lineUserId", "==", lineUserId).limit(1).get();
+      const data = {
+        lineUserId,
+        lineDisplayName: profile.displayName || "",
+        linePictureUrl: profile.pictureUrl || "",
+        // 保留既有綁定，重新加好友不會清掉已經綁好的系統帳號
+        UserId: existingSnap.empty ? "" : (existingSnap.docs[0].data().UserId || ""),
+        createdAt: existingSnap.empty ? new Date().toISOString() : existingSnap.docs[0].data().createdAt
+      };
+      if (existingSnap.empty) {
+        await adminDb.collection("line_connections").add(data);
+      } else {
+        await adminDb.collection("line_connections").doc(existingSnap.docs[0].id).update(data);
+      }
+      console.log("LINE follow event recorded for", lineUserId);
+    } catch (e) {
+      console.error("LINE follow event handling failed", e);
+    }
   }
 });
 
