@@ -7,7 +7,7 @@ import fetch from "node-fetch";
 // 用subpath模組化API而不是 `import * as admin from "firebase-admin"`——
 // 後者在tsx/Node的ESM載入器下，CJS命名空間互通有問題，admin.apps會是undefined整個爆掉；
 // firebase-admin/app 等子路徑是原生ESM，不會有這個互通問題
-import { getApps, initializeApp as initializeAdminApp } from "firebase-admin/app";
+import { getApps, initializeApp as initializeAdminApp, cert } from "firebase-admin/app";
 import { getAuth as getAdminAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import * as crypto from "crypto";
@@ -30,9 +30,21 @@ function initializeFirebaseAdmin() {
   try {
     if (getApps().length === 0) {
       console.log("Initializing Firebase Admin for project:", firebaseConfig.projectId);
-      initializeAdminApp({
-        projectId: firebaseConfig.projectId,
-      });
+      // Vercel serverless runtime不是GCP環境，沒有metadata server也沒有gcloud ADC檔，
+      // initializeAdminApp若不帶明確憑證，任何真的碰Firestore/Auth的呼叫都會炸
+      // "Could not load the default credentials"。改成從service account key環境變數讀憑證。
+      const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+      if (serviceAccountKey) {
+        initializeAdminApp({
+          credential: cert(JSON.parse(serviceAccountKey)),
+          projectId: firebaseConfig.projectId,
+        });
+      } else {
+        console.warn("FIREBASE_SERVICE_ACCOUNT_KEY not set, falling back to ADC (will fail outside GCP)");
+        initializeAdminApp({
+          projectId: firebaseConfig.projectId,
+        });
+      }
     }
     adminAuth = getAdminAuth(getApps()[0]);
     adminDb = getFirestore(getApps()[0], firebaseConfig.firestoreDatabaseId);
