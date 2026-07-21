@@ -7,8 +7,8 @@ import {
   limit 
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Post, Vendor, Asset, DismissedHabit, BillingRecord, BillingContract } from '../types';
-import { visibleVendors, trackedVendors } from '../lib/vendorStatus';
+import { Post, Vendor, Asset, DismissedHabit, BillingRecord, BillingContract, ShootBooking } from '../types';
+import { visibleVendors, trackedVendors, getVideoStockAlert, getOwedVideoCount, getAvailableVideoAssets, hasVideoTrackingScope, LOW_STOCK_RUNWAY_DAYS } from '../lib/vendorStatus';
 import { 
   format, 
   isPast, 
@@ -31,7 +31,10 @@ import {
   BellRing,
   Plus,
   AlertCircle,
-  CreditCard
+  CreditCard,
+  Film,
+  Scissors,
+  Download
 } from 'lucide-react';
 
 import { clsx, type ClassValue } from 'clsx';
@@ -49,6 +52,7 @@ import {
   SuccessIcon, 
   InventoryIcon 
 } from './CustomIcons';
+import EditReminderExportModal from './EditReminderExportModal';
 
 export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
   const [posts, setPosts] = useState<Post[]>([]);
@@ -57,6 +61,8 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
   const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
   const [billingRecords, setBillingRecords] = useState<BillingRecord[]>([]);
   const [contracts, setContracts] = useState<BillingContract[]>([]);
+  const [bookings, setBookings] = useState<ShootBooking[]>([]);
+  const [isEditReminderModalOpen, setIsEditReminderModalOpen] = useState(false);
 
   useEffect(() => {
     const vUnsubscribe = onSnapshot(collection(db, 'vendors'), (snapshot) => {
@@ -83,6 +89,10 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
       setContracts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BillingContract)));
     });
 
+    const bkUnsubscribe = onSnapshot(collection(db, 'shootBookings'), (snapshot) => {
+      setBookings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ShootBooking)));
+    });
+
     return () => {
       vUnsubscribe();
       pUnsubscribe();
@@ -90,6 +100,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
       dUnsubscribe();
       brUnsubscribe();
       cUnsubscribe();
+      bkUnsubscribe();
     };
   }, []);
 
@@ -100,11 +111,21 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
     { label: '素材庫存', value: assets.filter(a => a.status === 'available').length, icon: InventoryIcon, color: 'text-[#A67C52]', bg: 'bg-[#A67C52]/10' },
   ];
 
-  // Low Video Stock Alert (fewer than 2 videos)（排除冷凍中/已終止的廠商）
-  const lowStockVendors = trackedVendors(vendors).map(vendor => {
-    const stock = assets.filter(a => a.vendorId === vendor.id && a.type === 'video' && a.status === 'available').length;
-    return { ...vendor, stock };
-  }).filter(v => v.stock < 2);
+  // Video Stock Alert：分兩級——'shoot'=連原始素材都不夠撐 LOW_STOCK_RUNWAY_DAYS 天，要安排拍攝；
+  // 'edit'=素材夠但沒剪完，成片撐不到天數，催剪輯優先處理。
+  // 用 hasVideoTrackingScope 而非 trackedVendors：冷凍中的廠商如果還留有舊欠片，一樣要提醒，不能因為冷凍就從告警清單消失
+  // （這個月本身不會疊加新短缺/新的撐幾天壓力，那部分邏輯在 getDeficitBreakdown/getWeeklyPace 內部已經處理）
+  const dashboardMonth = format(new Date(), 'yyyy-MM');
+  const stockAlertVendors = vendors.filter(v => hasVideoTrackingScope(v, dashboardMonth)).map(vendor => {
+    const vendorVideoAssets = getAvailableVideoAssets(vendor.id!, assets, posts);
+    const owed = getOwedVideoCount(vendor, posts, vendorVideoAssets.length);
+    const alert = getVideoStockAlert(vendor, vendorVideoAssets, owed);
+    const activeBooking = bookings
+      .filter(b => b.vendorId === vendor.id && b.status === 'booked')
+      .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate))[0] || null;
+    return { ...vendor, ...alert, activeBooking };
+  }).filter(v => v.severity !== null)
+    .sort((a, b) => (a.severity === 'shoot' ? 0 : 1) - (b.severity === 'shoot' ? 0 : 1));
 
   // Reminders: Posts that need attention
   const approvalReminders = posts.filter(p => {
@@ -310,22 +331,65 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
                 影片素材警示
               </h3>
               <span className="bg-white/20 px-2 py-1 rounded-lg text-[10px] md:text-xs font-bold">
-                低於 2 部
+                低於 {LOW_STOCK_RUNWAY_DAYS} 天
               </span>
             </div>
+            {stockAlertVendors.some(v => v.severity === 'edit') && (
+              <button
+                onClick={() => setIsEditReminderModalOpen(true)}
+                className="w-full bg-white/10 hover:bg-white/20 text-white text-xs font-bold py-2 rounded-xl transition-colors flex items-center justify-center"
+              >
+                <Download size={14} className="mr-1.5" /> 導出催剪輯清單
+              </button>
+            )}
             <div className="space-y-2 md:space-y-3">
-              {lowStockVendors.length > 0 ? lowStockVendors.map(v => (
+              {stockAlertVendors.length > 0 ? stockAlertVendors.map(v => (
                 <div key={v.id} className="bg-white/10 p-3 md:p-4 rounded-xl md:rounded-2xl flex justify-between items-center backdrop-blur-sm">
-                  <div>
-                    <p className="font-bold text-xs md:text-sm">{v.name}</p>
-                    <p className="text-[10px] md:text-xs text-white/60">目前庫存：{v.stock} 部</p>
+                  <div className="flex items-start space-x-2">
+                    {v.severity === 'shoot' ? (
+                      <Film size={16} className="text-red-300 mt-0.5 shrink-0" />
+                    ) : (
+                      <Scissors size={16} className="text-amber-300 mt-0.5 shrink-0" />
+                    )}
+                    <div>
+                      <p className="font-bold text-xs md:text-sm">
+                        {v.name}
+                        <span className={cn(
+                          "ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold align-middle",
+                          v.severity === 'shoot' ? "bg-red-400/30 text-red-100" : "bg-amber-400/30 text-amber-100"
+                        )}>
+                          {v.severity === 'shoot' ? '需拍片' : '催剪輯'}
+                        </span>
+                      </p>
+                      {v.severity === 'shoot' ? (
+                        <p className="text-[10px] md:text-xs text-white/60">
+                          成片+素材共 {v.finishedStock + v.rawStock} 部
+                          {v.owed > 0
+                            ? `，累計已欠 ${v.owed} 支`
+                            : `，只夠撐 ${Math.max(0, Math.floor(v.totalRunwayDays!))} 天`}
+                          ，需盡快安排拍攝
+                        </p>
+                      ) : (
+                        <p className="text-[10px] md:text-xs text-white/60">
+                          成片剩 {v.finishedStock} 部只夠撐 {Math.max(0, Math.floor(v.finishedRunwayDays!))} 天，另有 {v.rawStock} 部待剪
+                          {v.editorName ? `，麻煩去催剪輯師「${v.editorName}」優先剪` : '，麻煩去催剪輯師優先剪'}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <button 
-                    onClick={() => setActiveTab('videos')}
-                    className="bg-white text-[#5A5A40] p-1.5 md:p-2 rounded-lg md:rounded-xl hover:scale-105 transition-transform"
-                  >
-                    <Plus size={14} md:size={16} />
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {v.activeBooking && (
+                      <span className="bg-emerald-400/20 text-emerald-100 px-2 py-1 rounded-lg text-[9px] md:text-[10px] font-bold whitespace-nowrap">
+                        已預約 {format(parseISO(v.activeBooking.scheduledDate), 'MM/dd')}
+                      </span>
+                    )}
+                    <button
+                      onClick={() => setActiveTab(v.severity === 'shoot' ? 'shootBookings' : 'videos')}
+                      className="bg-white text-[#5A5A40] p-1.5 md:p-2 rounded-lg md:rounded-xl hover:scale-105 transition-transform shrink-0"
+                    >
+                      <Plus size={14} md:size={16} />
+                    </button>
+                  </div>
                 </div>
               )) : (
                 <div className="text-center py-4 text-white/60 italic text-xs md:text-sm">
@@ -467,6 +531,13 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
           )}
         </div>
       </div>
+      <EditReminderExportModal
+        isOpen={isEditReminderModalOpen}
+        onClose={() => setIsEditReminderModalOpen(false)}
+        vendors={vendors}
+        assets={assets}
+        posts={posts}
+      />
     </div>
   );
 }

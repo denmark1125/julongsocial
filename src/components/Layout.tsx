@@ -14,11 +14,12 @@ import {
   History,
   Video,
   AlertTriangle,
-  AlertCircle,
   BellRing,
   Clock,
   Lock,
-  CreditCard
+  CreditCard,
+  Film,
+  Scissors
 } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
@@ -26,7 +27,7 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { UserProfile, Post, Vendor, Asset, DismissedHabit } from '../types';
-import { trackedVendors } from '../lib/vendorStatus';
+import { trackedVendors, getVideoStockAlert, getOwedVideoCount, getAvailableVideoAssets, hasVideoTrackingScope } from '../lib/vendorStatus';
 import { format, parseISO, isBefore, addDays, isAfter, getDay, isSameDay, subDays } from 'date-fns';
 import Logo from './Logo';
 import { motion, AnimatePresence } from 'motion/react';
@@ -151,20 +152,35 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
       });
     }
 
-    // 3. Low Stock
-    trackedVendors(vendors).forEach(v => {
-      const stock = assets.filter(a => a.vendorId === v.id && a.type === 'video' && a.status === 'available').length;
-      if (stock < 2) {
+    // 3. Video Stock：'shoot'=連原始素材都不夠，急迫要拍片／'edit'=素材夠但沒剪完，催剪輯優先處理。
+    // 用 hasVideoTrackingScope 而非 trackedVendors：冷凍中的廠商如果還留有舊欠片，一樣要提醒，不能因為冷凍就從通知消失
+    vendors.filter(v => hasVideoTrackingScope(v, format(now, 'yyyy-MM'))).forEach(v => {
+      const vendorVideoAssets = getAvailableVideoAssets(v.id!, assets, posts);
+      const owed = getOwedVideoCount(v, posts, vendorVideoAssets.length);
+      const alert = getVideoStockAlert(v, vendorVideoAssets, owed);
+      if (alert.severity === 'shoot') {
         list.push({
-          id: `stock-${v.id}`,
+          id: `stock-shoot-${v.id}`,
           type: 'stock',
-          title: '影片庫存不足',
-          content: `${v.name} 目前僅剩 ${stock} 部影片`,
+          title: '需安排拍攝',
+          content: `${v.name} 成片+素材共 ${alert.finishedStock + alert.rawStock} 部${alert.owed > 0 ? `，累計已欠 ${alert.owed} 支` : `，只夠撐 ${Math.max(0, Math.floor(alert.totalRunwayDays!))} 天`}`,
+          time: now.toISOString(),
+          tab: 'shootBookings',
+          icon: Film,
+          color: 'text-red-500',
+          bg: 'bg-red-50'
+        });
+      } else if (alert.severity === 'edit') {
+        list.push({
+          id: `stock-edit-${v.id}`,
+          type: 'stock',
+          title: '催剪輯優先處理',
+          content: `${v.name} 成片僅剩 ${alert.finishedStock} 部只夠撐 ${Math.max(0, Math.floor(alert.finishedRunwayDays!))} 天，有 ${alert.rawStock} 部待剪，麻煩去催剪輯師${v.editorName ? `「${v.editorName}」` : ''}優先剪`,
           time: now.toISOString(),
           tab: 'videos',
-          icon: AlertCircle,
-          color: 'text-purple-500',
-          bg: 'bg-purple-50'
+          icon: Scissors,
+          color: 'text-amber-500',
+          bg: 'bg-amber-50'
         });
       }
     });
@@ -186,6 +202,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     { id: 'vendors', label: '廠商管理', icon: Users, roles: ['engineer', 'manager', 'employee'] },
     { id: 'posts', label: '貼文管理', icon: FileText, roles: ['engineer', 'manager', 'employee'] },
     { id: 'videos', label: '素材資料庫', icon: Video, roles: ['engineer', 'manager', 'employee'] },
+    { id: 'shootBookings', label: '拍攝進度', icon: Film, roles: ['engineer', 'manager', 'employee'] },
     { id: 'calendar', label: '社群日曆', icon: CalendarIcon, roles: ['engineer', 'manager', 'employee'] },
     { id: 'billing', label: '帳務管理', icon: CreditCard, roles: ['engineer', 'manager'] },
     { id: 'users', label: '員工管理', icon: ShieldCheck, roles: ['engineer', 'manager'] },
