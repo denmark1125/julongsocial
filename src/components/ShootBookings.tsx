@@ -100,6 +100,8 @@ export default function ShootBookings() {
       else if (owed > 0) sev = 'warn';
       return { vendor: v, target, delivered, stock, baseline: breakdown.baseline, breakdown, owed, active, overdue, frozenThisMonth, sev };
     })
+    // 冷凍中且完全沒欠片的廠商不用一直顯示佔版面（沒東西要管）；冷凍中但還有欠片的還是要留著提醒去清
+    .filter(row => !(row.frozenThisMonth && row.owed === 0))
     .sort((a, b) => (b.sev === 'crit' ? 2 : b.sev === 'warn' ? 1 : 0) - (a.sev === 'crit' ? 2 : a.sev === 'warn' ? 1 : 0) || b.owed - a.owed);
 
   const totalOwed = rows.reduce((s, r) => s + r.owed, 0);
