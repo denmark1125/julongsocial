@@ -1,5 +1,4 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import cookieParser from "cookie-parser";
 import session from "express-session";
@@ -224,6 +223,9 @@ async function setupServer() {
   if (process.env.NODE_ENV !== "production") {
     console.log("Setting up Vite middleware...");
     try {
+      // vite/rollup只有本機開發要用，動態import讓production bundle完全不碰它們，
+      // 順便閃過rollup平台原生二進位optional dependency在Vercel Linux runtime常見的npm bug
+      const { createServer: createViteServer } = await import("vite");
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: "spa",
