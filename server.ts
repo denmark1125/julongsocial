@@ -12,9 +12,16 @@ import { getApps, initializeApp as initializeAdminApp } from "firebase-admin/app
 import { getAuth as getAdminAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import * as crypto from "crypto";
-import firebaseConfig from "./firebase-applet-config.json";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
 
 dotenv.config();
+
+// 原本用`import firebaseConfig from "./firebase-applet-config.json"`本機tsx沒事，
+// 但Vercel prod是原生Node ESM，JSON import一定要帶import attribute(`with {type:"json"}`)
+// 不同Node版本語法(assert/with)又不一致，改用readFileSync最穩定不挑版本
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const firebaseConfig = JSON.parse(readFileSync(path.join(__dirname, "firebase-applet-config.json"), "utf8"));
 
 let adminAuth: any;
 let adminDb: any;
