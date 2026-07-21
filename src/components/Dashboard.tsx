@@ -7,7 +7,7 @@ import {
   limit 
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Post, Vendor, Asset, DismissedHabit, BillingRecord, BillingContract, ShootBooking } from '../types';
+import { Post, Vendor, Asset, DismissedHabit, BillingRecord, BillingContract, ShootBooking, UserProfile } from '../types';
 import { visibleVendors, trackedVendors, getVideoStockAlert, getOwedVideoCount, getAvailableVideoAssets, hasVideoTrackingScope, LOW_STOCK_RUNWAY_DAYS } from '../lib/vendorStatus';
 import { 
   format, 
@@ -54,7 +54,7 @@ import {
 } from './CustomIcons';
 import EditReminderExportModal from './EditReminderExportModal';
 
-export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
+export default function Dashboard({ setActiveTab, userProfile }: { setActiveTab: (tab: string) => void; userProfile?: UserProfile | null }) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -115,8 +115,16 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
   // 'edit'=素材夠但沒剪完，成片撐不到天數，催剪輯優先處理。
   // 用 hasVideoTrackingScope 而非 trackedVendors：冷凍中的廠商如果還留有舊欠片，一樣要提醒，不能因為冷凍就從告警清單消失
   // （這個月本身不會疊加新短缺/新的撐幾天壓力，那部分邏輯在 getDeficitBreakdown/getWeeklyPace 內部已經處理）
+  // 員工只看得到自己被指派(assignedUserIds)的廠商；engineer/manager 一律看得到全部；沒指派任何人的廠商大家都看得到
   const dashboardMonth = format(new Date(), 'yyyy-MM');
-  const stockAlertVendors = vendors.filter(v => hasVideoTrackingScope(v, dashboardMonth)).map(vendor => {
+  const stockAlertVendors = vendors
+    .filter(v => hasVideoTrackingScope(v, dashboardMonth))
+    .filter(v => {
+      if (userProfile?.role === 'engineer' || userProfile?.role === 'manager') return true;
+      if (!v.assignedUserIds || v.assignedUserIds.length === 0) return true;
+      return v.assignedUserIds.includes(userProfile?.uid || '');
+    })
+    .map(vendor => {
     const vendorVideoAssets = getAvailableVideoAssets(vendor.id!, assets, posts);
     const owed = getOwedVideoCount(vendor, posts, vendorVideoAssets.length);
     const alert = getVideoStockAlert(vendor, vendorVideoAssets, owed);

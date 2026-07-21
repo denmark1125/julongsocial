@@ -12,7 +12,7 @@ import {
   orderBy
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Vendor, SocialAccount, OperationType, Editor, PauseRecord } from '../types';
+import { Vendor, SocialAccount, OperationType, Editor, PauseRecord, UserProfile } from '../types';
 import { Plus, Trash2, Edit2, ExternalLink, Shield, X, Eye, EyeOff, Users, ChevronDown, ChevronUp, Settings2, Snowflake, RotateCcw, PowerOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { clsx, type ClassValue } from 'clsx';
@@ -28,6 +28,7 @@ type StatusTab = 'active' | 'paused' | 'ended';
 export default function VendorManagement() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [editors, setEditors] = useState<Editor[]>([]);
+  const [users, setUsers] = useState<UserProfile[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditorModalOpen, setIsEditorModalOpen] = useState(false);
   const [newEditorName, setNewEditorName] = useState('');
@@ -50,10 +51,19 @@ export default function VendorManagement() {
     weeklyPattern: null as number[] | null,
     excludeFromStats: false,
     pauseHistory: [] as PauseRecord[],
+    assignedUserIds: [] as string[],
     editorId: '',
     editorName: '',
     selfPublishing: false
   });
+
+  useEffect(() => {
+    const uq = query(collection(db, 'users'));
+    const uUnsub = onSnapshot(uq, (snapshot) => {
+      setUsers(snapshot.docs.map(d => d.data() as UserProfile));
+    });
+    return () => uUnsub();
+  }, []);
 
   useEffect(() => {
     const q = query(collection(db, 'vendors'));
@@ -203,6 +213,7 @@ export default function VendorManagement() {
         weeklyPattern: null,
         excludeFromStats: false,
         pauseHistory: [],
+        assignedUserIds: [],
         editorName: '',
         selfPublishing: false
       });
@@ -325,6 +336,7 @@ export default function VendorManagement() {
                 weeklyPattern: null,
                 excludeFromStats: false,
                 pauseHistory: [],
+                assignedUserIds: [],
                 editorId: '',
                 editorName: '',
                 selfPublishing: false
@@ -384,6 +396,7 @@ export default function VendorManagement() {
                       weeklyPattern: vendor.weeklyPattern && vendor.weeklyPattern.length === 4 ? vendor.weeklyPattern : null,
                       excludeFromStats: vendor.excludeFromStats || false,
                       pauseHistory: vendor.pauseHistory || [],
+                      assignedUserIds: vendor.assignedUserIds || [],
                       editorId: vendor.editorId || '',
                       editorName: vendor.editorName || '',
                       selfPublishing: vendor.selfPublishing || false
@@ -470,6 +483,12 @@ export default function VendorManagement() {
                   <div className="flex items-center text-xs font-bold text-[#5A5A40] bg-[#5A5A40]/5 px-2 py-1 rounded-lg border border-[#5A5A40]/10 w-fit">
                     <span className="mr-1">剪輯師:</span>
                     <span>{vendor.editorName}</span>
+                  </div>
+                )}
+                {vendor.assignedUserIds && vendor.assignedUserIds.length > 0 && (
+                  <div className="flex items-center text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-lg border border-blue-100 w-fit">
+                    <span className="mr-1">藏鏡人:</span>
+                    <span>{vendor.assignedUserIds.map(uid => users.find(u => u.uid === uid)?.displayName || '?').join('、')}</span>
                   </div>
                 )}
                 {vendor.excludeFromStats && (
@@ -605,6 +624,38 @@ export default function VendorManagement() {
                       <option key={ed.id} value={ed.id}>{ed.name}</option>
                     ))}
                   </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">藏鏡人（拍攝負責同事）</label>
+                  <div className="flex flex-wrap gap-2">
+                    {users.map(u => {
+                      const checked = formData.assignedUserIds.includes(u.uid);
+                      return (
+                        <label
+                          key={u.uid}
+                          className={cn(
+                            "flex items-center gap-2 px-3 py-2 rounded-xl border cursor-pointer text-sm transition-all",
+                            checked ? "bg-[#5A5A40] text-white border-[#5A5A40]" : "bg-[#F5F5F0] text-gray-600 border-transparent hover:border-[#5A5A40]/30"
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              const next = e.target.checked
+                                ? [...formData.assignedUserIds, u.uid]
+                                : formData.assignedUserIds.filter(id => id !== u.uid);
+                              setFormData({ ...formData, assignedUserIds: next });
+                            }}
+                            className="hidden"
+                          />
+                          {u.displayName || u.username}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">庫存/欠片警示通知只會發給這裡指派的人；沒指派任何人時，engineer/manager 一律看得到全部。之後LINE通知也會依這裡發送。</p>
                 </div>
 
                 <div>

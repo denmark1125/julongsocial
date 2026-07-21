@@ -246,10 +246,10 @@ export default function App() {
   const renderContent = () => {
     const allowedRoles = TAB_ROLES[activeTab];
     if (allowedRoles && !allowedRoles.includes(userProfile?.role || 'employee')) {
-      return <Dashboard setActiveTab={setActiveTab} />;
+      return <Dashboard setActiveTab={setActiveTab} userProfile={userProfile} />;
     }
     switch (activeTab) {
-      case 'dashboard': return <Dashboard setActiveTab={setActiveTab} />;
+      case 'dashboard': return <Dashboard setActiveTab={setActiveTab} userProfile={userProfile} />;
       case 'vendors': return <VendorManagement />;
       case 'posts': return <PostManagement />;
       case 'calendar': return <CalendarView />;
@@ -258,7 +258,7 @@ export default function App() {
       case 'billing': return <BillingManagement />;
       case 'users': return <UserManagement currentUserRole={userProfile?.role || 'employee'} />;
       case 'version': return <VersionLogView />;
-      default: return <Dashboard setActiveTab={setActiveTab} />;
+      default: return <Dashboard setActiveTab={setActiveTab} userProfile={userProfile} />;
     }
   };
 
