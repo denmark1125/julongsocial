@@ -180,9 +180,8 @@ app.post("/api/webhook/line", async (req: any, res) => {
     return res.status(401).json({ error: "invalid signature" });
   }
 
-  // 先回200給LINE（避免逾時被LINE判定失敗重送），事件處理用背景方式進行
-  res.status(200).json({ ok: true });
-
+  // 原本先回200再背景處理，但Vercel serverless function一送出回應就可能凍結/砍掉執行環境，
+  // 導致後面的fetch/Firestore寫入直接斷線(EPIPE)。改成處理完再回應，events數量少、動作快，不會逾時
   const events = req.body?.events || [];
   for (const event of events) {
     if (event?.type !== "follow" || event?.source?.type !== "user") continue;
@@ -213,6 +212,8 @@ app.post("/api/webhook/line", async (req: any, res) => {
       console.error("LINE follow event handling failed", e);
     }
   }
+
+  res.status(200).json({ ok: true });
 });
 
 // Vite middleware for development
