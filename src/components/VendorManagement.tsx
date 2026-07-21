@@ -627,9 +627,12 @@ export default function VendorManagement() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">藏鏡人（拍攝負責同事）</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">藏鏡人</label>
                   <div className="flex flex-wrap gap-2">
-                    {users.map(u => {
+                    {users.filter(u => u.isCameraPerson).length === 0 && (
+                      <p className="text-xs text-gray-400">尚未有成員被設為藏鏡人，請先到「成員管理」勾選。</p>
+                    )}
+                    {users.filter(u => u.isCameraPerson).map(u => {
                       const checked = formData.assignedUserIds.includes(u.uid);
                       return (
                         <label

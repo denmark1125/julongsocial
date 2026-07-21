@@ -41,6 +41,7 @@ export interface UserProfile {
   displayName?: string;
   lineUserId?: string; // Linked LINE User ID
   canEditDeficitBaseline?: boolean; // 工程師以外的人要能校正「起始欠片」，需工程師個別開權限；只有工程師能勾選/取消這個欄位
+  isCameraPerson?: boolean; // 藏鏡人：勾選後才會出現在廠商管理的藏鏡人指派名單裡
   createdAt: string;
 }
 
