@@ -141,6 +141,15 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
     }
   };
 
+  const handleToggleCameraPerson = async (uid: string, isCameraPerson: boolean) => {
+    try {
+      await updateDoc(doc(db, 'users', uid), { isCameraPerson });
+      toast.success(isCameraPerson ? '已設為藏鏡人' : '已取消藏鏡人');
+    } catch (error) {
+      toast.error('更新失敗');
+    }
+  };
+
   const handleDeleteUser = async (uid: string) => {
     if (window.confirm('確定要刪除此使用者嗎？')) {
       try {
@@ -319,6 +328,9 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                 {currentUserRole === 'engineer' && (
                   <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">校正起始欠片</th>
                 )}
+                {currentUserRole === 'engineer' && (
+                  <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">藏鏡人</th>
+                )}
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">操作</th>
               </tr>
             </thead>
@@ -379,6 +391,19 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                             <span className="ml-2 text-xs text-gray-500">{user.canEditDeficitBaseline ? '已開放' : '未開放'}</span>
                           </label>
                         )}
+                      </td>
+                    )}
+                    {currentUserRole === 'engineer' && (
+                      <td className="p-4">
+                        <label className="inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!!user.isCameraPerson}
+                            onChange={(e) => handleToggleCameraPerson(user.uid, e.target.checked)}
+                            className="w-4 h-4 rounded border-gray-300 text-[#5A5A40] focus:ring-[#5A5A40]"
+                          />
+                          <span className="ml-2 text-xs text-gray-500">{user.isCameraPerson ? '是' : '否'}</span>
+                        </label>
                       </td>
                     )}
                     <td className="p-4">
