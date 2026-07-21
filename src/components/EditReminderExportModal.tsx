@@ -23,7 +23,8 @@ export default function EditReminderExportModal({ isOpen, onClose, vendors, asse
   const exportRef = useRef<HTMLDivElement>(null);
 
   // 清單即時依當下庫存/週分佈/積欠重新計算，不存快照，確保永遠是最新狀態；
-  // 有積欠(owed>0)一律歸類成需拍片(shoot)，不會出現在這份催剪輯清單裡
+  // 用「有沒有待剪素材(rawStock>0)」判斷要不要上清單，不是看整體severity——
+  // 一個廠商可能同時「急需拍片(shoot)」又「有素材躺著沒剪」，這兩件事互不排斥，缺片名單擋不住還要進催剪輯清單
   const editItems = useMemo(() => {
     return trackedVendors(vendors)
       .map(vendor => {
@@ -32,7 +33,7 @@ export default function EditReminderExportModal({ isOpen, onClose, vendors, asse
         const alert = getVideoStockAlert(vendor, vendorVideoAssets, owed);
         return { vendor, alert };
       })
-      .filter(item => item.alert.severity === 'edit');
+      .filter(item => item.alert.rawStock > 0);
   }, [vendors, assets, posts]);
 
   const editorNames = useMemo(() => {
@@ -150,7 +151,10 @@ export default function EditReminderExportModal({ isOpen, onClose, vendors, asse
                           <div key={vendor.id} className="flex items-center justify-between py-2">
                             <span className="text-base font-bold text-[#5A5A40]">{vendor.name}</span>
                             <span className="text-sm text-gray-600">
-                              待剪 <span className="font-bold text-amber-600">{alert.rawStock}</span> 部・成片僅夠撐 <span className="font-bold text-red-600">{Math.max(0, Math.floor(alert.finishedRunwayDays!))}</span> 天
+                              待剪 <span className="font-bold text-amber-600">{alert.rawStock}</span> 部
+                              {alert.finishedRunwayDays !== null && (
+                                <>・成片僅夠撐 <span className="font-bold text-red-600">{Math.max(0, Math.floor(alert.finishedRunwayDays))}</span> 天</>
+                              )}
                             </span>
                           </div>
                         ))}

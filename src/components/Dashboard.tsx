@@ -115,8 +115,11 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
   // 'edit'=素材夠但沒剪完，成片撐不到天數，催剪輯優先處理。
   // 用 hasVideoTrackingScope 而非 trackedVendors：冷凍中的廠商如果還留有舊欠片，一樣要提醒，不能因為冷凍就從告警清單消失
   // （這個月本身不會疊加新短缺/新的撐幾天壓力，那部分邏輯在 getDeficitBreakdown/getWeeklyPace 內部已經處理）
+  // ERP裡不分派任何人都看得到全部（跟催不分你我）；assignedUserIds只用來過濾未來的LINE推播，不影響這裡
   const dashboardMonth = format(new Date(), 'yyyy-MM');
-  const stockAlertVendors = vendors.filter(v => hasVideoTrackingScope(v, dashboardMonth)).map(vendor => {
+  const stockAlertVendors = vendors
+    .filter(v => hasVideoTrackingScope(v, dashboardMonth))
+    .map(vendor => {
     const vendorVideoAssets = getAvailableVideoAssets(vendor.id!, assets, posts);
     const owed = getOwedVideoCount(vendor, posts, vendorVideoAssets.length);
     const alert = getVideoStockAlert(vendor, vendorVideoAssets, owed);

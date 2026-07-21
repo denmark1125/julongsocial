@@ -153,7 +153,8 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     }
 
     // 3. Video Stock：'shoot'=連原始素材都不夠，急迫要拍片／'edit'=素材夠但沒剪完，催剪輯優先處理。
-    // 用 hasVideoTrackingScope 而非 trackedVendors：冷凍中的廠商如果還留有舊欠片，一樣要提醒，不能因為冷凍就從通知消失
+    // 用 hasVideoTrackingScope 而非 trackedVendors：冷凍中的廠商如果還留有舊欠片，一樣要提醒，不能因為冷凍就從通知消失。
+    // ERP裡的鈴鐺不分派任何人都看得到全部（跟催不分你我）；assignedUserIds只用來過濾未來的LINE推播，不影響這裡
     vendors.filter(v => hasVideoTrackingScope(v, format(now, 'yyyy-MM'))).forEach(v => {
       const vendorVideoAssets = getAvailableVideoAssets(v.id!, assets, posts);
       const owed = getOwedVideoCount(v, posts, vendorVideoAssets.length);
