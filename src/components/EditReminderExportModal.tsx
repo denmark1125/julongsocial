@@ -149,12 +149,7 @@ export default function EditReminderExportModal({ isOpen, onClose, vendors, asse
                       <div className="space-y-3">
                         {items.map(({ vendor, alert }) => (
                           <div key={vendor.id} className="flex items-center justify-between py-2">
-                            <span className="text-base font-bold text-[#5A5A40]">
-                              {vendor.name}
-                              {alert.severity === 'shoot' && (
-                                <span className="ml-1.5 text-[10px] font-bold text-red-500 align-middle">同時也在缺片名單</span>
-                              )}
-                            </span>
+                            <span className="text-base font-bold text-[#5A5A40]">{vendor.name}</span>
                             <span className="text-sm text-gray-600">
                               待剪 <span className="font-bold text-amber-600">{alert.rawStock}</span> 部
                               {alert.finishedRunwayDays !== null && (
