@@ -13,7 +13,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import * as crypto from "crypto";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
-import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVideoTrackingScope } from "./src/lib/vendorStatus.js";
+import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVideoTrackingScope, getDeficitBreakdown } from "./src/lib/vendorStatus.js";
 
 dotenv.config();
 
@@ -249,8 +249,14 @@ async function sendLinePushMessage(to: string, message: any) {
 }
 
 const SEVERITY_COLOR = "#DC2626"; // 目前只有shoot一種嚴重度會進入推播迴圈，先用單一紅色；如果之後也要推edit級別可以在這裡加amber分支
+const SEVERITY_TINT = "#FEF2F2"; // 狀態強調區塊的淺色底
 
-function buildStockAlertBubble(vendor: any, alert: any, lastShootDate: string | null) {
+function buildStockAlertBubble(
+  vendor: any,
+  alert: any,
+  lastShootDate: string | null,
+  monthProgress: { target: number; delivered: number }
+) {
   const statusText = alert.owed > 0
     ? `已欠 ${alert.owed} 支`
     : `庫存剩 ${Math.max(0, Math.floor(alert.totalRunwayDays))} 天`;
@@ -258,33 +264,80 @@ function buildStockAlertBubble(vendor: any, alert: any, lastShootDate: string | 
   const row = (label: string, value: string) => ({
     type: "box",
     layout: "horizontal",
-    margin: "sm",
     contents: [
-      { type: "text", text: label, size: "sm", color: "#999999", flex: 2 },
-      { type: "text", text: value, size: "sm", color: "#333333", flex: 5, wrap: true },
+      { type: "text", text: label, size: "xs", color: "#9CA3AF", flex: 2 },
+      { type: "text", text: value, size: "xs", color: "#374151", flex: 5, wrap: true, weight: "bold" },
     ],
   });
+
+  const monthPct = monthProgress.target > 0
+    ? Math.max(0, Math.min(100, Math.round((monthProgress.delivered / monthProgress.target) * 100)))
+    : 0;
 
   return {
     type: "bubble",
     size: "kilo",
     header: {
       type: "box",
-      layout: "vertical",
+      layout: "horizontal",
       backgroundColor: SEVERITY_COLOR,
-      paddingAll: "12px",
+      paddingAll: "16px",
+      alignItems: "center",
+      spacing: "md",
       contents: [
-        { type: "text", text: "🔴 需拍片", color: "#FFFFFF", weight: "bold", size: "sm" },
+        { type: "text", text: "🎬", size: "xxl", flex: 0 },
+        {
+          type: "box",
+          layout: "vertical",
+          contents: [
+            { type: "text", text: "拍攝提醒", color: "#FECACA", size: "xs", weight: "bold" },
+            { type: "text", text: vendor.name, color: "#FFFFFF", size: "xl", weight: "bold" },
+          ],
+        },
       ],
     },
     body: {
       type: "box",
       layout: "vertical",
-      paddingAll: "16px",
+      paddingAll: "18px",
+      spacing: "md",
       contents: [
-        { type: "text", text: vendor.name, weight: "bold", size: "xl" },
-        { type: "separator", margin: "md" },
-        row("狀態", statusText),
+        {
+          type: "box",
+          layout: "vertical",
+          backgroundColor: SEVERITY_TINT,
+          cornerRadius: "10px",
+          paddingAll: "12px",
+          contents: [
+            { type: "text", text: statusText, size: "lg", weight: "bold", color: SEVERITY_COLOR, align: "center" },
+          ],
+        },
+        {
+          type: "box",
+          layout: "vertical",
+          spacing: "xs",
+          contents: [
+            {
+              type: "box",
+              layout: "horizontal",
+              contents: [
+                { type: "text", text: "本月進度", size: "xs", color: "#9CA3AF", flex: 1 },
+                { type: "text", text: `${monthProgress.delivered}/${monthProgress.target} 支`, size: "xs", color: "#6B7280", flex: 1, align: "end" },
+              ],
+            },
+            {
+              type: "box",
+              layout: "vertical",
+              backgroundColor: "#E5E7EB",
+              cornerRadius: "3px",
+              height: "6px",
+              contents: [
+                { type: "box", layout: "vertical", backgroundColor: SEVERITY_COLOR, cornerRadius: "3px", width: `${monthPct}%`, height: "6px", contents: [] },
+              ],
+            },
+          ],
+        },
+        { type: "separator" },
         row("庫存", `成片 ${alert.finishedStock}・素材 ${alert.rawStock}`),
         row("上次拍攝", lastShootDate || "尚無紀錄"),
       ],
@@ -292,10 +345,12 @@ function buildStockAlertBubble(vendor: any, alert: any, lastShootDate: string | 
     footer: {
       type: "box",
       layout: "vertical",
+      paddingAll: "12px",
       contents: [
         {
           type: "button",
           style: "primary",
+          height: "sm",
           color: SEVERITY_COLOR,
           action: { type: "uri", label: "前往安排拍攝", uri: "https://julongsocial.vercel.app/?tab=shootBookings" },
         },
@@ -344,14 +399,16 @@ async function buildStockAlertMessage(): Promise<any | null> {
         b.vendorId === vendor.id && b.status === "booked" &&
         b.scheduledDate >= today && b.scheduledDate <= sevenDaysFromNow
       );
-      return { vendor, alert, hasUpcomingBooking };
+      const monthEntry = getDeficitBreakdown(vendor, posts, month).monthlyShortfalls.find((e: any) => e.month === month);
+      const monthProgress = { target: monthEntry?.target ?? 0, delivered: monthEntry?.delivered ?? 0 };
+      return { vendor, alert, hasUpcomingBooking, monthProgress };
     })
     .filter(({ alert, hasUpcomingBooking }: any) => alert.severity === "shoot" && !hasUpcomingBooking);
 
   if (urgentVendors.length === 0) return null;
 
-  const bubbles = urgentVendors.map(({ vendor, alert }: any) =>
-    buildStockAlertBubble(vendor, alert, lastCompletedShootDate(vendor.id))
+  const bubbles = urgentVendors.map(({ vendor, alert, monthProgress }: any) =>
+    buildStockAlertBubble(vendor, alert, lastCompletedShootDate(vendor.id), monthProgress)
   );
 
   return {
