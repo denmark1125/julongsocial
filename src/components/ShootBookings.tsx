@@ -10,7 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Vendor, Asset, Post, ShootBooking, BookingReason, UserProfile, DeficitEntry } from '../types';
-import { getDeficitBreakdown, getEffectiveMonthlyTarget, getAvailableVideoAssets, hasVideoTrackingScope, isVendorTrackedInMonth } from '../lib/vendorStatus';
+import { getDeficitBreakdown, getEffectiveMonthlyTarget, getOwedVideoCount, getAvailableVideoAssets, hasVideoTrackingScope, isVendorTrackedInMonth } from '../lib/vendorStatus';
 import { Film, Plus, Check, CalendarClock, AlertTriangle, Pencil, X, Trash2 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -86,7 +86,8 @@ export default function ShootBookings() {
       ).length;
       const stock = getAvailableVideoAssets(v.id!, assets, posts).length;
       const breakdown = getDeficitBreakdown(v, posts, currentMonth);
-      const owed = Math.max(0, breakdown.totalShortfall - stock);
+      // 用共用的getOwedVideoCount(內部已無條件進位)，不要自己重算，避免跟Dashboard/LINE推播的欠片數字對不起來
+      const owed = getOwedVideoCount(v, posts, stock, currentMonth);
       const active = bookings
         .filter(b => b.vendorId === v.id && b.status === 'booked')
         .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate))[0] || null;
