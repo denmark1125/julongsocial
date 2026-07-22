@@ -252,6 +252,8 @@ export function getAvailableVideoAssets<A extends StockAsset>(
 
 // 積欠支數（跟「拍攝進度」頁同一套公式，抽出來共用，避免兩處各算一份而對不起來）：
 // getDeficitBreakdown 算出的累積短缺 - 目前庫存(不分成片/原始素材)
+// 無條件進位成整數：欠片是要拍幾「支」的概念，不能欠0.074支；當月proration引入小數後
+// 這裡是唯一輸出口，在這裡統一進位，UI/LINE推播就不用每個顯示點各自記得處理
 export function getOwedVideoCount(
   vendor: OwedVendor,
   posts: OwedPost[],
@@ -259,7 +261,7 @@ export function getOwedVideoCount(
   month: string = format(new Date(), 'yyyy-MM')
 ): number {
   const { totalShortfall } = getDeficitBreakdown(vendor, posts, month);
-  return Math.max(0, totalShortfall - totalStock);
+  return Math.max(0, Math.ceil(totalShortfall - totalStock));
 }
 
 export type VideoStockSeverity = 'shoot' | 'edit' | null;
