@@ -296,11 +296,21 @@ async function buildStockAlertMessage(): Promise<string | null> {
 
 // 目前先寫死推給 role='engineer' 且已綁定LINE的人；查詢包一層是為了之後換成
 // 「後台可設定推播對象」時，只要改這支函式的篩選條件，呼叫端(cron/測試按鈕)都不用動。
+//
+// 注意：users.lineUserId 存的其實是 line_connections 的文件ID(UserManagement.tsx綁定時寫入的是
+// connection.id，不是真正的LINE user ID)，要推播必須再查一次 line_connections 文件本身的
+// lineUserId 欄位(U開頭)才是LINE Messaging API push要的真正對象。
 async function getStockAlertRecipients(): Promise<string[]> {
   const usersSnap = await adminDb.collection("users").where("role", "==", "engineer").get();
-  return usersSnap.docs
+  const connectionIds = usersSnap.docs
     .map((d: any) => d.data().lineUserId)
     .filter((id: any): id is string => !!id);
+
+  const recipients = await Promise.all(connectionIds.map(async (connId) => {
+    const connDoc = await adminDb.collection("line_connections").doc(connId).get();
+    return connDoc.exists ? connDoc.data()?.lineUserId : null;
+  }));
+  return recipients.filter((id: any): id is string => !!id);
 }
 
 // Vercel Cron 排程打這支，用 CRON_SECRET 擋住，避免被外部亂打。
