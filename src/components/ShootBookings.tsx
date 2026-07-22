@@ -316,7 +316,7 @@ export default function ShootBookings() {
                     起始欠 {row.baseline}
                     {row.breakdown.monthlyShortfalls.map(ms => (
                       <span key={ms.month}>
-                        {' '}{ms.delta >= 0 ? '+' : '−'} {ms.month.slice(5)}月{row.breakdown.monthlyShortfalls.length === 1 ? '未達標' : ''} {Math.abs(ms.delta)}
+                        {' '}{ms.delta >= 0 ? '+' : '−'} {ms.month.slice(5)}月{row.breakdown.monthlyShortfalls.length === 1 ? '未達標' : ''} {Math.ceil(Math.abs(ms.delta))}
                       </span>
                     ))}
                     {' '}− 已有庫存 {row.stock}
