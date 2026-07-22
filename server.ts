@@ -232,7 +232,7 @@ app.post("/api/webhook/line", async (req: any, res) => {
 // ===============================================================
 // LINE 影片庫存告急主動推播（每日彙整一則，只推 severity='shoot' 的IP）
 // ===============================================================
-async function sendLinePushMessage(to: string, text: string) {
+async function sendLinePushMessage(to: string, message: any) {
   const accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
   if (!accessToken) throw new Error("LINE_CHANNEL_ACCESS_TOKEN not configured");
   const res = await fetch("https://api.line.me/v2/bot/message/push", {
@@ -241,18 +241,74 @@ async function sendLinePushMessage(to: string, text: string) {
       "Content-Type": "application/json",
       Authorization: `Bearer ${accessToken}`,
     },
-    body: JSON.stringify({ to, messages: [{ type: "text", text }] }),
+    body: JSON.stringify({ to, messages: [message] }),
   });
   if (!res.ok) {
     throw new Error(`LINE push failed (${res.status}): ${await res.text()}`);
   }
 }
 
+const SEVERITY_COLOR = "#DC2626"; // 目前只有shoot一種嚴重度會進入推播迴圈，先用單一紅色；如果之後也要推edit級別可以在這裡加amber分支
+
+function buildStockAlertBubble(vendor: any, alert: any, lastShootDate: string | null) {
+  const statusText = alert.owed > 0
+    ? `已欠 ${alert.owed} 支`
+    : `庫存剩 ${Math.max(0, Math.floor(alert.totalRunwayDays))} 天`;
+
+  const row = (label: string, value: string) => ({
+    type: "box",
+    layout: "horizontal",
+    margin: "sm",
+    contents: [
+      { type: "text", text: label, size: "sm", color: "#999999", flex: 2 },
+      { type: "text", text: value, size: "sm", color: "#333333", flex: 5, wrap: true },
+    ],
+  });
+
+  return {
+    type: "bubble",
+    size: "kilo",
+    header: {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: SEVERITY_COLOR,
+      paddingAll: "12px",
+      contents: [
+        { type: "text", text: "🔴 需拍片", color: "#FFFFFF", weight: "bold", size: "sm" },
+      ],
+    },
+    body: {
+      type: "box",
+      layout: "vertical",
+      paddingAll: "16px",
+      contents: [
+        { type: "text", text: vendor.name, weight: "bold", size: "xl" },
+        { type: "separator", margin: "md" },
+        row("狀態", statusText),
+        row("庫存", `成片 ${alert.finishedStock}・素材 ${alert.rawStock}`),
+        row("上次拍攝", lastShootDate || "尚無紀錄"),
+      ],
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      contents: [
+        {
+          type: "button",
+          style: "primary",
+          color: SEVERITY_COLOR,
+          action: { type: "uri", label: "前往安排拍攝", uri: "https://julongsocial.vercel.app/?tab=shootBookings" },
+        },
+      ],
+    },
+  };
+}
+
 // 跟 Dashboard.tsx 的「影片素材警示」卡片同一套公式(getAvailableVideoAssets/getOwedVideoCount/getVideoStockAlert)，
 // 避免前端跟推播兩邊各算一份、數字對不起來。
 // 只推 severity==='shoot'（真的不夠/有積欠，最急迫）；'edit'(催剪輯)不推，那是內部流程不用主動吵。
 // 7天內已有預約(status='booked')的IP先不推——已經排進去了，重複推是雜訊。
-async function buildStockAlertMessage(): Promise<string | null> {
+async function buildStockAlertMessage(): Promise<any | null> {
   const [vendorsSnap, postsSnap, assetsSnap, bookingsSnap] = await Promise.all([
     adminDb.collection("vendors").get(),
     adminDb.collection("posts").get(),
@@ -266,7 +322,17 @@ async function buildStockAlertMessage(): Promise<string | null> {
 
   const now = new Date();
   const month = now.toISOString().slice(0, 7);
-  const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const today = now.toISOString().slice(0, 10);
+  const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  const lastCompletedShootDate = (vendorId: string): string | null => {
+    const completed = bookings
+      .filter((b: any) => b.vendorId === vendorId && b.status === "completed")
+      .sort((a: any, b: any) => b.scheduledDate.localeCompare(a.scheduledDate));
+    if (completed.length === 0) return null;
+    const [, m, d] = completed[0].scheduledDate.split("-");
+    return `${m}/${d}`;
+  };
 
   const urgentVendors = vendors
     .filter((v: any) => hasVideoTrackingScope(v, month))
@@ -276,8 +342,7 @@ async function buildStockAlertMessage(): Promise<string | null> {
       const alert = getVideoStockAlert(vendor, vendorAssets, owed);
       const hasUpcomingBooking = bookings.some((b: any) =>
         b.vendorId === vendor.id && b.status === "booked" &&
-        b.scheduledDate >= now.toISOString().slice(0, 10) &&
-        b.scheduledDate <= sevenDaysFromNow.toISOString().slice(0, 10)
+        b.scheduledDate >= today && b.scheduledDate <= sevenDaysFromNow
       );
       return { vendor, alert, hasUpcomingBooking };
     })
@@ -285,13 +350,15 @@ async function buildStockAlertMessage(): Promise<string | null> {
 
   if (urgentVendors.length === 0) return null;
 
-  const lines = urgentVendors.map(({ vendor, alert }: any) =>
-    alert.owed > 0
-      ? `・${vendor.name} - 已欠${alert.owed}支`
-      : `・${vendor.name} - 剩${Math.max(0, Math.floor(alert.totalRunwayDays))}天庫存`
+  const bubbles = urgentVendors.map(({ vendor, alert }: any) =>
+    buildStockAlertBubble(vendor, alert, lastCompletedShootDate(vendor.id))
   );
 
-  return `【聚浪拍攝提醒】\n以下IP庫存告急，需盡快安排拍攝：\n${lines.join("\n")}\n\n請至拍攝進度頁面安排`;
+  return {
+    type: "flex",
+    altText: `【聚浪拍攝提醒】${urgentVendors.length}個IP庫存告急，需盡快安排拍攝`,
+    contents: { type: "carousel", contents: bubbles },
+  };
 }
 
 // 目前先寫死推給 role='engineer' 且已綁定LINE的人；查詢包一層是為了之後換成

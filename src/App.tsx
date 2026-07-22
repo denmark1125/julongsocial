@@ -30,7 +30,8 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  // 讓LINE推播裡的按鈕能直接連結到指定分頁(如`?tab=shootBookings`)，不然打開都只會停在dashboard
+  const [activeTab, setActiveTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'dashboard');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
