@@ -248,8 +248,7 @@ async function sendLinePushMessage(to: string, message: any) {
   }
 }
 
-const SEVERITY_COLOR = "#DC2626"; // 目前只有shoot一種嚴重度會進入推播迴圈，先用單一紅色；如果之後也要推edit級別可以在這裡加amber分支
-const SEVERITY_TINT = "#FEF2F2"; // 狀態強調區塊的淺色底
+const SEVERITY_COLOR = "#B95755"; // 使用者覺得原本#DC2626太飽和，改用磚紅色調，同樣目前只有shoot一種嚴重度會用到
 
 function buildStockAlertBubble(
   vendor: any,
@@ -264,80 +263,34 @@ function buildStockAlertBubble(
   const row = (label: string, value: string) => ({
     type: "box",
     layout: "horizontal",
+    margin: "sm",
     contents: [
-      { type: "text", text: label, size: "xs", color: "#9CA3AF", flex: 2 },
-      { type: "text", text: value, size: "xs", color: "#374151", flex: 5, wrap: true, weight: "bold" },
+      { type: "text", text: label, size: "sm", color: "#999999", flex: 2 },
+      { type: "text", text: value, size: "sm", color: "#333333", flex: 5, wrap: true },
     ],
   });
-
-  const monthPct = monthProgress.target > 0
-    ? Math.max(0, Math.min(100, Math.round((monthProgress.delivered / monthProgress.target) * 100)))
-    : 0;
 
   return {
     type: "bubble",
     size: "kilo",
     header: {
       type: "box",
-      layout: "horizontal",
+      layout: "vertical",
       backgroundColor: SEVERITY_COLOR,
-      paddingAll: "16px",
-      alignItems: "center",
-      spacing: "md",
+      paddingAll: "12px",
       contents: [
-        { type: "text", text: "🎬", size: "xxl", flex: 0 },
-        {
-          type: "box",
-          layout: "vertical",
-          contents: [
-            { type: "text", text: "拍攝提醒", color: "#FECACA", size: "xs", weight: "bold" },
-            { type: "text", text: vendor.name, color: "#FFFFFF", size: "xl", weight: "bold" },
-          ],
-        },
+        { type: "text", text: "🔴 需拍片", color: "#FFFFFF", weight: "bold", size: "sm" },
       ],
     },
     body: {
       type: "box",
       layout: "vertical",
-      paddingAll: "18px",
-      spacing: "md",
+      paddingAll: "16px",
       contents: [
-        {
-          type: "box",
-          layout: "vertical",
-          backgroundColor: SEVERITY_TINT,
-          cornerRadius: "10px",
-          paddingAll: "12px",
-          contents: [
-            { type: "text", text: statusText, size: "lg", weight: "bold", color: SEVERITY_COLOR, align: "center" },
-          ],
-        },
-        {
-          type: "box",
-          layout: "vertical",
-          spacing: "xs",
-          contents: [
-            {
-              type: "box",
-              layout: "horizontal",
-              contents: [
-                { type: "text", text: "本月進度", size: "xs", color: "#9CA3AF", flex: 1 },
-                { type: "text", text: `${monthProgress.delivered}/${monthProgress.target} 支`, size: "xs", color: "#6B7280", flex: 1, align: "end" },
-              ],
-            },
-            {
-              type: "box",
-              layout: "vertical",
-              backgroundColor: "#E5E7EB",
-              cornerRadius: "3px",
-              height: "6px",
-              contents: [
-                { type: "box", layout: "vertical", backgroundColor: SEVERITY_COLOR, cornerRadius: "3px", width: `${monthPct}%`, height: "6px", contents: [] },
-              ],
-            },
-          ],
-        },
-        { type: "separator" },
+        { type: "text", text: vendor.name, weight: "bold", size: "xl" },
+        { type: "separator", margin: "md" },
+        row("狀態", statusText),
+        row("本月進度", `${monthProgress.delivered}/${monthProgress.target} 支`),
         row("庫存", `成片 ${alert.finishedStock}・素材 ${alert.rawStock}`),
         row("上次拍攝", lastShootDate || "尚無紀錄"),
       ],
@@ -345,12 +298,10 @@ function buildStockAlertBubble(
     footer: {
       type: "box",
       layout: "vertical",
-      paddingAll: "12px",
       contents: [
         {
           type: "button",
           style: "primary",
-          height: "sm",
           color: SEVERITY_COLOR,
           action: { type: "uri", label: "前往安排拍攝", uri: "https://julongsocial.vercel.app/?tab=shootBookings" },
         },
