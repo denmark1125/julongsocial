@@ -9,7 +9,7 @@ import {
 import { getAuth } from 'firebase/auth';
 import { db } from '../firebase';
 import { Post, Vendor, Asset, DismissedHabit, BillingRecord, BillingContract, ShootBooking, UserRole } from '../types';
-import { visibleVendors, trackedVendors, getVideoStockAlert, getOwedVideoCount, getAvailableVideoAssets, hasVideoTrackingScope, LOW_STOCK_RUNWAY_DAYS } from '../lib/vendorStatus';
+import { visibleVendors, trackedVendors, getVideoStockAlert, getOwedVideoCount, getDeficitBreakdown, getAvailableVideoAssets, hasVideoTrackingScope, LOW_STOCK_RUNWAY_DAYS } from '../lib/vendorStatus';
 import { 
   format, 
   isPast, 
@@ -154,10 +154,11 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
     const vendorVideoAssets = getAvailableVideoAssets(vendor.id!, assets, posts);
     const owed = getOwedVideoCount(vendor, posts, vendorVideoAssets.length);
     const alert = getVideoStockAlert(vendor, vendorVideoAssets, owed);
+    const currentMonthEntry = getDeficitBreakdown(vendor, posts, dashboardMonth).monthlyShortfalls.find(e => e.month === dashboardMonth);
     const activeBooking = bookings
       .filter(b => b.vendorId === vendor.id && b.status === 'booked')
       .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate))[0] || null;
-    return { ...vendor, ...alert, activeBooking };
+    return { ...vendor, ...alert, activeBooking, monthTarget: currentMonthEntry?.target, expectedByNow: currentMonthEntry?.expectedByNow };
   }).filter(v => v.severity !== null)
     .sort((a, b) => (a.severity === 'shoot' ? 0 : 1) - (b.severity === 'shoot' ? 0 : 1));
 
@@ -405,13 +406,20 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                         </span>
                       </p>
                       {v.severity === 'shoot' ? (
-                        <p className="text-[10px] md:text-xs text-white/60">
-                          成片+素材共 {v.finishedStock + v.rawStock} 部
-                          {v.owed > 0
-                            ? `，累計已欠 ${v.owed} 支`
-                            : `，只夠撐 ${Math.max(0, Math.floor(v.totalRunwayDays!))} 天`}
-                          ，需盡快安排拍攝
-                        </p>
+                        <>
+                          <p className="text-[10px] md:text-xs text-white/60">
+                            成片+素材共 {v.finishedStock + v.rawStock} 部
+                            {v.owed > 0
+                              ? `，累計已欠 ${v.owed} 支`
+                              : `，只夠撐 ${Math.max(0, Math.floor(v.totalRunwayDays!))} 天`}
+                            ，需盡快安排拍攝
+                          </p>
+                          {v.owed > 0 && v.expectedByNow !== undefined && (
+                            <p className="text-[9px] md:text-[10px] text-white/40">
+                              （本月目標 {v.monthTarget} 支・照節奏目前應交 {Math.max(0, Math.round(v.expectedByNow))} 支）
+                            </p>
+                          )}
+                        </>
                       ) : (
                         <p className="text-[10px] md:text-xs text-white/60">
                           成片剩 {v.finishedStock} 部只夠撐 {Math.max(0, Math.floor(v.finishedRunwayDays!))} 天，另有 {v.rawStock} 部待剪

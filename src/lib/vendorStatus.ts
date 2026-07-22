@@ -137,13 +137,33 @@ function prevMonth(month: string): string {
 
 export interface DeficitBreakdown {
   baseline: number; // 歷史債總額（deficitEntries 加總，或舊版 manualDeficitBaseline）
-  monthlyShortfalls: { month: string; target: number; delivered: number; delta: number }[]; // 即時追蹤的月份短缺明細（從最後一筆明細的下個月起連續累加到現在，可能為負＝該月超額交付）
+  monthlyShortfalls: { month: string; target: number; delivered: number; delta: number; expectedByNow?: number }[]; // 即時追蹤的月份短缺明細（從最後一筆明細的下個月起連續累加到現在，可能為負＝該月超額交付）；expectedByNow只有「進行中的當月」那筆會有值
   totalShortfall: number; // baseline + monthlyShortfalls 加總（還沒扣庫存）
   gapMonths: string[]; // 填過的月份「中間」還缺的月份（例如填了2月跟6月但漏了3~5月），純粹提醒還沒回填，不計入總數；最後一筆之後到現在的月份不算在這裡，那段是連續自動累加的
 }
 
-type OwedVendor = Pick<Vendor, 'id' | 'monthlyTargetVideos' | 'manualDeficitBaseline' | 'manualDeficitUpdatedAt' | 'deficitEntries' | 'monthlyAdjustments' | 'status' | 'excludeFromStats' | 'pauseHistory' | 'cooperationStartMonth'>;
+type OwedVendor = Pick<Vendor, 'id' | 'weeklyPattern' | 'monthlyTargetVideos' | 'manualDeficitBaseline' | 'manualDeficitUpdatedAt' | 'deficitEntries' | 'monthlyAdjustments' | 'status' | 'excludeFromStats' | 'pauseHistory' | 'cooperationStartMonth'>;
 type OwedPost = Pick<Post, 'vendorId' | 'contentType' | 'status' | 'targetMonth' | 'scheduledAt'>;
+
+// 進行中的當月「照週節奏累積到今天應該交幾支」，取代整月目標去跟已交比較——
+// 不然月初delivered=0時會直接背整月欠帳，要到月底才會補回準確。跟撐幾天用同一套四段週節奏(getMonthWeekBucket)，
+// 沒設weeklyPattern就用effectiveMonthlyTarget/4平均攤提，維持跟舊版fallback邏輯一致。
+function getExpectedDeliveredSoFar(weeklyPattern: number[] | undefined, effectiveMonthlyTarget: number, date: Date): number {
+  const pattern = (weeklyPattern && weeklyPattern.length === 4) ? weeklyPattern : Array(4).fill(effectiveMonthlyTarget / 4);
+  const dayOfMonth = date.getDate();
+  const daysInMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  const currentBucket = getMonthWeekBucket(date);
+
+  let expected = 0;
+  for (let i = 0; i < currentBucket - 1; i++) expected += pattern[i];
+
+  const bucketStartDay = (currentBucket - 1) * 7 + 1;
+  const bucketLength = currentBucket === 4 ? daysInMonth - bucketStartDay + 1 : 7;
+  const daysIntoBucket = dayOfMonth - bucketStartDay + 1;
+  expected += pattern[currentBucket - 1] * (daysIntoBucket / bucketLength);
+
+  return expected;
+}
 
 // 起始欠片有兩種來源（deficitEntries 存在就優先用，忽略舊版單一數字）：
 // 1) deficitEntries：逐月手動回填的歷史積欠明細（含填0/負數沖銷），加總成 baseline；從「最後一筆的下個月」開始，
@@ -155,9 +175,11 @@ type OwedPost = Pick<Post, 'vendorId' | 'contentType' | 'status' | 'targetMonth'
 export function getDeficitBreakdown(
   vendor: OwedVendor,
   posts: OwedPost[],
-  month: string = format(new Date(), 'yyyy-MM')
+  month: string = format(new Date(), 'yyyy-MM'),
+  date: Date = new Date()
 ): DeficitBreakdown {
   const entries = vendor.deficitEntries || [];
+  const currentRealMonth = format(date, 'yyyy-MM');
 
   const deliveredInMonth = (m: string) => posts.filter(p =>
     p.vendorId === vendor.id && p.contentType === 'video' &&
@@ -165,9 +187,14 @@ export function getDeficitBreakdown(
     (p.targetMonth ? p.targetMonth === m : (p.scheduledAt || '').slice(0, 7) === m)
   ).length;
 
-  const liveShortfall = (m: string): { month: string; target: number; delivered: number; delta: number } => {
+  const liveShortfall = (m: string): { month: string; target: number; delivered: number; delta: number; expectedByNow?: number } => {
     const target = getEffectiveMonthlyTarget(vendor, m);
     const delivered = deliveredInMonth(m);
+    // 只有「進行中的當月」才用prorate，已經過完的月份維持原邏輯(整月目標 vs 已交)，那些月份本來就該交滿
+    if (m === month && m === currentRealMonth) {
+      const expectedByNow = getExpectedDeliveredSoFar(vendor.weeklyPattern, target, date);
+      return { month: m, target, delivered, delta: expectedByNow - delivered, expectedByNow };
+    }
     return { month: m, target, delivered, delta: target - delivered };
   };
 
