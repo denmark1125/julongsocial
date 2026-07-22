@@ -470,6 +470,33 @@ app.post("/api/admin/test-stock-alert-push", async (req, res) => {
   }
 });
 
+// 拍攝進度頁訂日期/改期成功後打這支，把消息送回LINE群組——不然LINE推播卡片點進app訂完
+// 日期，LINE那邊完全沒有回音，感覺像沒訂一樣。任何登入使用者都能觸發(不限engineer)，
+// 因為訂日期本來就是各角色都能做的動作。
+app.post("/api/notify/booking-confirmed", async (req, res) => {
+  const { idToken, vendorId, scheduledDate } = req.body;
+  if (!idToken || !vendorId || !scheduledDate) return res.status(400).json({ error: "Missing required fields" });
+  if (!adminAuth || !adminDb) return res.status(500).json({ error: "Firebase Admin not initialized" });
+
+  try {
+    await adminAuth.verifyIdToken(idToken);
+
+    const vendorDoc = await adminDb.collection("vendors").doc(vendorId).get();
+    const vendorName = vendorDoc.exists ? (vendorDoc.data()?.name || "此IP") : "此IP";
+    const [, m, d] = scheduledDate.split("-");
+
+    const recipients = await getStockAlertRecipients();
+    if (recipients.length === 0) return res.json({ sent: false, reason: "no recipients bound" });
+
+    const message = { type: "text", text: `📅 ${vendorName} 已排定 ${m}/${d} 拍攝` };
+    await Promise.all(recipients.map((to) => sendLinePushMessage(to, message)));
+    res.json({ sent: true, recipientCount: recipients.length });
+  } catch (error: any) {
+    console.error("booking-confirmed notify failed", error);
+    res.status(500).json({ error: error.message || "Unknown error occurred" });
+  }
+});
+
 // Vite middleware for development
 async function setupServer() {
   console.log("Starting setupServer...");
