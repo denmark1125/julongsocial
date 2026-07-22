@@ -6,8 +6,9 @@ import {
   orderBy,
   limit 
 } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
 import { db } from '../firebase';
-import { Post, Vendor, Asset, DismissedHabit, BillingRecord, BillingContract, ShootBooking } from '../types';
+import { Post, Vendor, Asset, DismissedHabit, BillingRecord, BillingContract, ShootBooking, UserRole } from '../types';
 import { visibleVendors, trackedVendors, getVideoStockAlert, getOwedVideoCount, getAvailableVideoAssets, hasVideoTrackingScope, LOW_STOCK_RUNWAY_DAYS } from '../lib/vendorStatus';
 import { 
   format, 
@@ -54,7 +55,7 @@ import {
 } from './CustomIcons';
 import EditReminderExportModal from './EditReminderExportModal';
 
-export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
+export default function Dashboard({ setActiveTab, currentUserRole }: { setActiveTab: (tab: string) => void; currentUserRole?: UserRole }) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -63,6 +64,36 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
   const [contracts, setContracts] = useState<BillingContract[]>([]);
   const [bookings, setBookings] = useState<ShootBooking[]>([]);
   const [isEditReminderModalOpen, setIsEditReminderModalOpen] = useState(false);
+  const [isTestingPush, setIsTestingPush] = useState(false);
+
+  const handleTestStockAlertPush = async () => {
+    setIsTestingPush(true);
+    try {
+      const auth = getAuth();
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        toast.error('認證失敗，請重新登入');
+        return;
+      }
+      const response = await fetch('/api/admin/test-stock-alert-push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        toast.error(data.error || '推播測試失敗');
+      } else if (!data.pushed) {
+        toast(data.reason === 'no recipients bound' ? '沒有工程師綁定LINE，無法推播' : '目前沒有告急IP，不用推播', { icon: 'ℹ️' });
+      } else {
+        toast.success(`已推播給 ${data.recipientCount} 位工程師`);
+      }
+    } catch (e) {
+      toast.error('推播測試發生錯誤');
+    } finally {
+      setIsTestingPush(false);
+    }
+  };
 
   useEffect(() => {
     const vUnsubscribe = onSnapshot(collection(db, 'vendors'), (snapshot) => {
@@ -343,6 +374,15 @@ export default function Dashboard({ setActiveTab }: { setActiveTab: (tab: string
                 className="w-full bg-white/10 hover:bg-white/20 text-white text-xs font-bold py-2 rounded-xl transition-colors flex items-center justify-center"
               >
                 <Download size={14} className="mr-1.5" /> 導出催剪輯清單
+              </button>
+            )}
+            {currentUserRole === 'engineer' && (
+              <button
+                onClick={handleTestStockAlertPush}
+                disabled={isTestingPush}
+                className="w-full bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white text-xs font-bold py-2 rounded-xl transition-colors flex items-center justify-center"
+              >
+                <BellRing size={14} className="mr-1.5" /> {isTestingPush ? '推播測試中...' : '測試LINE庫存推播'}
               </button>
             )}
             <div className="space-y-2 md:space-y-3">

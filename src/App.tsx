@@ -249,7 +249,7 @@ export default function App() {
       return <Dashboard setActiveTab={setActiveTab} />;
     }
     switch (activeTab) {
-      case 'dashboard': return <Dashboard setActiveTab={setActiveTab} />;
+      case 'dashboard': return <Dashboard setActiveTab={setActiveTab} currentUserRole={userProfile?.role || 'employee'} />;
       case 'vendors': return <VendorManagement />;
       case 'posts': return <PostManagement />;
       case 'calendar': return <CalendarView />;

@@ -9,5 +9,11 @@
       "source": "/(.*)",
       "destination": "/api"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/stock-alert-push",
+      "schedule": "0 1 * * *"
+    }
   ]
 }
