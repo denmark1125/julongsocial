@@ -29,22 +29,6 @@ const SEV_STYLES: Record<Severity, { chip: string; bar: string; label: string }>
   good: { chip: 'bg-green-100 text-green-700 border border-green-200', bar: 'bg-green-500', label: '正常' },
 };
 
-// 訂日期/改期成功後把消息送回LINE群組，不然LINE推播卡片點進app訂完全沒有回音。
-// 用fire-and-forget：這則通知送失敗不該讓訂日期這個動作本身失敗。
-async function notifyBookingConfirmed(vendorId: string, scheduledDate: string) {
-  try {
-    const idToken = await auth.currentUser?.getIdToken();
-    if (!idToken) return;
-    await fetch('/api/notify/booking-confirmed', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idToken, vendorId, scheduledDate }),
-    });
-  } catch (e) {
-    console.error('notifyBookingConfirmed failed', e);
-  }
-}
-
 // 回填欠片明細通常是針對已結束的月份，預設帶上個月，減少每次都要手動改月份
 function currentMonthDefault(): string {
   const d = new Date();
@@ -198,7 +182,6 @@ export default function ShootBookings() {
       });
       toast.success(`已預約 ${dateInput.slice(5).replace('-', '/')}`);
       closePanel();
-      notifyBookingConfirmed(vendorId, dateInput);
     } catch (e) {
       toast.error('登記失敗');
     }
@@ -253,7 +236,6 @@ export default function ShootBookings() {
       });
       toast.success(`已改期至 ${dateInput.slice(5).replace('-', '/')}`);
       closePanel();
-      notifyBookingConfirmed(row.vendor.id!, dateInput);
     } catch (e) {
       toast.error('操作失敗');
     }

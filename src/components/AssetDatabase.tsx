@@ -130,9 +130,7 @@ export default function AssetDatabase() {
 
   // 藏鏡人上傳素材＝拍攝真的完成了；不能靠他們額外記得回「拍攝進度」頁按完成，
   // 直接在這裡自動核銷該廠商目前有效的預約，交件數跟著這批上傳累加。
-  // 回傳實際發生了什麼，讓呼叫端可以跳出對應的toast——不然核銷是靜默發生的，
-  // 上傳素材的人完全不知道剛剛觸發了核銷，感覺不出這個自動化真的有在運作。
-  const autoResolveBooking = async (vendorId: string): Promise<'resolved' | 'incremented' | 'none'> => {
+  const autoResolveBooking = async (vendorId: string) => {
     const today = new Date().toISOString().split('T')[0];
     try {
       const bookedSnap = await getDocs(query(
@@ -146,7 +144,7 @@ export default function AssetDatabase() {
           deliveredCount: 1,
           resolvedAt: new Date().toISOString()
         });
-        return 'resolved';
+        return;
       }
       const completedSnap = await getDocs(query(
         collection(db, 'shootBookings'),
@@ -157,12 +155,9 @@ export default function AssetDatabase() {
       if (sameDay) {
         const cur = (sameDay.data() as ShootBooking).deliveredCount || 0;
         await updateDoc(doc(db, 'shootBookings', sameDay.id), { deliveredCount: cur + 1 });
-        return 'incremented';
       }
-      return 'none';
     } catch (error) {
       console.error('autoResolveBooking failed', error);
-      return 'none';
     }
   };
 
@@ -183,15 +178,10 @@ export default function AssetDatabase() {
         createdAt: new Date().toISOString(),
         createdBy: auth.currentUser?.uid
       });
-      toast.success(newAsset.stage === 'raw' ? '原始素材已建檔' : '素材已上架');
       if (newAsset.type === 'video') {
-        const resolution = await autoResolveBooking(newAsset.vendorId);
-        if (resolution === 'resolved') {
-          toast.success('📸 已自動核銷本次拍攝預約', { duration: 4000 });
-        } else if (resolution === 'incremented') {
-          toast.success('📸 已累加至今日拍攝的交件數', { duration: 4000 });
-        }
+        await autoResolveBooking(newAsset.vendorId);
       }
+      toast.success(newAsset.stage === 'raw' ? '原始素材已建檔' : '素材已上架');
       setNewAsset({ 
         title: '', 
         url: '', 
