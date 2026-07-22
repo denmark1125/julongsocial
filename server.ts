@@ -270,6 +270,37 @@ function buildStockAlertBubble(
     ],
   });
 
+  const monthPct = monthProgress.target > 0
+    ? Math.max(0, Math.min(100, Math.round((monthProgress.delivered / monthProgress.target) * 100)))
+    : 0;
+
+  const monthProgressRow = {
+    type: "box",
+    layout: "vertical",
+    margin: "sm",
+    spacing: "xs",
+    contents: [
+      {
+        type: "box",
+        layout: "horizontal",
+        contents: [
+          { type: "text", text: "本月進度", size: "sm", color: "#999999", flex: 2 },
+          { type: "text", text: `${monthProgress.delivered}/${monthProgress.target} 支`, size: "sm", color: "#333333", flex: 5 },
+        ],
+      },
+      {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: "#EEEEEE",
+        cornerRadius: "3px",
+        height: "6px",
+        contents: [
+          { type: "box", layout: "vertical", backgroundColor: SEVERITY_COLOR, cornerRadius: "3px", width: `${monthPct}%`, height: "6px", contents: [] },
+        ],
+      },
+    ],
+  };
+
   return {
     type: "bubble",
     size: "kilo",
@@ -290,7 +321,7 @@ function buildStockAlertBubble(
         { type: "text", text: vendor.name, weight: "bold", size: "xl" },
         { type: "separator", margin: "md" },
         row("狀態", statusText),
-        row("本月進度", `${monthProgress.delivered}/${monthProgress.target} 支`),
+        monthProgressRow,
         row("庫存", `成片 ${alert.finishedStock}・素材 ${alert.rawStock}`),
         row("上次拍攝", lastShootDate || "尚無紀錄"),
       ],
