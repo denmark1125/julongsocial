@@ -25,7 +25,7 @@ import {
   subDays,
   addDays
 } from 'date-fns';
-import { ChevronLeft, ChevronRight, Clock, Plus, Download, X, Calendar as CalendarIcon, BellRing } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Plus, Download, X, Calendar as CalendarIcon, BellRing, Image as ImageIcon, Video } from 'lucide-react';
 import { clsx } from 'clsx';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
@@ -40,6 +40,7 @@ export default function CalendarView() {
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
+  const [selectedVendorId, setSelectedVendorId] = useState<string>('all');
 
   useEffect(() => {
     const vUnsubscribe = onSnapshot(collection(db, 'vendors'), (snapshot) => {
@@ -196,7 +197,8 @@ export default function CalendarView() {
 
   const filteredPosts = posts.filter(p => {
     const postMonth = p.targetMonth || (p.scheduledAt && p.scheduledAt.length > 0 ? format(parseISO(p.scheduledAt), 'yyyy-MM') : null);
-    return postMonth === format(currentDate, 'yyyy-MM');
+    const matchesVendor = selectedVendorId === 'all' || p.vendorId === selectedVendorId;
+    return postMonth === format(currentDate, 'yyyy-MM') && matchesVendor;
   }).sort((a, b) => {
     if (!a.scheduledAt || a.scheduledAt.length === 0) return 1;
     if (!b.scheduledAt || b.scheduledAt.length === 0) return -1;
@@ -213,7 +215,7 @@ export default function CalendarView() {
               onClick={() => setIsTrackingModalOpen(true)}
               className="hidden sm:flex bg-orange-50 text-orange-600 px-4 py-1.5 rounded-xl items-center shadow-sm border border-orange-100 hover:bg-orange-100 transition-all text-xs font-bold"
             >
-              <BellRing size={16} className="mr-2" /> 催片導出
+              <BellRing size={16} className="mr-2" /> 上片排程表
             </button>
             <button 
               onClick={exportToExcel}
@@ -277,6 +279,35 @@ export default function CalendarView() {
         </div>
       </div>
 
+      {/* Vendor Filter Bar */}
+      <div className="flex items-center space-x-2 overflow-x-auto px-4 sm:px-6 py-3 border-b border-black/5 bg-white scrollbar-hide">
+        <button
+          onClick={() => setSelectedVendorId('all')}
+          className={clsx(
+            "px-4 py-1.5 rounded-full text-xs font-bold transition-all whitespace-nowrap border",
+            selectedVendorId === 'all'
+              ? "bg-[#5A5A40] text-white border-[#5A5A40]"
+              : "bg-white text-gray-500 border-black/5 hover:border-gray-300"
+          )}
+        >
+          全部IP
+        </button>
+        {visibleVendors(vendors).map(vendor => (
+          <button
+            key={vendor.id}
+            onClick={() => setSelectedVendorId(vendor.id!)}
+            className={clsx(
+              "px-4 py-1.5 rounded-full text-xs font-bold transition-all whitespace-nowrap border",
+              selectedVendorId === vendor.id
+                ? "bg-[#5A5A40] text-white border-[#5A5A40]"
+                : "bg-white text-gray-500 border-black/5 hover:border-gray-300"
+            )}
+          >
+            {vendor.name}
+          </button>
+        ))}
+      </div>
+
       <div className="flex-1 overflow-auto">
         {viewMode === 'calendar' ? (
           <div className="min-w-[800px] xl:min-w-0">
@@ -292,15 +323,21 @@ export default function CalendarView() {
               {calendarDays.map((day, idx) => {
                 if (!day) return <div key={`pad-${idx}`} className="bg-gray-50/30 border-r border-b border-black/5"></div>;
                 
-                const dayPosts = posts.filter(p => p.scheduledAt && isSameDay(parseISO(p.scheduledAt), day));
-                const dayOfWeek = getDay(day);
-                
-                // Find habits for this day（排除冷凍中/已終止的廠商，避免提醒誤發）
-                const dayHabits = trackedVendors(vendors).flatMap(v =>
-                  (v.postingHabits || [])
-                    .filter(h => h.daysOfWeek.includes(dayOfWeek))
-                    .map(h => ({ ...h, vendorName: v.name, vendorId: v.id }))
+                const dayPosts = posts.filter(p =>
+                  p.scheduledAt &&
+                  isSameDay(parseISO(p.scheduledAt), day) &&
+                  (selectedVendorId === 'all' || p.vendorId === selectedVendorId)
                 );
+                const dayOfWeek = getDay(day);
+
+                // Find habits for this day（排除冷凍中/已終止的廠商，避免提醒誤發）
+                const dayHabits = trackedVendors(vendors)
+                  .filter(v => selectedVendorId === 'all' || v.id === selectedVendorId)
+                  .flatMap(v =>
+                    (v.postingHabits || [])
+                      .filter(h => h.daysOfWeek.includes(dayOfWeek))
+                      .map(h => ({ ...h, vendorName: v.name, vendorId: v.id }))
+                  );
                 
                 return (
                   <div 
@@ -380,7 +417,10 @@ export default function CalendarView() {
                           >
                             <div className="flex items-center gap-1 overflow-hidden">
                               <span className="font-bold flex-shrink-0">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'HH:mm') : '-'}</span>
-                              <span className="opacity-70 flex-shrink-0">[{post.contentType === 'post' ? '圖文' : '影'}]</span>
+                              <span className="flex items-center gap-0.5 opacity-70 flex-shrink-0">
+                                {post.contentType === 'post' ? <ImageIcon size={9} /> : <Video size={9} />}
+                                [{post.contentType === 'post' ? '圖文' : '影'}]
+                              </span>
                               <span className="truncate font-bold">{vendor?.name}</span>
                             </div>
                             <div className="truncate opacity-90">{post.title}</div>
@@ -425,7 +465,10 @@ export default function CalendarView() {
                     >
                       <div className="text-center min-w-[50px]">
                         <div className="text-sm font-bold text-gray-900">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'HH:mm') : '-'}</div>
-                        <div className="text-[10px] font-bold text-gray-400 uppercase">{post.contentType === 'post' ? '圖文' : '短影音'}</div>
+                        <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-gray-400 uppercase">
+                          {post.contentType === 'post' ? <ImageIcon size={10} /> : <Video size={10} />}
+                          {post.contentType === 'post' ? '圖文' : '短影音'}
+                        </div>
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center space-x-2 mb-0.5">

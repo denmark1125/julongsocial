@@ -583,7 +583,7 @@ export default function PostManagement() {
             onClick={() => setIsTrackingModalOpen(true)}
             className="flex-1 sm:flex-none flex items-center justify-center px-4 py-2 bg-orange-50 text-orange-600 rounded-xl shadow-sm border border-orange-100 hover:bg-orange-100 transition-all text-sm font-bold"
           >
-            <BellRing size={18} className="mr-2" /> 催片導出
+            <BellRing size={18} className="mr-2" /> 上片排程表
           </button>
           <button 
             onClick={exportToExcel}

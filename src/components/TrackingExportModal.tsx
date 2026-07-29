@@ -7,23 +7,22 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Post, Vendor, Asset, Editor, DismissedHabit } from '../types';
-import { 
-  format, 
-  addDays, 
-  startOfWeek, 
-  endOfWeek, 
-  parseISO, 
-  isSameDay, 
+import {
+  format,
+  addDays,
+  startOfWeek,
+  parseISO,
+  isSameDay,
   getDay,
   subDays,
   isAfter,
   isBefore
 } from 'date-fns';
-import { 
-  X, 
-  Download, 
-  Calendar as CalendarIcon, 
-  User, 
+import {
+  X,
+  Download,
+  Calendar as CalendarIcon,
+  User,
   Filter,
   CheckCircle2,
   Clock,
@@ -62,8 +61,10 @@ export default function TrackingExportModal({
   const [startDate, setStartDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState<string>(format(addDays(new Date(), 7), 'yyyy-MM-dd'));
   const [selectedWeekStart, setSelectedWeekStart] = useState<Date>(
-    startOfWeek(addDays(new Date(), 7), { weekStartsOn: 1 }) // Default to next week
+    startOfWeek(addDays(new Date(), 7), { weekStartsOn: 1 }) // 預設下週一，日常快速選週用
   );
+  const [trackingRangeDays, setTrackingRangeDays] = useState<number>(7);
+  const [useCustomRange, setUseCustomRange] = useState(false); // 平常用快速選週，偶爾突發案例才切自訂起訖日
   const [selectedVendorIds, setSelectedVendorIds] = useState<string[]>([]);
   const [customRemarks, setCustomRemarks] = useState<Record<string, string>>({});
   const exportRef = useRef<HTMLDivElement>(null);
@@ -90,10 +91,21 @@ export default function TrackingExportModal({
 
   if (!isOpen) return null;
 
-  const weekEnd = endOfWeek(selectedWeekStart, { weekStartsOn: 1 });
-  const weekDays = exportMode === 'schedule' 
-    ? Array.from({ length: Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)) + 1 }, (_, i) => addDays(new Date(startDate), i))
-    : Array.from({ length: 7 }, (_, i) => addDays(selectedWeekStart, i));
+  // 發片清單模式本來就是給業主的自訂區間；待補影片/全部排程預設走快速選週，
+  // 但使用者可以按「自訂起訖日」切換，應付突發的非固定區間需求
+  const isCustomRange = exportMode === 'schedule' || useCustomRange;
+  const rangeStart = isCustomRange ? (startDate ? parseISO(startDate) : new Date()) : selectedWeekStart;
+  const rangeEnd = isCustomRange
+    ? (endDate ? parseISO(endDate) : rangeStart)
+    : addDays(selectedWeekStart, trackingRangeDays - 1);
+  const rangeDaySpan = Math.max(1, Math.ceil((rangeEnd.getTime() - rangeStart.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+  const weekDays = Array.from({ length: rangeDaySpan }, (_, i) => addDays(rangeStart, i));
+
+  const enableCustomRange = () => {
+    setStartDate(format(selectedWeekStart, 'yyyy-MM-dd'));
+    setEndDate(format(addDays(selectedWeekStart, trackingRangeDays - 1), 'yyyy-MM-dd'));
+    setUseCustomRange(true);
+  };
 
   const trackingData: any[] = [];
 
@@ -211,20 +223,25 @@ export default function TrackingExportModal({
     if (!exportRef.current) return;
     
     const loadingToast = toast.loading('正在準備導出圖片...');
-    
+
     try {
       const element = exportRef.current;
+
+      // 字體(Noto Serif TC)是異步載入的，沒等它就直接量測尺寸/截圖，
+      // 常常會抓到「字體還沒到位、排版還沒定案」那一刻的高度，
+      // 導致截圖留白或跟實際內容對不齊。先確保字體就緒、再等一個畫面更新，才量測+截圖。
+      await document.fonts.ready;
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
       const rect = element.getBoundingClientRect();
-      
-      const dataUrl = await toJpeg(element, { 
-        quality: 1, 
+
+      const dataUrl = await toJpeg(element, {
+        quality: 1,
         backgroundColor: '#F5F5F0',
         pixelRatio: 3,
         width: rect.width,
         height: rect.height,
         style: {
-          transform: 'scale(1)',
-          transformOrigin: 'top left',
           margin: '0',
           padding: '0',
         },
@@ -235,10 +252,10 @@ export default function TrackingExportModal({
           return true;
         }
       });
-      
+
       const editorName = selectedEditorId === 'all' ? '全部' : editors.find(e => e.id === selectedEditorId)?.name;
-      const fileName = `催片清單_${editorName}_${format(selectedWeekStart, 'MMdd')}-${format(weekEnd, 'MMdd')}.jpg`;
-      
+      const fileName = `上片排程表_${editorName}_${format(rangeStart, 'MMdd')}-${format(rangeEnd, 'MMdd')}.jpg`;
+
       download(dataUrl, fileName);
       toast.success('導出成功', { id: loadingToast });
     } catch (error) {
@@ -257,8 +274,8 @@ export default function TrackingExportModal({
               <Download className="text-white w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-[#5A5A40]">催片清單導出</h2>
-              <p className="text-xs text-gray-400">彙整下周待補影片與發片排程</p>
+              <h2 className="text-xl font-bold text-[#5A5A40]">上片排程表導出</h2>
+              <p className="text-xs text-gray-400">彙整指定區間的上片排程與待補影片提醒</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
@@ -285,19 +302,30 @@ export default function TrackingExportModal({
           </div>
 
           <div className="space-y-2">
-            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center">
-              <CalendarIcon className="w-3 h-3 mr-1" /> 追蹤時間
-            </label>
-            {exportMode === 'schedule' ? (
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center">
+                <CalendarIcon className="w-3 h-3 mr-1" /> 追蹤時間
+              </label>
+              {exportMode !== 'schedule' && (
+                <button
+                  onClick={() => useCustomRange ? setUseCustomRange(false) : enableCustomRange()}
+                  className="text-[10px] font-bold text-[#8B7355] hover:underline"
+                >
+                  {useCustomRange ? '改用快速選週' : '自訂起訖日'}
+                </button>
+              )}
+            </div>
+
+            {isCustomRange ? (
               <div className="flex items-center space-x-2">
-                <input 
+                <input
                   type="date"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
                   className="flex-1 p-3 bg-[#F5F5F0] rounded-2xl text-sm font-medium border-none focus:ring-2 focus:ring-[#8B7355]"
                 />
                 <span className="text-gray-400">至</span>
-                <input 
+                <input
                   type="date"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
@@ -305,23 +333,43 @@ export default function TrackingExportModal({
                 />
               </div>
             ) : (
-              <div className="flex items-center space-x-2">
-                <button 
-                  onClick={() => setSelectedWeekStart(subDays(selectedWeekStart, 7))}
-                  className="p-3 bg-[#F5F5F0] rounded-2xl hover:bg-gray-200"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <div className="flex-1 p-3 bg-[#F5F5F0] rounded-2xl text-center text-sm font-medium">
-                  {format(selectedWeekStart, 'MM/dd')} - {format(weekEnd, 'MM/dd')}
+              <>
+                <div className="flex bg-[#F5F5F0] p-1 rounded-2xl">
+                  {[
+                    { label: '1週', days: 7 },
+                    { label: '2週', days: 14 },
+                    { label: '1個月', days: 30 },
+                  ].map(opt => (
+                    <button
+                      key={opt.days}
+                      onClick={() => setTrackingRangeDays(opt.days)}
+                      className={clsx(
+                        "flex-1 py-1.5 rounded-xl text-[10px] font-bold transition-all",
+                        trackingRangeDays === opt.days ? "bg-white text-[#8B7355] shadow-sm" : "text-gray-400"
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
                 </div>
-                <button 
-                  onClick={() => setSelectedWeekStart(addDays(selectedWeekStart, 7))}
-                  className="p-3 bg-[#F5F5F0] rounded-2xl hover:bg-gray-200"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setSelectedWeekStart(subDays(selectedWeekStart, trackingRangeDays))}
+                    className="p-3 bg-[#F5F5F0] rounded-2xl hover:bg-gray-200"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <div className="flex-1 p-3 bg-[#F5F5F0] rounded-2xl text-center text-sm font-medium">
+                    {format(rangeStart, 'MM/dd')} - {format(rangeEnd, 'MM/dd')}
+                  </div>
+                  <button
+                    onClick={() => setSelectedWeekStart(addDays(selectedWeekStart, trackingRangeDays))}
+                    className="p-3 bg-[#F5F5F0] rounded-2xl hover:bg-gray-200"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </>
             )}
           </div>
 
@@ -447,30 +495,28 @@ export default function TrackingExportModal({
 
         {/* Preview Area */}
         <div className="flex-1 overflow-auto p-0 bg-gray-100 custom-scrollbar">
-          <div 
-            ref={exportRef} 
-            className="bg-[#F5F5F0] min-w-full p-4 sm:p-8"
-          >
-            <div className="bg-[#F5F5F0] shadow-none border-none overflow-hidden w-full max-w-[800px] mx-auto">
+          {/* 這層只負責畫面上的置中留白，不參與截圖，避免導出的 JPG 兩側多出跟卡片本身無關的空白 */}
+          <div className="min-w-full p-4 sm:p-8">
+            <div
+              ref={exportRef}
+              className="bg-[#F5F5F0] shadow-none border-none overflow-hidden w-full max-w-[800px] mx-auto"
+            >
               {/* JPG Header */}
               <div className="p-12 bg-[#5A5A40] text-white">
                 <div className="flex justify-between items-end">
                   <div>
                     <h1 className="text-5xl font-black tracking-tighter mb-2">
-                      {exportMode === 'schedule' ? 'SCHEDULE LIST' : 'TRACKING LIST'}
+                      {exportMode === 'schedule' ? 'SCHEDULE LIST' : 'CONTENT SCHEDULE'}
                     </h1>
                     <p className="text-xl opacity-80 font-medium tracking-wide">
-                      {selectedEditorId !== 'all' && editors.find(e => e.id === selectedEditorId)?.name} 
-                      {exportMode === 'schedule' ? ' 發片排程清單' : ' 催片清單'}
+                      {selectedEditorId !== 'all' && editors.find(e => e.id === selectedEditorId)?.name}
+                      {exportMode === 'schedule' ? ' 發片排程清單' : ' 上片排程表'}
                     </p>
                   </div>
                   <div className="text-right">
                     <p className="text-sm opacity-60 uppercase tracking-widest mb-1">Timeframe</p>
                     <p className="text-2xl font-bold">
-                      {exportMode === 'schedule' 
-                        ? `${startDate ? format(parseISO(startDate), 'yyyy/MM/dd') : '-'} - ${endDate ? format(parseISO(endDate), 'yyyy/MM/dd') : '-'}`
-                        : `${format(selectedWeekStart, 'yyyy/MM/dd')} - ${format(weekEnd, 'yyyy/MM/dd')}`
-                      }
+                      {format(rangeStart, 'yyyy/MM/dd')} - {format(rangeEnd, 'yyyy/MM/dd')}
                     </p>
                   </div>
                 </div>
@@ -557,7 +603,7 @@ export default function TrackingExportModal({
                   <div className="bg-white/50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                     <CheckCircle2 className="text-gray-300 w-8 h-8" />
                   </div>
-                  <p className="text-gray-400 font-medium">此週次無待補項目</p>
+                  <p className="text-gray-400 font-medium">所選區間內無符合項目</p>
                 </div>
               )}
             </div>
@@ -577,7 +623,7 @@ export default function TrackingExportModal({
         {/* Footer */}
         <div className="p-6 bg-[#F5F5F0]/50 border-t border-gray-100 flex flex-col sm:flex-row justify-between items-center gap-4">
           <p className="text-xs text-gray-400 text-center sm:text-left">
-            * 系統將自動彙整下周一至周日的排程與提醒
+            {`* 系統將自動彙整 ${format(rangeStart, 'MM/dd')} - ${format(rangeEnd, 'MM/dd')} 區間的排程${exportMode === 'schedule' ? '' : '與待補提醒'}`}
           </p>
           <div className="flex space-x-3 w-full sm:w-auto">
             <button 
