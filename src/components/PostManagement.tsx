@@ -1014,10 +1014,15 @@ export default function PostManagement() {
                     // 貼文刪掉，掛在上面的素材一定要放回庫存，否則它會永遠停在 used、
                     // 排程選單再也挑不到，等於按錯一次就報廢一支成片。
                     // 先刪貼文再放素材：萬一這步失敗，素材變成「掛著一個已不存在的貼文」，
-                    // isAssetFree() 會自動把它當回庫存，不會卡死。
+                    // isAssetOrphaned() 會自動把它當回庫存，不會卡死——所以這裡各自 try，
+                    // 放素材失敗不能報成「刪除失敗」，貼文明明已經刪掉了，講反了使用者會重按。
                     if (target?.assetId && target.assetId !== 'to_be_added') {
-                      await updateDoc(doc(db, 'assets', target.assetId), { status: 'available', usedInPostId: null });
-                      toast.success('已刪除貼文，素材已放回庫存可重新排程');
+                      try {
+                        await updateDoc(doc(db, 'assets', target.assetId), { status: 'available', usedInPostId: null });
+                        toast.success('已刪除貼文，素材已放回庫存可重新排程');
+                      } catch {
+                        toast.success('已刪除貼文（素材狀態沒更新成功，但系統會自動視為可用）');
+                      }
                     } else {
                       toast.success('已刪除貼文');
                     }
