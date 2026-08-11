@@ -287,6 +287,14 @@ export function buildPostIndex(posts: Pick<Post, 'id' | 'status'>[]): PostIndex 
   };
 }
 
+// 素材標成 used、但它掛的那則貼文已經不存在了（被刪掉）＝其實根本沒被用掉，只是狀態沒清乾淨。
+// 舊版沒有這個概念，貼文一刪素材就永遠卡在 used、排程選單再也挑不到，等於按錯一次就報廢一支成片。
+// 寫成自癒判斷而不是跑 migration：既有卡住的素材會自己回來，之後萬一還有漏網的路徑也不會再累積；
+// 而且下次它被掛到新貼文時 usedInPostId 就自然被覆蓋掉，資料會自己收斂。
+export function isAssetOrphaned(asset: Pick<Asset, 'status' | 'usedInPostId'>, index: PostIndex): boolean {
+  return asset.status === 'used' && !!asset.usedInPostId && !index.allPostIds.has(asset.usedInPostId);
+}
+
 // 這支素材現在是不是「還可以用」——庫存要不要算它、排程選單能不能挑到它，都用這一條，
 // 不要各處自己寫 status==='available'，不然兩邊會對不起來。
 export function isAssetFree(asset: Pick<Asset, 'status' | 'usedInPostId'>, index: PostIndex): boolean {
@@ -294,11 +302,14 @@ export function isAssetFree(asset: Pick<Asset, 'status' | 'usedInPostId'>, index
   if (asset.status !== 'used' || !asset.usedInPostId) return false;
   // 掛在草稿貼文＝還沒定案，隨時可能被刪或換素材，素材其實還沒真的離開庫存
   if (index.draftPostIds.has(asset.usedInPostId)) return true;
-  // 掛的貼文已經不存在了（被刪掉）＝自動放回庫存。
-  // 舊版沒有這條，貼文一刪素材就永遠卡在 used、排程選單再也挑不到，等於按錯一次就報廢一支成片。
-  // 寫成自癒判斷而不是跑 migration，這樣既有卡住的素材會自己回來，之後萬一還有漏網的路徑也不會再累積。
-  if (!index.allPostIds.has(asset.usedInPostId)) return true;
-  return false;
+  return isAssetOrphaned(asset, index);
+}
+
+// 素材庫顯示用的「實際狀態」：孤兒素材要顯示成可使用，不能還掛著已使用的灰底。
+// 注意這裡故意不把「掛在草稿」也算成可使用——那種在素材庫本來就該顯示已使用（它確實連著一則貼文），
+// 只有庫存/排程選單才把它當還能動用。archived 不受影響。
+export function getDisplayAssetStatus<A extends Pick<Asset, 'status' | 'usedInPostId'>>(asset: A, index: PostIndex): A['status'] {
+  return isAssetOrphaned(asset, index) ? 'available' : asset.status;
 }
 
 export function getAvailableVideoAssets<A extends StockAsset>(

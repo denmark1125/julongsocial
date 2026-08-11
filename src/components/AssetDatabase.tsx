@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking } from '../types';
-import { visibleVendors, trackedVendors } from '../lib/vendorStatus';
+import { visibleVendors, trackedVendors, buildPostIndex, getDisplayAssetStatus } from '../lib/vendorStatus';
 import { 
   Video, 
   Plus, 
@@ -64,6 +64,10 @@ const handleFirestoreError = (error: unknown, operationType: OperationType, path
 export default function AssetDatabase() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
+  // 顯示/篩選/計數一律走「實際狀態」而不是 asset.status：貼文被刪掉的素材資料上還留著 used，
+  // 直接讀 status 會讓它永遠掛著已使用的灰底、篩選也撈不到，使用者眼中那支片就等於報廢了。
+  const postIndex = React.useMemo(() => buildPostIndex(posts), [posts]);
+  const effStatus = (a: Pick<Asset, 'status' | 'usedInPostId'>) => getDisplayAssetStatus(a, postIndex);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [editors, setEditors] = useState<Editor[]>([]);
   const [isAdding, setIsAdding] = useState(false);
@@ -225,11 +229,13 @@ export default function AssetDatabase() {
 
   const toggleManualComplete = async (asset: Asset) => {
     try {
+      // usedInPostId 一起清掉：不清的話會留下指向已刪貼文的懸空 id，
+      // 之後又被 isAssetOrphaned 判成孤兒，狀態在兩邊來回跳
       if (asset.status === 'used') {
-        await updateDoc(doc(db, 'assets', asset.id!), { status: 'available' });
+        await updateDoc(doc(db, 'assets', asset.id!), { status: 'available', usedInPostId: null });
         toast.success('已解鎖，重新可使用');
       } else {
-        await updateDoc(doc(db, 'assets', asset.id!), { status: 'used' });
+        await updateDoc(doc(db, 'assets', asset.id!), { status: 'used', usedInPostId: null });
         toast.success('已標記完成');
       }
     } catch (error) {
@@ -261,17 +267,19 @@ export default function AssetDatabase() {
     const matchesTab = a.type === activeTab;
     const matchesSearch = a.title.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesVendor = filterVendor === 'all' || a.vendorId === filterVendor;
-    const matchesStatus = filterStatus === 'all' 
-      ? a.status !== 'archived' 
-      : a.status === filterStatus;
+    // 這條決定素材出不出現在「可使用／已使用」分頁，一定要用實際狀態——
+    // 用 a.status 的話，貼文被刪掉的素材會卡在「已使用」分頁裡出不來，等於使用者永遠找不回它
+    const matchesStatus = filterStatus === 'all'
+      ? effStatus(a) !== 'archived'
+      : effStatus(a) === filterStatus;
     const matchesStage = a.stage === filterStage || (!a.stage && filterStage === 'finished');
     return matchesTab && matchesSearch && matchesVendor && matchesStatus && matchesStage;
   });
 
   const getVendorName = (id: string) => vendors.find(v => v.id === id)?.name || '未知廠商';
 
-  const videoInventory = assets.filter(a => a.type === 'video' && a.status === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
-  const postInventory = assets.filter(a => a.type === 'post' && a.status === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
+  const videoInventory = assets.filter(a => a.type === 'video' && effStatus(a) === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
+  const postInventory = assets.filter(a => a.type === 'post' && effStatus(a) === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
 
   const scheduledVideoInventory = assets.filter(a => {
     if (a.type !== 'video' || a.status !== 'used' || !a.usedInPostId) return false;
@@ -288,8 +296,8 @@ export default function AssetDatabase() {
   }).length;
 
   const vendorStocks = trackedVendors(vendors).map(vendor => {
-    const availableVideos = assets.filter(a => a.vendorId === vendor.id && a.type === 'video' && a.status === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
-    const availablePosts = assets.filter(a => a.vendorId === vendor.id && a.type === 'post' && a.status === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
+    const availableVideos = assets.filter(a => a.vendorId === vendor.id && a.type === 'video' && effStatus(a) === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
+    const availablePosts = assets.filter(a => a.vendorId === vendor.id && a.type === 'post' && effStatus(a) === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
     
     const scheduledVideos = assets.filter(a => {
       if (a.vendorId !== vendor.id || a.type !== 'video' || a.status !== 'used' || !a.usedInPostId) return false;
@@ -527,13 +535,13 @@ export default function AssetDatabase() {
                   "text-[10px] px-2 py-0.5 rounded-full font-bold",
                   filterVendor === 'all' ? "bg-white/20" : "bg-gray-100"
                 )}>
-                  {assets.filter(a => a.type === activeTab && a.status === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length}
+                  {assets.filter(a => a.type === activeTab && effStatus(a) === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length}
                 </span>
               </button>
               {visibleVendors(vendors)
                 .filter(v => v.name.toLowerCase().includes(vendorSearchTerm.toLowerCase()))
                 .map(vendor => {
-                const count = assets.filter(a => a.vendorId === vendor.id && a.type === activeTab && a.status === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
+                const count = assets.filter(a => a.vendorId === vendor.id && a.type === activeTab && effStatus(a) === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
                 const pendingCount = assets.filter(a => a.vendorId === vendor.id && a.type === activeTab && !a.approved && a.status !== 'archived' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
                 
                 return (
@@ -659,19 +667,19 @@ export default function AssetDatabase() {
             key={asset.id} 
             className={cn(
               "bg-white rounded-[32px] overflow-hidden border border-black/5 shadow-sm transition-all group",
-              asset.status === 'used' 
+              effStatus(asset) === 'used' 
                 ? "opacity-50 scale-[0.96] grayscale-[0.5] hover:opacity-80" 
                 : "hover:shadow-md hover:scale-[1.01]"
             )}
           >
             <div className={cn(
               "bg-[#F5F5F0] relative flex items-center justify-center overflow-hidden transition-all",
-              asset.status === 'used' ? "aspect-[21/9]" : "aspect-video"
+              effStatus(asset) === 'used' ? "aspect-[21/9]" : "aspect-video"
             )}>
               {asset.type === 'video' ? (
-                <Video size={asset.status === 'used' ? 32 : 48} className="text-[#5A5A40] opacity-20" />
+                <Video size={effStatus(asset) === 'used' ? 32 : 48} className="text-[#5A5A40] opacity-20" />
               ) : (
-                <FileText size={asset.status === 'used' ? 32 : 48} className="text-[#5A5A40] opacity-20" />
+                <FileText size={effStatus(asset) === 'used' ? 32 : 48} className="text-[#5A5A40] opacity-20" />
               )}
               {asset.url && (
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -681,17 +689,17 @@ export default function AssetDatabase() {
                     rel="noopener noreferrer"
                     className={cn(
                       "bg-white text-[#5A5A40] rounded-full hover:scale-110 transition-transform",
-                      asset.status === 'used' ? "p-2" : "p-3"
+                      effStatus(asset) === 'used' ? "p-2" : "p-3"
                     )}
                   >
-                    <ExternalLink size={asset.status === 'used' ? 18 : 24} />
+                    <ExternalLink size={effStatus(asset) === 'used' ? 18 : 24} />
                   </a>
                 </div>
               )}
               <div className="absolute top-4 left-4">
                 <span className={cn(
                   "px-3 py-1 rounded-full text-[10px] font-bold text-white uppercase tracking-wider",
-                  asset.stage === 'raw' ? "bg-[#8B7355]" : asset.status === 'used' ? "bg-gray-400" : "bg-[#5A5A40]"
+                  asset.stage === 'raw' ? "bg-[#8B7355]" : effStatus(asset) === 'used' ? "bg-gray-400" : "bg-[#5A5A40]"
                 )}>
                   {asset.stage === 'raw' ? '原始素材' : (asset.category || '未分類')}
                 </span>
@@ -700,14 +708,14 @@ export default function AssetDatabase() {
                 <span className={cn(
                   "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
                   asset.stage === 'raw' ? "bg-[#8B7355]/10 text-[#8B7355] border border-[#8B7355]/20" : 
-                  asset.status === 'available' ? "bg-[#8A8A6A]/10 text-[#8A8A6A] border border-[#8A8A6A]/20" : 
+                  effStatus(asset) === 'available' ? "bg-[#8A8A6A]/10 text-[#8A8A6A] border border-[#8A8A6A]/20" : 
                   "bg-gray-100 text-gray-500 border border-gray-200"
                 )}>
-                  {asset.stage === 'raw' ? '待剪輯' : asset.status === 'available' ? '可使用' : '已使用'}
+                  {asset.stage === 'raw' ? '待剪輯' : effStatus(asset) === 'available' ? '可使用' : '已使用'}
                 </span>
               </div>
             </div>
-            <div className={cn("p-6 space-y-4", asset.status === 'used' && "py-3")}>
+            <div className={cn("p-6 space-y-4", effStatus(asset) === 'used' && "py-3")}>
               <div>
                 <div className="flex justify-between items-start mb-1">
                   <div className="space-y-0.5">
@@ -725,7 +733,7 @@ export default function AssetDatabase() {
                 </div>
                 <h4 className={cn(
                   "font-bold leading-tight line-clamp-2",
-                  asset.status === 'used' ? "text-sm text-gray-500" : "text-lg"
+                  effStatus(asset) === 'used' ? "text-sm text-gray-500" : "text-lg"
                 )}>{asset.title}</h4>
               </div>
               <div className="flex items-center justify-between pt-4 border-t border-black/5">
@@ -748,17 +756,17 @@ export default function AssetDatabase() {
                       {asset.approved ? '已審核' : '待審核'}
                     </button>
                   )}
-                  {asset.stage === 'finished' && (asset.status === 'available' || (asset.status === 'used' && !asset.usedInPostId)) && (
+                  {asset.stage === 'finished' && (effStatus(asset) === 'available' || (effStatus(asset) === 'used' && !asset.usedInPostId)) && (
                     <button
                       onClick={() => toggleManualComplete(asset)}
-                      title={asset.status === 'used' ? '取消完成，解鎖回可使用' : '標記完成（不排日期直接視為已使用）'}
+                      title={effStatus(asset) === 'used' ? '取消完成，解鎖回可使用' : '標記完成（不排日期直接視為已使用）'}
                       className={cn(
                         "px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1",
-                        asset.status === 'used' ? "bg-gray-200 text-gray-500" : "bg-[#5A5A40]/10 text-[#5A5A40]"
+                        effStatus(asset) === 'used' ? "bg-gray-200 text-gray-500" : "bg-[#5A5A40]/10 text-[#5A5A40]"
                       )}
                     >
                       <CheckCircle2 size={12} />
-                      <span>{asset.status === 'used' ? '取消完成' : '完成'}</span>
+                      <span>{effStatus(asset) === 'used' ? '取消完成' : '完成'}</span>
                     </button>
                   )}
                   <span className="text-[10px] text-gray-400">{new Date(asset.createdAt).toLocaleDateString()}</span>
@@ -767,15 +775,15 @@ export default function AssetDatabase() {
                   <button 
                     onClick={() => toggleArchive(asset)}
                     className="text-gray-400 hover:text-[#5A5A40] transition-colors"
-                    title={asset.status === 'archived' ? '還原素材' : '移至回收站'}
+                    title={effStatus(asset) === 'archived' ? '還原素材' : '移至回收站'}
                   >
-                    {asset.status === 'archived' ? <RotateCcw size={18} /> : <Archive size={18} />}
+                    {effStatus(asset) === 'archived' ? <RotateCcw size={18} /> : <Archive size={18} />}
                   </button>
                   <button 
                     onClick={() => handleDelete(asset.id!)}
                     className="text-gray-400 hover:text-red-500 transition-colors"
                   >
-                    <Trash2 size={asset.status === 'used' ? 14 : 18} />
+                    <Trash2 size={effStatus(asset) === 'used' ? 14 : 18} />
                   </button>
                 </div>
               </div>
@@ -1291,8 +1299,8 @@ export default function AssetDatabase() {
                             ? getEffectiveEditorId(a) === selectedEditorId 
                             : a.vendorId === selectedVendorIdForExport;
                           
-                          const isRaw = a.stage === 'raw' && a.status === 'available';
-                          const isFinished = a.stage === 'finished' && a.status === 'available';
+                          const isRaw = a.stage === 'raw' && effStatus(a) === 'available';
+                          const isFinished = a.stage === 'finished' && effStatus(a) === 'available';
                           
                           const matchesStage = (includeRaw && isRaw) || (includeFinished && isFinished);
                           
@@ -1338,8 +1346,8 @@ export default function AssetDatabase() {
                           const matchesTarget = exportMode === 'editor' 
                             ? getEffectiveEditorId(a) === selectedEditorId 
                             : a.vendorId === selectedVendorIdForExport;
-                          const isRaw = a.stage === 'raw' && a.status === 'available';
-                          const isFinished = a.stage === 'finished' && a.status === 'available';
+                          const isRaw = a.stage === 'raw' && effStatus(a) === 'available';
+                          const isFinished = a.stage === 'finished' && effStatus(a) === 'available';
                           const matchesStage = (includeRaw && isRaw) || (includeFinished && isFinished);
                           return matchesTarget && matchesStage;
                         }).length === 0 && (
