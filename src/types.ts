@@ -31,7 +31,59 @@ export interface BillingRecord {
   createdAt: string;
 }
 
-export type UserRole = 'engineer' | 'manager' | 'employee';
+// ─── 應付：剪輯師請款 ─────────────────────────────────────
+// 方向跟上面的 BillingContract/BillingRecord 相反：那是客戶付我們，這是我們付剪輯師。
+// 計費錨點是 Asset.cloudUploadedAt（剪輯師自己按「上傳雲端」的那一刻），
+// 不是建檔日也不是發布日 —— 老闆定的規則就是「成片上傳雲端＝這支可以請款」。
+
+/** 預設單價。實務：影片 <60 秒 750、>60 秒 900，所以剪輯師可以逐支改。 */
+export const DEFAULT_EDITOR_FEE = 900;
+
+/**
+ * 這個月份之前上傳的片一律不進請款清單。
+ * 交棒鏈上線後、請款功能上線前那段期間按過「上傳雲端」的片會有 cloudUploadedAt 但從沒經過請款流程，
+ * 沒有這道閘，剪輯師第一次打開請款頁會看到一整串歷史片並全部勾起來送出。
+ */
+// 目前設 2026-07：實查全庫 367 筆，cloudUploadedAt 有值的是 0 筆，
+// 所以這道閘現在擋不到任何東西，往前開一個月是安全的（也讓月份切換看得出來）。
+// ⚠️ 正式開放給剪輯師用之前，要改成「請款功能上線的那個月」，
+// 否則上線前累積的上傳記錄會一次全部湧進第一張請款單。
+export const EDITOR_BILLING_START_MONTH = '2026-07';
+
+/**
+ * 請款單明細＝送單當下的快照。
+ * 之所以整份複製而不是只存 assetId：片名可能被改、IP 可能改名、素材甚至可能被刪，
+ * 已經送出去的單不能被這些後續變動污染。
+ */
+export interface EditorInvoiceItem {
+  assetId: string;
+  vendorId: string;
+  vendorName: string;      // 快照
+  title: string;           // 快照
+  cloudUploadedAt: string; // 快照（ISO）
+  amount: number;          // 凍結金額
+}
+
+export interface EditorInvoice {
+  id?: string;
+  editorId: string;        // → editors/{id}
+  editorName: string;      // 快照，剪輯師改名或被刪都不影響舊單
+  submittedByUid: string;  // 送單的登入帳號 → users/{uid}
+  billingMonth: string;    // YYYY-MM，取自 cloudUploadedAt 所屬月份（本地時區）
+  items: EditorInvoiceItem[];
+  itemCount: number;       // = items.length，列表/統計不用展開陣列
+  totalAmount: number;     // = sum(items.amount)，凍結
+  status: 'submitted' | 'paid' | 'void';
+  submittedAt: string;
+  note?: string;
+  paidAt?: string;
+  paidByUid?: string;
+  voidedAt?: string;
+  voidReason?: string;
+  createdAt: string;
+}
+
+export type UserRole = 'engineer' | 'manager' | 'employee' | 'editor';
 
 export interface UserProfile {
   uid: string;
@@ -42,6 +94,10 @@ export interface UserProfile {
   lineUserId?: string; // Linked LINE User ID
   canEditDeficitBaseline?: boolean; // 工程師以外的人要能校正「起始欠片」，需工程師個別開權限；只有工程師能勾選/取消這個欄位
   isCameraPerson?: boolean; // 藏鏡人：勾選後才會出現在廠商管理的藏鏡人指派名單裡
+  assignedVendorIds?: string[]; // 剪輯師(role='editor')帳號能存取的廠商範圍，只有 role='editor' 時有意義；其他角色一律看得到全部
+  // 這是從 linkedEditorId 自動同步出來的快照(廠商管理改了「負責剪輯師」就會自動更新)，不要手動編輯，
+  // 唯一維護入口是廠商管理的「負責剪輯師」欄位。
+  linkedEditorId?: string; // 對應到 editors/{id}，剪輯師登入帳號代表哪一位剪輯師標籤
   createdAt: string;
 }
 
@@ -90,6 +146,7 @@ export type CooperationItem = 'short_video' | 'graphic_post';
 export interface Editor {
   id?: string;
   name: string;
+  linkedUserUid?: string; // 若此剪輯師有登入帳號，指向 users/{uid}；用來讓廠商管理的指派變動自動同步登入帳號的權限範圍
   createdAt: string;
 }
 
@@ -165,6 +222,76 @@ export interface Post {
 
 export type AssetType = 'video' | 'post';
 
+/**
+ * 交棒鏈：一支片從待剪到可排程要經過剪輯師→業主→小編數手，
+ * 過去只靠 stage('raw'|'finished') + approved 兩個布林值表達，
+ * 導致「這支現在球在誰手上、卡了幾天」在系統裡查不到，只能靠 LINE 對話追。
+ * flowStage 就是那條交棒鏈本身；stage/approved 仍照舊維護（見 FLOW_STAGE_COMPAT），
+ * 讓既有的庫存/欠片計算完全不受影響。
+ */
+export type AssetFlowStage =
+  | 'to_edit'        // 待剪 — 球在剪輯師
+  | 'client_review'  // 業主審核中 — 球在業主（剪輯師按「轉成片」後進入）
+  | 'revising'       // 業主要改 — 球回剪輯師
+  | 'to_upload'      // 業主已通過，待上傳雲端 — 球在剪輯師
+  | 'ready';         // 可排程 — 球在小編
+
+export type FlowOwnerRole = 'editor' | 'client' | 'social';
+
+/** 每一棒的負責角色，用來在看板上顯示「球在誰手上」 */
+export const FLOW_STAGE_OWNER: Record<AssetFlowStage, FlowOwnerRole> = {
+  to_edit: 'editor',
+  client_review: 'client',
+  revising: 'editor',
+  to_upload: 'editor',
+  ready: 'social',
+};
+
+export const FLOW_STAGE_LABEL: Record<AssetFlowStage, string> = {
+  to_edit: '待剪',
+  client_review: '業主審核中',
+  revising: '業主要改',
+  to_upload: '待上傳雲端',
+  ready: '可排程',
+};
+
+export const FLOW_OWNER_LABEL: Record<FlowOwnerRole, string> = {
+  editor: '剪輯師',
+  client: '業主',
+  social: '小編',
+};
+
+/**
+ * flowStage 與舊欄位的對照。每次推進 flowStage 都必須連帶寫入這組值，
+ * 否則 vendorStatus 的庫存/欠片會算錯（raw=待剪素材、finished+approved=可用成片）。
+ * 特別注意 'revising' 要把 stage 寫回 'raw' —— 這正是過去「退回後剪輯師看不到那支片」的破口。
+ */
+export const FLOW_STAGE_COMPAT: Record<AssetFlowStage, { stage: 'raw' | 'finished'; approved: boolean }> = {
+  to_edit: { stage: 'raw', approved: false },
+  revising: { stage: 'raw', approved: false },
+  client_review: { stage: 'finished', approved: false },
+  to_upload: { stage: 'finished', approved: false },
+  ready: { stage: 'finished', approved: true },
+};
+
+/** 各棒停滯超過幾天就算卡住（看板轉紅、LINE 催） */
+export const FLOW_STALE_DAYS: Record<AssetFlowStage, number> = {
+  to_edit: 5,
+  client_review: 3,
+  revising: 3,
+  to_upload: 2,
+  ready: 7,
+};
+
+export interface FlowLogEntry {
+  from?: AssetFlowStage;
+  to: AssetFlowStage;
+  at: string;
+  byUid?: string;
+  byName?: string;
+  note?: string; // 例如業主退回原因
+}
+
 export interface Asset {
   id?: string;
   vendorId: string;
@@ -178,8 +305,60 @@ export interface Asset {
   status: 'available' | 'used' | 'archived';
   usedInPostId?: string;
   approved: boolean;
+  /** @deprecated 拖曳排序已移除（拖一筆會覆寫整份清單且永不清除，反而讓新急件永遠排在後面）。改用 isUrgent。 */
+  manualPriorityRank?: number;
+  isUrgent?: boolean; // 急件：只影響這一筆、可隨時取消，看板置頂紅標
+  flowStage?: AssetFlowStage; // 沒有值的是 migration 前的舊資料，用 deriveFlowStage() 推導
+  flowSince?: string; // 進入目前這一棒的時間，用來算卡幾天
+  revisionCount?: number; // 被業主退回過幾次
+  revisionNote?: string; // 最近一次退回原因
+  cloudUploadedAt?: string; // 剪輯師標記「已上傳雲端」的時間。這是請款月份的唯一認定依據，只寫一次不覆蓋
+  editorFee?: number;       // 這支的剪輯費（未填＝DEFAULT_EDITOR_FEE）。納入請款單後凍結
+  billableEditorId?: string; // 計費歸屬，在上傳當下定案（不能事後查 vendor.editorId，那是即時值，換剪輯師會讓舊片的請款跑掉）
+  editorInvoiceId?: string;  // 已納入哪張請款單。有值＝已請款過，規則保證只能 unset→set
+  flowLog?: FlowLogEntry[]; // 交棒歷程（取代過去匯出時手打、關窗即失的備註）
+  submittedBy?: string; // 剪輯師送審時的 uid
+  submittedAt?: string; // 剪輯師送審時間
   createdAt: string;
   createdBy: string;
+}
+
+/**
+ * 用 stage/approved 反推交棒棒次。對照表是 FLOW_STAGE_COMPAT 的反向，
+ * 唯一無法反推的是 client_review 與 to_upload（兩者 stage/approved 相同），
+ * 一律當成 client_review（保守：假設業主還沒回覆，而不是假設已通過）。
+ */
+function legacyFlowStage(asset: Pick<Asset, 'stage' | 'approved'>): AssetFlowStage {
+  if (asset.stage === 'raw') return 'to_edit';
+  return asset.approved ? 'ready' : 'client_review';
+}
+
+/**
+ * 取得一支素材目前的交棒棒次。
+ *
+ * ⚠️ flowStage 不是無條件可信的。2026-07-31 跑過一次 migration 把 flowStage 寫進正式站，
+ * 但這套交棒鏈的程式碼至今沒有部署，線上跑的仍是只會寫 stage/approved 的舊版。
+ * 因此小編在正式站按「轉為成片」「已審核」時，stage/approved 前進了，flowStage 卻停在 migration 當天的值
+ * —— 已完成甚至已上傳的片，在剪輯師畫面上會變回「待剪」，逼他重按一次轉成片。
+ *
+ * 所以這裡改成：flowStage 只有在「跟 stage/approved 對得起來」時才採信，
+ * 矛盾時一律以 stage/approved 為準（那兩個欄位是全系統都在維護的權威值）。
+ * 這也讓資料自己癒合 —— 不需要每次程式碼落後就再跑一次 migration。
+ */
+export function deriveFlowStage(asset: Pick<Asset, 'stage' | 'approved' | 'flowStage'>): AssetFlowStage {
+  const legacy = legacyFlowStage(asset);
+  if (!asset.flowStage) return legacy;
+
+  const compat = FLOW_STAGE_COMPAT[asset.flowStage];
+  if (!compat) return legacy;
+
+  // stage 可能是 undefined（更早期的資料），比照 legacyFlowStage 的判定視為 finished
+  const stageMatches = (asset.stage === 'raw' ? 'raw' : 'finished') === compat.stage;
+  const approvedMatches = !!asset.approved === compat.approved;
+
+  // 對得起來才保留 flowStage —— 它比 stage/approved 多帶了資訊
+  // （client_review 與 to_upload 在舊欄位上完全同值，只有 flowStage 分得出來）
+  return stageMatches && approvedMatches ? asset.flowStage : legacy;
 }
 
 export interface DismissedHabit {

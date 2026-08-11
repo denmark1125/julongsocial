@@ -14,6 +14,7 @@ import {
 import { db, auth } from '../firebase';
 import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking } from '../types';
 import { visibleVendors, trackedVendors, buildPostIndex, getDisplayAssetStatus } from '../lib/vendorStatus';
+import { buildFlowUpdate, notifyFlowEvent } from '../lib/assetFlow';
 import { 
   Video, 
   Plus, 
@@ -201,15 +202,24 @@ export default function AssetDatabase() {
     }
   };
 
+  // 內部代為「轉為成片」（剪輯師沒登入時的後路；正常情況是剪輯師在自己後台按「轉成片」）。
+  // 一律走 buildFlowUpdate，否則 stage/approved 會跟 flowStage 不一致，
+  // 交棒看板就會顯示錯的「球在誰手上」。
   const handleConvert = async () => {
     if (!convertingAsset) return;
     try {
       await updateDoc(doc(db, 'assets', convertingAsset.id!), {
-        stage: 'finished',
+        ...buildFlowUpdate(convertingAsset, 'client_review', {
+          byUid: auth.currentUser?.uid,
+          note: '內部代為轉成片',
+        }),
         url: conversionUrl || convertingAsset.url || '',
-        approved: false // New finished assets need approval
       });
-      toast.success('已轉為成片，待審核');
+      toast.success('已轉為成片，待業主審核');
+      // 跟剪輯師自己按「轉成片」是同一個交棒事件，一樣要通知下一棒去送業主審。
+      // 不 await：通知是盡力而為（失敗自己吞掉 + 每日 cron 會補撈），
+      // 不能讓使用者為了等一個推播請求卡在畫面上。
+      void notifyFlowEvent(convertingAsset.id!, 'submitted');
       setConvertingAsset(null);
       setConversionUrl('');
       setFilterStage('finished');
@@ -218,9 +228,15 @@ export default function AssetDatabase() {
     }
   };
 
+  // 「已審核」＝業主過了且雲端也上傳好了，可以拿去排程（等同交棒鏈的 ready）。
+  // 取消審核則退回「業主審核中」；要明確記錄業主意見請用製作進度看板的「要改」。
   const toggleApproval = async (asset: Asset) => {
     try {
-      await updateDoc(doc(db, 'assets', asset.id!), { approved: !asset.approved });
+      const to = asset.approved ? 'client_review' : 'ready';
+      await updateDoc(
+        doc(db, 'assets', asset.id!),
+        buildFlowUpdate(asset, to, { byUid: auth.currentUser?.uid })
+      );
       toast.success(asset.approved ? '已取消審核' : '已通過審核');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `assets/${asset.id}`);
@@ -254,6 +270,19 @@ export default function AssetDatabase() {
   };
 
   const handleDelete = async (id: string) => {
+    const target = assets.find(a => a.id === id);
+
+    // 剪輯師已經上傳雲端的片＝他已經做完、可以請款了。刪掉等於把他的請款依據抹掉，
+    // 而且不可逆。業主不用這支的話請改按「封存」——封存不影響他的請款紀錄。
+    if (target?.editorInvoiceId) {
+      toast.error('這支已納入剪輯師請款單，不能刪除。請改用「封存」。');
+      return;
+    }
+    if (target?.cloudUploadedAt) {
+      toast.error('剪輯師已標記上傳雲端，刪掉會抹掉他的請款依據。請改用「封存」。');
+      return;
+    }
+
     if (!window.confirm('確定要刪除此素材嗎？')) return;
     try {
       await deleteDoc(doc(db, 'assets', id));

@@ -14,6 +14,7 @@ import {
 import { db } from '../firebase';
 import { Vendor, BillingContract, BillingRecord, BillingService } from '../types';
 import { visibleVendors } from '../lib/vendorStatus';
+import EditorPayables from './EditorPayables';
 import { format, parseISO, startOfMonth, endOfMonth, addMonths, subMonths, isSameMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import { 
   Plus, 
@@ -61,6 +62,8 @@ export default function BillingManagement() {
   const [recordEditData, setRecordEditData] = useState({ amount: 0, dueDate: '' });
   const [selectedVendorId, setSelectedVendorId] = useState('');
   const [activeView, setActiveView] = useState<'billing' | 'contracts'>('billing');
+  // 應收(客戶付我們) / 應付(我們付剪輯師)。兩者方向相反、資料完全不共用，只是共用這個入口。
+  const [scope, setScope] = useState<'receivable' | 'payable'>('receivable');
   
   // Form state for new contract
   const [newServices, setNewServices] = useState<BillingService[]>([DEFAULT_SERVICE]);
@@ -382,18 +385,46 @@ export default function BillingManagement() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold serif">帳務管理</h2>
-          <p className="text-sm text-gray-500">管理廠商合約與每月收款進度</p>
+          <p className="text-sm text-gray-500">
+            {scope === 'receivable' ? '管理廠商合約與每月收款進度' : '剪輯師計件費用的請款與對帳'}
+          </p>
         </div>
-        <div className="flex items-center space-x-2">
-          <button 
-            onClick={() => setIsAddContractOpen(true)}
-            className="flex-1 md:flex-none bg-[#5A5A40] text-white px-4 py-2 rounded-xl font-bold flex items-center justify-center hover:bg-[#4A4A30] transition-colors"
-          >
-            <Plus size={18} className="mr-2" />
-            新增合約
-          </button>
-        </div>
+        {scope === 'receivable' && (
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setIsAddContractOpen(true)}
+              className="flex-1 md:flex-none bg-[#5A5A40] text-white px-4 py-2 rounded-xl font-bold flex items-center justify-center hover:bg-[#4A4A30] transition-colors"
+            >
+              <Plus size={18} className="mr-2" />
+              新增合約
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* 應收(客戶付我們) vs 應付(我們付剪輯師)。兩個方向的錢放同一頁，但完全不共用資料。 */}
+      <div className="flex items-center space-x-1 bg-gray-100 p-1 rounded-xl w-fit">
+        <button
+          onClick={() => setScope('receivable')}
+          className={cn(
+            "px-4 py-2 rounded-lg text-sm font-bold transition-all",
+            scope === 'receivable' ? "bg-white text-[#5A5A40] shadow-sm" : "text-gray-500 hover:text-gray-700"
+          )}
+        >
+          應收 · 客戶
+        </button>
+        <button
+          onClick={() => setScope('payable')}
+          className={cn(
+            "px-4 py-2 rounded-lg text-sm font-bold transition-all",
+            scope === 'payable' ? "bg-white text-[#5A5A40] shadow-sm" : "text-gray-500 hover:text-gray-700"
+          )}
+        >
+          應付 · 剪輯師
+        </button>
+      </div>
+
+      {scope === 'payable' ? <EditorPayables /> : <>
 
       {/* Stats Dashboard */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -863,6 +894,7 @@ export default function BillingManagement() {
           </div>
         </div>
       )}
+      </>}
     </div>
   );
 }

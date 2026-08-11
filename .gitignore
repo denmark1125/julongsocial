@@ -1,2 +1,10 @@
 .vercel
 .env*
+
+# 相依套件與建置產物：不進版控
+node_modules
+dist
+
+# 一次性的 migration／規則備份，留在本機當還原點即可
+_migration_backup_*/
+_rules_backup_*.rules

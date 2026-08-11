@@ -19,12 +19,18 @@ import ShootBookings from './components/ShootBookings';
 import UserManagement from './components/UserManagement';
 import BillingManagement from './components/BillingManagement';
 import VersionLogView from './components/VersionLog';
+import EditorAssetQueue from './components/EditorAssetQueue';
+import EditorInvoicePage from './components/EditorInvoicePage';
 import Logo from './components/Logo';
 import { Toaster } from 'react-hot-toast';
 import { LogIn, Mail, Lock, User as UserIcon } from 'lucide-react';
 import { UserProfile, UserRole } from './types';
 import toast from 'react-hot-toast';
 import { PASSWORD_SUFFIX, ADMIN_USERNAME, ADMIN_EMAIL, INITIAL_ADMIN_REAL_EMAIL } from './constants';
+
+// 剪輯師（外包，權限最收斂）唯一能進的兩頁。新增剪輯師分頁時這裡跟 TAB_ROLES、
+// Layout.tsx 的 menuItems 三個地方都要一起加，少一個就會被強制導回工作台。
+const EDITOR_TABS = ['editorQueue', 'editorInvoice'];
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -94,6 +100,14 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // 剪輯師只有這兩個頁面：不管 activeTab 當下是什麼（含 dashboard 預設值或 ?tab= query param）
+  // 只要不在白名單內一律導回 editorQueue，讓側邊欄高亮/header標題跟 renderContent 的強制導向保持一致。
+  useEffect(() => {
+    if (userProfile?.role === 'editor' && !EDITOR_TABS.includes(activeTab)) {
+      setActiveTab('editorQueue');
+    }
+  }, [userProfile, activeTab]);
 
   const handleUsernameLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -238,13 +252,26 @@ export default function App() {
     posts: ['engineer', 'manager', 'employee'],
     videos: ['engineer', 'manager', 'employee'],
     shootBookings: ['engineer', 'manager', 'employee'],
+    // 已併入 shootBookings（製作進度），保留是為了讓舊的 ?tab=editPriority 連結仍受角色控管
+    editPriority: ['engineer', 'manager', 'employee'],
     calendar: ['engineer', 'manager', 'employee'],
     billing: ['engineer', 'manager'],
     users: ['engineer', 'manager'],
     version: ['engineer'],
+    editorQueue: ['editor'],
+    editorInvoice: ['editor'],
   };
 
   const renderContent = () => {
+    // 剪輯師是外包身分、權限最收斂的角色：不管 activeTab 是什麼(包含 ?tab= query param 這種繞過側邊欄的路徑)，
+    // 一律只渲染他們自己的頁面，絕不落到 Dashboard 等會查全公司資料的頁面。
+    if (userProfile?.role === 'editor') {
+      switch (activeTab) {
+        case 'editorInvoice': return <EditorInvoicePage userProfile={userProfile} />;
+        case 'editorQueue':
+        default: return <EditorAssetQueue userProfile={userProfile} />;
+      }
+    }
     const allowedRoles = TAB_ROLES[activeTab];
     if (allowedRoles && !allowedRoles.includes(userProfile?.role || 'employee')) {
       return <Dashboard setActiveTab={setActiveTab} />;
@@ -256,6 +283,8 @@ export default function App() {
       case 'calendar': return <CalendarView />;
       case 'videos': return <AssetDatabase />;
       case 'shootBookings': return <ShootBookings />;
+      // 舊的 ?tab=editPriority 連結（LINE 推播/書籤）導回合併後的製作進度，不要掉到 dashboard
+      case 'editPriority': return <ShootBookings />;
       case 'billing': return <BillingManagement />;
       case 'users': return <UserManagement currentUserRole={userProfile?.role || 'employee'} />;
       case 'version': return <VersionLogView />;

@@ -13,7 +13,7 @@ import { initializeApp, getApps, getApp, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { db } from '../firebase';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { UserProfile, UserRole, LineConnection, FirestoreErrorInfo, OperationType } from '../types';
+import { UserProfile, UserRole, LineConnection, Vendor, Editor, FirestoreErrorInfo, OperationType } from '../types';
 import { Shield, User, Trash2, Edit2, X, Plus, Key, Mail, UserPlus, MessageCircle, Link as LinkIcon, Unlink } from 'lucide-react';
 import { auth as firebaseAuth } from '../firebase';
 import toast from 'react-hot-toast';
@@ -29,6 +29,8 @@ function cn(...inputs: ClassValue[]) {
 export default function UserManagement({ currentUserRole }: { currentUserRole: UserRole }) {
   const [activeSubTab, setActiveSubTab] = useState<'users' | 'line'>('users');
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [editors, setEditors] = useState<Editor[]>([]);
   const [lineConnections, setLineConnections] = useState<LineConnection[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newUser, setNewUser] = useState({
@@ -36,7 +38,8 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
     password: '',
     email: '',
     displayName: '',
-    role: 'employee' as UserRole
+    role: 'employee' as UserRole,
+    linkedEditorId: ''
   });
   const [isCreating, setIsCreating] = useState(false);
   const [resettingUid, setResettingUid] = useState<string | null>(null);
@@ -85,11 +88,30 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
       toast.error(`無法讀取 LINE 串接資料 (${error.code || '權限錯誤'})`);
     });
 
+    const vq = query(collection(db, 'vendors'));
+    const vUnsubscribe = onSnapshot(vq, (snapshot) => {
+      setVendors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Vendor)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'vendors');
+    });
+
+    const eq = query(collection(db, 'editors'));
+    const eUnsubscribe = onSnapshot(eq, (snapshot) => {
+      setEditors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Editor)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'editors');
+    });
+
     return () => {
       unsubscribe();
       lUnsubscribe();
+      vUnsubscribe();
+      eUnsubscribe();
     };
   }, []);
+
+  // 剪輯師的廠商存取範圍唯一維護入口是「廠商管理」的「負責剪輯師」欄位，這裡只讀不寫
+  const vendorsForEditor = (editorId?: string) => vendors.filter(v => v.editorId === editorId);
 
   const handleBindLineUser = async (connectionId: string, systemUid: string) => {
     try {
@@ -243,6 +265,11 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
       return;
     }
 
+    if (newUser.role === 'editor' && !newUser.linkedEditorId) {
+      toast.error('請選擇這個帳號對應哪一位剪輯師');
+      return;
+    }
+
     setIsCreating(true);
     let secondaryApp;
     try {
@@ -258,6 +285,10 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
       const userCredential = await createUserWithEmailAndPassword(secondaryAuth, loginEmail, securePassword);
       const uid = userCredential.user.uid;
 
+      // 剪輯師帳號的廠商存取範圍不是這裡手動填，是從「廠商管理」現有的「負責剪輯師」指派算出來的
+      const isEditorAccount = newUser.role === 'editor' && newUser.linkedEditorId;
+      const assignedVendorIds = isEditorAccount ? vendorsForEditor(newUser.linkedEditorId).map(v => v.id!) : undefined;
+
       // Create user profile in Firestore
       await setDoc(doc(db, 'users', uid), {
         uid,
@@ -265,15 +296,21 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
         email: newUser.email || '',
         displayName: newUser.displayName,
         role: newUser.role,
+        ...(isEditorAccount ? { linkedEditorId: newUser.linkedEditorId, assignedVendorIds } : {}),
         createdAt: new Date().toISOString()
       });
 
+      // 反向連結：讓廠商管理那邊知道這個剪輯師標籤已經有登入帳號了，之後改指派才有東西可以同步
+      if (isEditorAccount) {
+        await updateDoc(doc(db, 'editors', newUser.linkedEditorId), { linkedUserUid: uid });
+      }
+
       // Sign out from secondary app to cleanup
       await signOut(secondaryAuth);
-      
+
       toast.success('帳號建立成功');
       setIsModalOpen(false);
-      setNewUser({ username: '', password: '', email: '', displayName: '', role: 'employee' });
+      setNewUser({ username: '', password: '', email: '', displayName: '', role: 'employee', linkedEditorId: '' });
     } catch (error: any) {
       console.error('Create user error:', error);
       toast.error(`建立失敗: ${error.message}`);
@@ -288,7 +325,8 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
   const roleLabels: Record<UserRole, string> = {
     engineer: '工程師',
     manager: '主管',
-    employee: '員工'
+    employee: '員工',
+    editor: '剪輯師'
   };
 
   return (
@@ -338,6 +376,7 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">電子郵件</th>
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">LINE 狀態</th>
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">目前權限</th>
+                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">剪輯師可存取廠商</th>
                 {currentUserRole === 'engineer' && (
                   <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">校正起始欠片</th>
                 )}
@@ -387,7 +426,29 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                         <option value="employee">員工</option>
                         <option value="manager">主管</option>
                         <option value="engineer">工程師</option>
+                        <option value="editor">剪輯師</option>
                       </select>
+                    </td>
+                    <td className="p-4">
+                      {user.role === 'editor' ? (
+                        <div className="max-w-[240px]">
+                          <p className="text-[10px] text-gray-400 mb-1">
+                            對應剪輯師：{editors.find(ed => ed.id === user.linkedEditorId)?.name || '未設定'}
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {vendorsForEditor(user.linkedEditorId).length === 0 ? (
+                              <span className="text-[10px] text-gray-300">目前未負責任何廠商</span>
+                            ) : vendorsForEditor(user.linkedEditorId).map(v => (
+                              <span key={v.id} className="px-2 py-0.5 rounded-lg bg-[#F5F5F0] text-gray-600 text-[10px] font-bold">
+                                {v.name}
+                              </span>
+                            ))}
+                          </div>
+                          <p className="text-[9px] text-gray-300 mt-1">要改請到「廠商管理」調整負責剪輯師</p>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-300">—</span>
+                      )}
                     </td>
                     {currentUserRole === 'engineer' && (
                       <td className="p-4">
@@ -659,7 +720,7 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
 
               <div className="space-y-2">
                 <label className="text-sm font-bold text-gray-600 ml-1">初始權限</label>
-                <select 
+                <select
                   className="w-full px-5 py-3 bg-[#F5F5F0] rounded-2xl border-none focus:ring-2 focus:ring-[#5A5A40]"
                   value={newUser.role}
                   onChange={(e) => setNewUser({...newUser, role: e.target.value as UserRole})}
@@ -667,8 +728,39 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                   <option value="employee">員工</option>
                   <option value="manager">主管</option>
                   <option value="engineer">工程師</option>
+                  <option value="editor">剪輯師(外包)</option>
                 </select>
               </div>
+
+              {newUser.role === 'editor' && (
+                <div className="space-y-2">
+                  <label className="text-sm font-bold text-gray-600 ml-1">對應剪輯師</label>
+                  <select
+                    required
+                    className="w-full px-5 py-3 bg-[#F5F5F0] rounded-2xl border-none focus:ring-2 focus:ring-[#5A5A40]"
+                    value={newUser.linkedEditorId}
+                    onChange={(e) => setNewUser({ ...newUser, linkedEditorId: e.target.value })}
+                  >
+                    <option value="">請選擇(需先在「廠商管理」建立剪輯師標籤)</option>
+                    {editors.filter(ed => !ed.linkedUserUid).map(ed => (
+                      <option key={ed.id} value={ed.id}>{ed.name}</option>
+                    ))}
+                  </select>
+                  {newUser.linkedEditorId && (
+                    <div className="p-3 bg-[#F5F5F0] rounded-2xl">
+                      <p className="text-[10px] text-gray-400 mb-1">目前在「廠商管理」負責的廠商(自動帶入，不用手動勾)：</p>
+                      <div className="flex flex-wrap gap-1">
+                        {vendorsForEditor(newUser.linkedEditorId).length === 0 ? (
+                          <span className="text-xs text-gray-400">尚未指派任何廠商</span>
+                        ) : vendorsForEditor(newUser.linkedEditorId).map(v => (
+                          <span key={v.id} className="px-2 py-1 rounded-lg bg-white text-gray-600 text-xs font-bold">{v.name}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-xs text-gray-400">之後在「廠商管理」改這位剪輯師負責哪些廠商，這個帳號的權限範圍會自動跟著更新。</p>
+                </div>
+              )}
 
               <div className="pt-4 flex space-x-3">
                 <button 

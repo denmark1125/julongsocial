@@ -19,7 +19,8 @@ import {
   Lock,
   CreditCard,
   Film,
-  Scissors
+  Scissors,
+  Receipt
 } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
@@ -56,7 +57,12 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
   const [lastReadNoti, setLastReadNoti] = useState<string>(localStorage.getItem('lastReadNoti') || new Date(0).toISOString());
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
+  // 剪輯師(role='editor')權限被收斂到只能看自己指派的廠商，這裡的公司全域監聽/鈴鐺對他們完全不適用，
+  // 且一旦規則生效，未範圍限定的 collection() 查詢對 editor 角色會直接 permission-denied 把整個殼弄壞——完全跳過。
+  const isEditor = userProfile?.role === 'editor';
+
   useEffect(() => {
+    if (isEditor) return;
     const vUnsubscribe = onSnapshot(collection(db, 'vendors'), (snapshot) => {
       setVendors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Vendor)));
     });
@@ -76,10 +82,10 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
       aUnsubscribe();
       dUnsubscribe();
     };
-  }, []);
+  }, [isEditor]);
 
-  // Notification Logic
-  const notifications = (() => {
+  // Notification Logic（剪輯師沒有鈴鐺，直接回空清單，不跑任何公司全域計算）
+  const notifications = isEditor ? [] : (() => {
     const list: any[] = [];
     const now = new Date();
     const threeDaysFromNow = addDays(now, 3);
@@ -178,7 +184,8 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
           title: '催剪輯優先處理',
           content: `${v.name} 成片僅剩 ${alert.finishedStock} 部只夠撐 ${Math.max(0, Math.floor(alert.finishedRunwayDays!))} 天，有 ${alert.rawStock} 部待剪，麻煩去催剪輯師${v.editorName ? `「${v.editorName}」` : ''}優先剪`,
           time: now.toISOString(),
-          tab: 'videos',
+          // 導到製作進度的交棒看板，一眼看得出這幾支到底卡在剪輯師還是卡在業主
+          tab: 'shootBookings',
           icon: Scissors,
           color: 'text-amber-500',
           bg: 'bg-amber-50'
@@ -203,11 +210,14 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     { id: 'vendors', label: '廠商管理', icon: Users, roles: ['engineer', 'manager', 'employee'] },
     { id: 'posts', label: '貼文管理', icon: FileText, roles: ['engineer', 'manager', 'employee'] },
     { id: 'videos', label: '素材資料庫', icon: Video, roles: ['engineer', 'manager', 'employee'] },
-    { id: 'shootBookings', label: '拍攝進度', icon: Film, roles: ['engineer', 'manager', 'employee'] },
+    // 拍攝＋剪輯交棒合併成一條產線；原本的「剪輯排序」只是一份清單，不值得單獨佔一個主分頁
+    { id: 'shootBookings', label: '製作進度', icon: Film, roles: ['engineer', 'manager', 'employee'] },
     { id: 'calendar', label: '社群日曆', icon: CalendarIcon, roles: ['engineer', 'manager', 'employee'] },
     { id: 'billing', label: '帳務管理', icon: CreditCard, roles: ['engineer', 'manager'] },
     { id: 'users', label: '員工管理', icon: ShieldCheck, roles: ['engineer', 'manager'] },
     { id: 'version', label: '版本日誌', icon: History, roles: ['engineer'] },
+    { id: 'editorQueue', label: '我的剪輯任務', icon: Scissors, roles: ['editor'] },
+    { id: 'editorInvoice', label: '我的請款', icon: Receipt, roles: ['editor'] },
   ];
 
   const filteredMenu = menuItems.filter(item => 
@@ -257,7 +267,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
                 <div className="flex-1 min-w-0 mr-2">
                   <p className="text-sm font-medium truncate">{userProfile?.displayName || user.email}</p>
                   <p className="text-[10px] font-bold text-[#5A5A40] uppercase tracking-wider">
-                    {userProfile?.role === 'engineer' ? '工程師' : userProfile?.role === 'manager' ? '主管' : '員工'}
+                    {userProfile?.role === 'engineer' ? '工程師' : userProfile?.role === 'manager' ? '主管' : userProfile?.role === 'editor' ? '剪輯師' : '員工'}
                   </p>
                 </div>
               )}
@@ -338,7 +348,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
                   <div className="flex-1 min-w-0 mr-4">
                     <p className="font-bold truncate">{userProfile?.displayName || user.email}</p>
                     <p className="text-xs font-bold text-[#5A5A40] uppercase tracking-wider">
-                      {userProfile?.role === 'engineer' ? '工程師' : userProfile?.role === 'manager' ? '主管' : '員工'}
+                      {userProfile?.role === 'engineer' ? '工程師' : userProfile?.role === 'manager' ? '主管' : userProfile?.role === 'editor' ? '剪輯師' : '員工'}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -378,8 +388,9 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
           </div>
           
           <div className="flex items-center space-x-2 md:space-x-4">
+            {!isEditor && (
             <div className="relative">
-              <button 
+              <button
                 onClick={markAsRead}
                 className={cn(
                   "p-2 text-gray-500 hover:bg-black/5 rounded-full relative transition-colors",
@@ -455,6 +466,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
                 )}
               </AnimatePresence>
             </div>
+            )}
           </div>
         </header>
 

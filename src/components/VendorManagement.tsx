@@ -104,7 +104,11 @@ export default function VendorManagement() {
   };
 
   const handleDeleteEditor = async (id: string) => {
-    if (!window.confirm('確定要刪除此剪輯師嗎？')) return;
+    const editor = editors.find(e => e.id === id);
+    const confirmMsg = editor?.linkedUserUid
+      ? '此剪輯師已有登入帳號，刪除標籤後該帳號的廠商權限將不會再自動更新。確定要刪除嗎？'
+      : '確定要刪除此剪輯師嗎？';
+    if (!window.confirm(confirmMsg)) return;
     try {
       await deleteDoc(doc(db, 'editors', id));
       toast.success('已刪除');
@@ -173,6 +177,20 @@ export default function VendorManagement() {
     handleHabitChange(habitIndex, 'platforms', newPlatforms);
   };
 
+  // 剪輯師登入帳號的權限範圍不能手動維護兩份，唯一維護入口是這裡的「負責剪輯師」欄位。
+  // 存完廠商後，重新用「當下所有廠商」算一次該剪輯師實際負責的廠商清單，寫回其登入帳號(如果有的話)。
+  const syncEditorVendorAccess = async (editorId: string | undefined, nextVendors: Vendor[]) => {
+    if (!editorId) return;
+    const editor = editors.find(e => e.id === editorId);
+    if (!editor?.linkedUserUid) return; // 這個剪輯師標籤還沒有登入帳號，沒有東西要同步
+    const vendorIds = nextVendors.filter(v => v.editorId === editorId && v.id).map(v => v.id!);
+    try {
+      await updateDoc(doc(db, 'users', editor.linkedUserUid), { assignedVendorIds: vendorIds });
+    } catch (error) {
+      console.error('Sync editor vendor access failed:', error);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth.currentUser) return;
@@ -195,13 +213,27 @@ export default function VendorManagement() {
         createdAt: new Date().toISOString()
       };
 
+      const previousEditorId = editingVendor?.editorId;
+      let savedVendorId = editingVendor?.id;
+
       if (editingVendor) {
         await updateDoc(doc(db, 'vendors', editingVendor.id!), data);
         toast.success('廠商資料已更新');
       } else {
-        await addDoc(collection(db, 'vendors'), data);
+        const docRef = await addDoc(collection(db, 'vendors'), data);
+        savedVendorId = docRef.id;
         toast.success('廠商資料已建立');
       }
+
+      // 模擬存檔後的廠商清單(不用等 onSnapshot 回來)，用來重算剪輯師的廠商存取範圍
+      const savedVendor: Vendor = { ...(data as Vendor), id: savedVendorId };
+      const nextVendors = editingVendor
+        ? vendors.map(v => v.id === savedVendorId ? savedVendor : v)
+        : [...vendors, savedVendor];
+      await Promise.all(
+        [...new Set([previousEditorId, formData.editorId].filter(Boolean))]
+          .map(editorId => syncEditorVendorAccess(editorId, nextVendors))
+      );
 
       setIsModalOpen(false);
       setEditingVendor(null);
@@ -1220,8 +1252,15 @@ export default function VendorManagement() {
               <div className="max-h-[300px] overflow-y-auto space-y-2 pr-2">
                 {editors.map(ed => (
                   <div key={ed.id} className="flex justify-between items-center p-3 bg-[#F5F5F0] rounded-xl group">
-                    <span className="font-bold text-[#5A5A40]">{ed.name}</span>
-                    <button 
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-[#5A5A40]">{ed.name}</span>
+                      {ed.linkedUserUid && (
+                        <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-[9px] font-bold border border-green-200">
+                          已有登入帳號
+                        </span>
+                      )}
+                    </div>
+                    <button
                       onClick={() => handleDeleteEditor(ed.id!)}
                       className="text-red-400 hover:text-red-600 p-1 opacity-0 group-hover:opacity-100 transition-all"
                     >

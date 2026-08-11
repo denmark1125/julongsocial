@@ -1,4 +1,4 @@
-// Rules Updated: 2026-04-10 07:25 UTC
+// Rules Updated: 2026-08-11 — 剪輯師角色權限 + 請款/對帳 + 素材刪除保護
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -64,6 +64,51 @@ service cloud.firestore {
 
     function isManager() {
       return isAuthenticated() && (getUserData().role == 'manager' || isAdmin());
+    }
+
+    // 剪輯師(外包)：權限最收斂的角色，只能讀取自己被指派的廠商範圍，其餘角色一律不受此限制
+    function isEditorRole() {
+      return isAuthenticated() && getUserData().role == 'editor';
+    }
+
+    function editorAssignedVendors() {
+      return getUserData().get('assignedVendorIds', []);
+    }
+
+    function editorCanAccessVendor(vendorId) {
+      return !isEditorRole() || vendorId in editorAssignedVendors();
+    }
+
+    // 剪輯師對 assets 只能碰這幾個欄位（交片送審、上傳雲端、請款金額），其餘欄位一律不可變動。
+    // flowStage/flowSince/flowLog 是交棒鏈本體，cloudUploadedAt 是「已上傳雲端」的時間戳，
+    // editorFee/billableEditorId/editorInvoiceId 是請款用的三個欄位。
+    function isEditorAssetUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['stage', 'url', 'approved', 'submittedBy', 'submittedAt',
+                  'flowStage', 'flowSince', 'flowLog', 'cloudUploadedAt',
+                  'editorFee', 'billableEditorId', 'editorInvoiceId']);
+    }
+
+    // 這位使用者代表哪一位剪輯師標籤。請款單的擁有權判斷全部靠這個。
+    function myEditorId() {
+      return getUserData().get('linkedEditorId', '');
+    }
+
+    // 已經納進某張請款單＝金額與綁定關係全部凍結
+    function assetInvoiced() {
+      return resource.data.get('editorInvoiceId', '') != '';
+    }
+
+    function touchesBillingFields() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['editorFee', 'billableEditorId', 'editorInvoiceId']);
+    }
+
+    // 剪輯師只能把「計費歸屬」蓋成自己 —— 防止共用同一個 IP 的兩位剪輯師互搶對方的片來請款
+    function billableEditorIsSelf() {
+      return !isEditorRole()
+        || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['billableEditorId'])
+        || request.resource.data.billableEditorId == myEditorId();
     }
 
     // 「校正起始欠片」是比一般廠商編輯更敏感的財務類數字，預設只有工程師能改；
@@ -138,7 +183,20 @@ service cloud.firestore {
              data.createdAt is string &&
              (!('url' in data) || data.url is string) &&
              (!('category' in data) || data.category is string) &&
-             (!('editorId' in data) || data.editorId is string);
+             (!('editorId' in data) || data.editorId is string) &&
+             // 交棒鏈（flowStage）：舊資料沒有這些欄位，所以全部是選填，前端用 deriveFlowStage 推導
+             (!('flowStage' in data) || data.flowStage in ['to_edit', 'client_review', 'revising', 'to_upload', 'ready']) &&
+             (!('flowSince' in data) || data.flowSince is string) &&
+             (!('flowLog' in data) || data.flowLog is list) &&
+             (!('revisionCount' in data) || data.revisionCount is int) &&
+             (!('revisionNote' in data) || data.revisionNote is string) &&
+             (!('cloudUploadedAt' in data) || data.cloudUploadedAt is string) &&
+             // 剪輯師請款：金額上限放在 schema 而不是角色判斷裡，因為它對所有角色都要生效
+             //（老闆自己手滑打 900000 也該被擋）
+             (!('editorFee' in data) || (data.editorFee is int && data.editorFee >= 0 && data.editorFee <= 100000)) &&
+             (!('billableEditorId' in data) || data.billableEditorId is string) &&
+             (!('editorInvoiceId' in data) || data.editorInvoiceId is string) &&
+             (!('isUrgent' in data) || data.isUrgent is bool);
     }
 
     function isValidDismissedHabit(data) {
@@ -167,6 +225,28 @@ service cloud.firestore {
              data.status in ['pending', 'paid', 'overdue'];
     }
 
+    function isValidEditorInvoice(data) {
+      return data.keys().hasAll(['editorId', 'editorName', 'submittedByUid', 'billingMonth',
+                                 'items', 'itemCount', 'totalAmount', 'status', 'submittedAt', 'createdAt']) &&
+             isValidString(data.editorId, 200) &&
+             data.editorName is string &&
+             data.submittedByUid is string &&
+             data.billingMonth is string && data.billingMonth.size() == 7 &&
+             data.items is list && data.items.size() > 0 && data.items.size() <= 200 &&
+             data.itemCount is int && data.itemCount == data.items.size() &&
+             // 規則沒有迴圈，逐筆明細驗不了。金額造假的最後防線是這個上限
+             // ＋ asset 端的 editorFee <= 100000 ＋ 老闆付款前肉眼複核。
+             data.totalAmount is int && data.totalAmount >= 0 && data.totalAmount <= 1000000 &&
+             data.status in ['submitted', 'paid', 'void'] &&
+             data.submittedAt is string &&
+             data.createdAt is string &&
+             (!('note' in data) || data.note is string) &&
+             (!('paidAt' in data) || data.paidAt is string) &&
+             (!('paidByUid' in data) || data.paidByUid is string) &&
+             (!('voidedAt' in data) || data.voidedAt is string) &&
+             (!('voidReason' in data) || data.voidReason is string);
+    }
+
     function isValidLineUser(data) {
       return data.keys().hasAll(['lineUserId', 'createdAt']) &&
              data.lineUserId is string &&
@@ -192,7 +272,7 @@ service cloud.firestore {
     }
 
     match /vendors/{vendorId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && editorCanAccessVendor(vendorId);
       allow create: if isManager() && isValidVendor(request.resource.data);
       allow update: if isValidVendor(request.resource.data) && (
         (isManager() && !touchesDeficitBaseline()) ||
@@ -202,30 +282,79 @@ service cloud.firestore {
     }
 
     match /posts/{postId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidPost(request.resource.data);
-      allow update: if isAuthenticated() && isValidPost(request.resource.data);
+      allow read: if isAuthenticated() && editorCanAccessVendor(resource.data.vendorId);
+      allow create: if isAuthenticated() && !isEditorRole() && isValidPost(request.resource.data);
+      allow update: if isAuthenticated() && !isEditorRole() && isValidPost(request.resource.data);
       allow delete: if isManager();
     }
 
     match /assets/{assetId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidAsset(request.resource.data);
-      allow update: if isAuthenticated() && isValidAsset(request.resource.data);
-      allow delete: if isManager();
+      allow read: if isAuthenticated() && editorCanAccessVendor(resource.data.vendorId);
+      allow create: if isAuthenticated() && !isEditorRole() && isValidAsset(request.resource.data);
+      allow update: if isAuthenticated() && isValidAsset(request.resource.data)
+        // 請款鎖：已入單的片，金額與綁定關係一律凍結（不分角色，老闆自己也不行 —— 這是帳務完整性，
+        // 不是權限問題）。editorInvoiceId 因此只能 unset→set 一次，剪輯師無法清掉重複請款。
+        && (!touchesBillingFields() || !assetInvoiced())
+        && billableEditorIsSelf()
+        && (
+          !isEditorRole() || (
+            editorCanAccessVendor(resource.data.vendorId) &&
+            editorCanAccessVendor(request.resource.data.vendorId) &&
+            isEditorAssetUpdate()
+          )
+        );
+      // 刪除保護：剪輯師已標記上傳雲端（＝已可請款）或已納入請款單的片一律不可刪。
+      // 刪掉是不可逆的，等於把外包的請款依據抹掉。業主不用那支的話請改按「封存」。
+      allow delete: if isManager()
+        && resource.data.get('cloudUploadedAt', '') == ''
+        && resource.data.get('editorInvoiceId', '') == '';
     }
 
     match /editors/{editorId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
+      // 請款單引用 editorId/editorName，這份名冊等於薪酬對象清單，剪輯師本人絕不該能改。
+      // 不收斂到 isManager() 是因為廠商管理（employee 也能進）的「新增剪輯師」在用。
+      allow create: if isAuthenticated() && !isEditorRole();
+      allow update: if isAuthenticated() && !isEditorRole();
       allow delete: if isManager();
     }
 
+    // 剪輯師請款單。金額一經送出就凍結，連 manager 都只能改狀態，不能動明細。
+    match /editorInvoices/{invoiceId} {
+      // ⚠️ 剪輯師端的 list 查詢必須自帶 where('editorId','==',自己)，
+      // 否則整個查詢會 permission-denied（不是回空陣列）。
+      // employee 沒有理由看得到外包薪資，所以不開 isAuthenticated 全讀。
+      allow read: if isManager()
+        || (isEditorRole() && resource.data.editorId == myEditorId());
+
+      // 只能開給自己、只能以 submitted 起始（不能自己開成已付款）
+      allow create: if isAuthenticated()
+        && isValidEditorInvoice(request.resource.data)
+        && request.resource.data.status == 'submitted'
+        && request.resource.data.submittedByUid == request.auth.uid
+        && !('paidAt' in request.resource.data)
+        && (
+          (isEditorRole() && request.resource.data.editorId == myEditorId())
+          || isManager()   // 老闆代開（剪輯師忘了送單）
+        );
+
+      // 標記已請款／作廢：manager 以上，且明細與金額全程不可變動
+      allow update: if isManager()
+        && isValidEditorInvoice(request.resource.data)
+        && request.resource.data.editorId == resource.data.editorId
+        && request.resource.data.billingMonth == resource.data.billingMonth
+        && request.resource.data.items == resource.data.items
+        && request.resource.data.itemCount == resource.data.itemCount
+        && request.resource.data.totalAmount == resource.data.totalAmount
+        && request.resource.data.submittedByUid == resource.data.submittedByUid;
+
+      allow delete: if isAdmin();
+    }
+
     match /shootBookings/{bookingId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated();
+      allow read: if isAuthenticated() && editorCanAccessVendor(resource.data.vendorId);
+      allow create: if isAuthenticated() && !isEditorRole();
+      allow update: if isAuthenticated() && !isEditorRole();
       allow delete: if isManager();
     }
 
