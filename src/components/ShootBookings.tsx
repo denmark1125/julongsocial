@@ -10,7 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Vendor, Asset, Post, ShootBooking, BookingReason, UserProfile, DeficitEntry } from '../types';
-import { getDeficitBreakdown, getEffectiveMonthlyTarget, getOwedVideoCount, getAvailableVideoAssets, hasVideoTrackingScope, isVendorTrackedInMonth } from '../lib/vendorStatus';
+import { getDeficitBreakdown, getEffectiveMonthlyTarget, getOwedVideoCount, getAvailableVideoAssets, hasVideoTrackingScope, isVendorTrackedInMonth, getDeliveredVideosInMonth } from '../lib/vendorStatus';
 import { Film, Plus, Check, CalendarClock, AlertTriangle, Pencil, X, Trash2 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -92,16 +92,17 @@ export default function ShootBookings() {
         .filter(b => b.vendorId === v.id && b.status === 'booked')
         .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate))[0] || null;
       const overdue = !!active && active.scheduledDate < today;
-      // 這個廠商本來就在追蹤範圍內(hasVideoTrackingScope)，但這個月本身可能因為冷凍期而不計入新短缺——
-      // 用來讓畫面清楚標示「這個月冷凍中」，不要讓人誤會本月的target/delivered是真的有在要求
+      // 這個廠商本來就在追蹤範圍內(hasVideoTrackingScope)，但這個月本身可能因為冷凍期/已終止而不計入新短缺——
+      // 用來讓畫面清楚標示，不要讓人誤會本月的target/delivered是真的有在要求
       const frozenThisMonth = !isVendorTrackedInMonth(v, currentMonth);
+      const isEnded = v.status === 'ended';
       let sev: Severity = 'good';
       if (overdue) sev = 'crit';
       else if (owed > 0 && !active) sev = owed >= 4 ? 'crit' : 'warn';
       else if (owed > 0) sev = 'warn';
-      return { vendor: v, target, delivered, stock, baseline: breakdown.baseline, breakdown, owed, active, overdue, frozenThisMonth, sev };
+      return { vendor: v, target, delivered, stock, baseline: breakdown.baseline, breakdown, owed, active, overdue, frozenThisMonth, isEnded, sev };
     })
-    // 冷凍中且完全沒欠片的廠商不用一直顯示佔版面（沒東西要管）；冷凍中但還有欠片的還是要留著提醒去清
+    // 冷凍中/已終止且完全沒欠片的廠商不用一直顯示佔版面（沒東西要管）；還有欠片的留著提醒去清完
     .filter(row => !(row.frozenThisMonth && row.owed === 0))
     .sort((a, b) => (b.sev === 'crit' ? 2 : b.sev === 'warn' ? 1 : 0) - (a.sev === 'crit' ? 2 : a.sev === 'warn' ? 1 : 0) || b.owed - a.owed);
 
@@ -295,16 +296,23 @@ export default function ShootBookings() {
                     <h3 className="text-lg font-bold flex items-center gap-1.5">
                       {row.vendor.name}
                       {row.frozenThisMonth && (
-                        <span className="text-[10px] font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded-full border border-cyan-100">冷凍中</span>
+                        row.isEnded ? (
+                          <span className="text-[10px] font-bold text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded-full border border-gray-200">
+                            已終止{row.vendor.endedAt ? ` ${row.vendor.endedAt.slice(5).replace('-', '/')}` : ''}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded-full border border-cyan-100">冷凍中</span>
+                        )
                       )}
                     </h3>
                     <p className="text-[11px] text-gray-400 mt-0.5">
                       {row.frozenThisMonth
-                        ? `本月冷凍中，不列入新短缺・已交 ${row.delivered} 支・庫存 ${row.stock}`
+                        ? `本月${row.isEnded ? '已終止合作' : '冷凍中'}，不再累計新目標・本月已交 ${row.delivered} 支（直接沖銷欠片）・庫存 ${row.stock}`
                         : `本月 ${row.delivered}/${row.target} 支・庫存 ${row.stock}`}
                     </p>
                   </div>
-                  <span className={cn('px-3 py-1 rounded-full text-[10px] font-bold', s.chip)}>{s.label}</span>
+                  {/* shrink-0 + nowrap 缺一不可：左邊那段說明文字一長，flex 就會把這顆 chip 壓扁成「落後待／補」兩行 */}
+                  <span className={cn('shrink-0 whitespace-nowrap px-3 py-1 rounded-full text-[10px] font-bold', s.chip)}>{s.label}</span>
                 </div>
 
                 <div>
@@ -314,11 +322,24 @@ export default function ShootBookings() {
                   </p>
                   <p className="text-[10.5px] text-gray-400 mt-1.5">
                     起始欠 {row.baseline}
-                    {row.breakdown.monthlyShortfalls.map(ms => (
-                      <span key={ms.month}>
-                        {' '}{ms.delta >= 0 ? '+' : '−'} {ms.month.slice(5)}月{row.breakdown.monthlyShortfalls.length === 1 ? '未達標' : ''} {Math.ceil(Math.abs(ms.delta))}
-                      </span>
-                    ))}
+                    {row.breakdown.monthlyShortfalls
+                      // 冷凍/終止月完全沒交片時 delta=0，印成「＋08月補交 0」只是雜訊，直接不顯示
+                      .filter(ms => !(ms.untracked && ms.delivered === 0))
+                      .map(ms => {
+                        const adj = ms.target - (row.vendor.monthlyTargetVideos || 0);
+                        return (
+                          <span key={ms.month}>
+                            {/* 月份那一小段要綁在一起，不然會斷成行尾「− 08」＋下一行「月補交 2」。
+                                後面括號裡的推導才讓它自由換行，整段 nowrap 會爆出卡片 */}
+                            {' '}
+                            <span className="whitespace-nowrap">
+                              {ms.delta >= 0 ? '+' : '−'} {ms.month.slice(5)}月
+                              {ms.untracked ? `補交 ${Math.abs(ms.delta)}` : `未達標 ${Math.ceil(Math.abs(ms.delta))}`}
+                            </span>
+                            {!ms.untracked && `（目標 ${ms.target}${adj !== 0 ? `＝月目標 ${row.vendor.monthlyTargetVideos || 0}${adj > 0 ? '＋加贈' : '−扣片'} ${Math.abs(adj)}` : ''} − 已交 ${ms.delivered}）`}
+                          </span>
+                        );
+                      })}
                     {' '}− 已有庫存 {row.stock}
                     {(row.vendor.deficitEntries?.length || row.vendor.manualDeficitUpdatedAt) && (
                       <span className="ml-1 text-gray-300">
@@ -327,6 +348,14 @@ export default function ShootBookings() {
                           : `起始校正於 ${row.vendor.manualDeficitUpdatedAt!.slice(0, 10)}`}
                       </span>
                     )}
+                  </p>
+                  {/* 使用者最常問「沒填當月欠片，系統會不會自己依上片狀態算」：會，但只從錨點月起算，更早的一律不回頭補算。
+                      沒有任何回填紀錄時錨點就是當月，等於歷史全部當 0，這點一定要講白，不然數字會被誤以為含歷史。 */}
+                  <p className="text-[10px] text-gray-300 mt-0.5">
+                    {row.breakdown.autoTrackedFrom.replace('-', '/')} 起依貼文管理的已發布／已排程自動累加；
+                    {(row.vendor.deficitEntries?.length || row.vendor.manualDeficitUpdatedAt)
+                      ? '更早的月份以手動回填紀錄為準'
+                      : '更早的月份沒有回填紀錄，一律當 0（系統不會回頭補算）'}
                   </p>
                   {row.breakdown.gapMonths.length > 0 && (
                     <p className="text-[10px] text-amber-600 mt-1">
@@ -565,6 +594,12 @@ export default function ShootBookings() {
                   <div className="space-y-2">
                     {entries.map((e, idx) => {
                       const originalIndex = (liveVendor.deficitEntries || []).indexOf(e);
+                      // 拿系統依貼文管理的實算值做對照：手填數字一旦存在，該月就以手填為準、之後改貼文歸屬月也不會連動，
+                      // 所以要把「系統會算成幾支」擺出來，落差才看得見（同月可能有多筆加減，只在正數那筆比對）
+                      const sysTarget = getEffectiveMonthlyTarget(liveVendor, e.month);
+                      const sysDelivered = getDeliveredVideosInMonth(liveVendor.id, posts, e.month);
+                      const sysShortfall = sysTarget - sysDelivered;
+                      const diverges = e.owed >= 0 && sysShortfall !== e.owed;
                       return (
                         <div key={idx} className="flex items-start justify-between gap-2 p-3 bg-[#F5F5F0] rounded-xl text-sm">
                           <div>
@@ -575,6 +610,10 @@ export default function ShootBookings() {
                               ) : (
                                 <span className="ml-2 text-green-600">沖銷 {Math.abs(e.owed)} 支</span>
                               )}
+                            </div>
+                            <div className={cn('text-[11px] mt-0.5', diverges ? 'text-amber-600' : 'text-gray-400')}>
+                              {diverges ? '⚠ ' : ''}系統實算 {sysShortfall} 支（目標 {sysTarget} − 已交 {sysDelivered}）
+                              {diverges ? '，以上面手填的為準' : ''}
                             </div>
                             {e.note && <div className="text-xs text-gray-500 mt-0.5">{e.note}</div>}
                           </div>

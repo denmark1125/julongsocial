@@ -40,6 +40,8 @@ export default function VendorManagement() {
   const [pauseModalVendor, setPauseModalVendor] = useState<Vendor | null>(null);
   const [pauseFromInput, setPauseFromInput] = useState('');
   const [pauseUntilInput, setPauseUntilInput] = useState('');
+  const [endModalVendor, setEndModalVendor] = useState<Vendor | null>(null);
+  const [endedAtInput, setEndedAtInput] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     socialAccounts: [{ platform: 'IG', username: '', password: '' }],
@@ -200,6 +202,7 @@ export default function VendorManagement() {
         await addDoc(collection(db, 'vendors'), data);
         toast.success('廠商資料已建立');
       }
+
       setIsModalOpen(false);
       setEditingVendor(null);
       setFormData({ 
@@ -222,11 +225,22 @@ export default function VendorManagement() {
     }
   };
 
-  const handleEndCooperation = async (id: string) => {
-    if (!window.confirm('確定要終止與此廠商的合作嗎？資料會保留在資料庫，但不會再出現在其他頁面的選單與追蹤中。')) return;
+  const openEndModal = (vendor: Vendor) => {
+    setEndModalVendor(vendor);
+    setEndedAtInput(vendor.endedAt || format(new Date(), 'yyyy-MM-dd'));
+  };
+
+  const handleConfirmEnd = async () => {
+    if (!endModalVendor?.id) return;
+    if (!endedAtInput) {
+      toast.error('請輸入終止合作日期');
+      return;
+    }
     try {
-      await updateDoc(doc(db, 'vendors', id), { status: 'ended' });
+      await updateDoc(doc(db, 'vendors', endModalVendor.id), { status: 'ended', endedAt: endedAtInput });
       toast.success('已終止合作');
+      setEndModalVendor(null);
+      setEndedAtInput('');
     } catch (error) {
       toast.error('操作失敗');
     }
@@ -241,7 +255,8 @@ export default function VendorManagement() {
       const closedHistory = history.length > 0 && !history[history.length - 1].until
         ? history.map((rec, i) => i === history.length - 1 ? { ...rec, until: today } : rec)
         : history;
-      await updateDoc(doc(db, 'vendors', id), { status: 'active', pausedUntil: '', pauseHistory: closedHistory });
+      // endedAt 一併清掉，否則從「已終止」恢復後，終止月(含)之後仍會被當成不追蹤
+      await updateDoc(doc(db, 'vendors', id), { status: 'active', pausedUntil: '', endedAt: '', pauseHistory: closedHistory });
       toast.success('已恢復合作');
     } catch (error) {
       toast.error('操作失敗');
@@ -437,7 +452,7 @@ export default function VendorManagement() {
                 )}
                 {statusTab !== 'ended' && (
                   <button
-                    onClick={() => handleEndCooperation(vendor.id!)}
+                    onClick={() => openEndModal(vendor)}
                     className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
                     title="終止合作"
                   >
@@ -476,7 +491,7 @@ export default function VendorManagement() {
                 {statusTab === 'ended' && (
                   <div className="flex items-center text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-lg border border-gray-200 w-fit">
                     <PowerOff size={12} className="mr-1" />
-                    <span>已終止合作</span>
+                    <span>已終止合作{vendor.endedAt ? `（${vendor.endedAt}）` : ''}</span>
                   </div>
                 )}
                 {vendor.editorName && (
@@ -1119,6 +1134,56 @@ export default function VendorManagement() {
                   className="bg-cyan-600 text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-cyan-700"
                 >
                   確定冷凍
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {endModalVendor && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-3xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-red-50/50">
+              <h3 className="text-xl font-bold serif text-red-600 flex items-center">
+                <PowerOff size={20} className="mr-2" /> 終止合作
+              </h3>
+              <button onClick={() => setEndModalVendor(null)} className="p-2 hover:bg-white rounded-full transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-600">
+                終止與 <span className="font-bold">{endModalVendor.name}</span> 的合作。資料會保留，排片選單不再出現這家廠商。
+              </p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">終止合作日期</label>
+                <input
+                  type="date"
+                  value={endedAtInput}
+                  onChange={(e) => setEndedAtInput(e.target.value)}
+                  className="w-full p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-red-400"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  這個日期所屬的月份（含）起不再累計新目標與欠片。可以填之前的日期回溯。
+                </p>
+              </div>
+              <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+                <p className="text-xs text-amber-800">
+                  既有欠片不會消失：拍攝進度頁會繼續顯示這家廠商，之後補拍補發的影音一樣會沖銷欠片，等欠片清到 0 才會自動從清單消失。
+                </p>
+              </div>
+              <div className="flex justify-end space-x-3 pt-2">
+                <button
+                  onClick={() => setEndModalVendor(null)}
+                  className="px-6 py-2 text-gray-500 font-medium"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleConfirmEnd}
+                  className="bg-red-500 text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-red-600"
+                >
+                  確定終止
                 </button>
               </div>
             </div>
