@@ -275,17 +275,43 @@ export function getDeficitBreakdown(
 // 這部分會透過「已交」被算進它排定的那個月，不會漏算也不會跟庫存重複算。
 type StockAsset = Pick<Asset, 'vendorId' | 'type' | 'status' | 'usedInPostId' | 'stage'>;
 
+export interface PostIndex {
+  draftPostIds: Set<string | undefined>;
+  allPostIds: Set<string | undefined>;
+}
+
+export function buildPostIndex(posts: Pick<Post, 'id' | 'status'>[]): PostIndex {
+  return {
+    draftPostIds: new Set(posts.filter(p => p.status === 'draft').map(p => p.id)),
+    allPostIds: new Set(posts.map(p => p.id)),
+  };
+}
+
+// 這支素材現在是不是「還可以用」——庫存要不要算它、排程選單能不能挑到它，都用這一條，
+// 不要各處自己寫 status==='available'，不然兩邊會對不起來。
+export function isAssetFree(asset: Pick<Asset, 'status' | 'usedInPostId'>, index: PostIndex): boolean {
+  if (asset.status === 'available') return true;
+  if (asset.status !== 'used' || !asset.usedInPostId) return false;
+  // 掛在草稿貼文＝還沒定案，隨時可能被刪或換素材，素材其實還沒真的離開庫存
+  if (index.draftPostIds.has(asset.usedInPostId)) return true;
+  // 掛的貼文已經不存在了（被刪掉）＝自動放回庫存。
+  // 舊版沒有這條，貼文一刪素材就永遠卡在 used、排程選單再也挑不到，等於按錯一次就報廢一支成片。
+  // 寫成自癒判斷而不是跑 migration，這樣既有卡住的素材會自己回來，之後萬一還有漏網的路徑也不會再累積。
+  if (!index.allPostIds.has(asset.usedInPostId)) return true;
+  return false;
+}
+
 export function getAvailableVideoAssets<A extends StockAsset>(
   vendorId: string,
   assets: A[],
   posts: Pick<Post, 'id' | 'status'>[]
 ): A[] {
-  const draftPostIds = new Set(posts.filter(p => p.status === 'draft').map(p => p.id));
+  const index = buildPostIndex(posts);
 
   return assets.filter(a =>
     a.vendorId === vendorId &&
     a.type === 'video' &&
-    (a.status === 'available' || (a.status === 'used' && !!a.usedInPostId && draftPostIds.has(a.usedInPostId)))
+    isAssetFree(a, index)
   );
 }
 

@@ -49,6 +49,8 @@ export default function ShootBookings() {
   const [dateInput, setDateInput] = useState(new Date().toISOString().split('T')[0]);
   const [countInput, setCountInput] = useState(1);
   const [deficitModalVendor, setDeficitModalVendor] = useState<Vendor | null>(null);
+  // 哪一張卡片正在展開欠片算式（一次只開一張，卡片才不會整排被撐長）
+  const [openBreakdownId, setOpenBreakdownId] = useState<string | null>(null);
   const [deficitMonth, setDeficitMonth] = useState(currentMonthDefault());
   const [deficitOwed, setDeficitOwed] = useState(1);
   const [deficitNote, setDeficitNote] = useState('');
@@ -320,6 +322,21 @@ export default function ShootBookings() {
                   <p className="text-4xl font-bold leading-none mt-1">
                     {row.owed} <span className="text-sm font-normal text-gray-400">支 Reels</span>
                   </p>
+                  {/* 預設只給一行結論：欠多少、手上有多少。完整推導收在「怎麼算的」裡——
+                      整串算式攤在卡片上大家看了霧煞煞，但要查帳時又非有不可，所以是收合不是刪掉。
+                      庫存是整數，所以 ceil(總短缺)−庫存 跟 owed 的 ceil(總短缺−庫存) 一定相等，不會對不起來。 */}
+                  <div className="flex items-baseline gap-2 mt-1.5 flex-wrap">
+                    <p className="text-[10.5px] text-gray-400">
+                      累積欠 {Math.max(0, Math.ceil(row.breakdown.totalShortfall))} 支 − 手上庫存 {row.stock} 支
+                    </p>
+                    <button
+                      onClick={() => setOpenBreakdownId(openBreakdownId === row.vendor.id ? null : row.vendor.id!)}
+                      className="text-[10.5px] font-bold text-gray-400 hover:text-[#5A5A40] underline decoration-dotted underline-offset-2 shrink-0"
+                    >
+                      {openBreakdownId === row.vendor.id ? '收合' : '怎麼算的'}
+                    </button>
+                  </div>
+                  {openBreakdownId === row.vendor.id && (
                   <p className="text-[10.5px] text-gray-400 mt-1.5">
                     起始欠 {row.baseline}
                     {row.breakdown.monthlyShortfalls
@@ -340,23 +357,28 @@ export default function ShootBookings() {
                           </span>
                         );
                       })}
-                    {' '}− 已有庫存 {row.stock}
+                    {/* 同理要綁在一起，不然會斷成「− 已有庫」＋下一行「存 4」 */}
+                    {' '}<span className="whitespace-nowrap">− 已有庫存 {row.stock}</span>
                     {(row.vendor.deficitEntries?.length || row.vendor.manualDeficitUpdatedAt) && (
-                      <span className="ml-1 text-gray-300">
+                      <span className="ml-1 text-gray-300 whitespace-nowrap">
                         ・{row.vendor.deficitEntries?.length
                           ? `已回填 ${row.vendor.deficitEntries.length} 個月`
                           : `起始校正於 ${row.vendor.manualDeficitUpdatedAt!.slice(0, 10)}`}
                       </span>
                     )}
                   </p>
+                  )}
                   {/* 使用者最常問「沒填當月欠片，系統會不會自己依上片狀態算」：會，但只從錨點月起算，更早的一律不回頭補算。
                       沒有任何回填紀錄時錨點就是當月，等於歷史全部當 0，這點一定要講白，不然數字會被誤以為含歷史。 */}
-                  <p className="text-[10px] text-gray-300 mt-0.5">
-                    {row.breakdown.autoTrackedFrom.replace('-', '/')} 起依貼文管理的已發布／已排程自動累加；
-                    {(row.vendor.deficitEntries?.length || row.vendor.manualDeficitUpdatedAt)
-                      ? '更早的月份以手動回填紀錄為準'
-                      : '更早的月份沒有回填紀錄，一律當 0（系統不會回頭補算）'}
-                  </p>
+                  {openBreakdownId === row.vendor.id && (
+                    <p className="text-[10px] text-gray-300 mt-0.5">
+                      {row.breakdown.autoTrackedFrom.replace('-', '/')} 起依貼文管理的已發布／已排程自動累加；
+                      {(row.vendor.deficitEntries?.length || row.vendor.manualDeficitUpdatedAt)
+                        ? '更早的月份以手動回填紀錄為準'
+                        : '更早的月份沒有回填紀錄，一律當 0（系統不會回頭補算）'}
+                    </p>
+                  )}
+                  {/* gapMonths 是「有月份沒回填、數字可能不準」的警告，不能藏在收合裡 */}
                   {row.breakdown.gapMonths.length > 0 && (
                     <p className="text-[10px] text-amber-600 mt-1">
                       ⚠ {row.breakdown.gapMonths.join('、')} 尚未回填，暫不計入合計

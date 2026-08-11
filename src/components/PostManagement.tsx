@@ -40,7 +40,7 @@ import { format, isPast, isToday, addDays, parseISO, getDay, setHours, setMinute
 import toast from 'react-hot-toast';
 import TrackingExportModal from './TrackingExportModal';
 import { DismissedHabit, MonthlyAdjustment } from '../types';
-import { visibleVendors, trackedVendorsForMonth, getEffectiveMonthlyTarget } from '../lib/vendorStatus';
+import { visibleVendors, trackedVendorsForMonth, getEffectiveMonthlyTarget, isAssetFree, buildPostIndex } from '../lib/vendorStatus';
 import { setPostStatus, togglePostConfirmation, togglePostPlatformPublished } from '../lib/postActions';
 
 import { clsx, type ClassValue } from 'clsx';
@@ -54,6 +54,8 @@ export default function PostManagement() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
+  // 判斷素材還能不能用要看貼文現況（掛在草稿的仍算可用、掛的貼文被刪掉的自動放回），先建索引避免每個 option 都掃一次
+  const postIndex = React.useMemo(() => buildPostIndex(posts), [posts]);
   const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
@@ -992,7 +994,11 @@ export default function PostManagement() {
               <Trash2 className="text-red-500" size={32} />
             </div>
             <h3 className="text-xl font-bold text-center mb-2 serif">確定要刪除嗎？</h3>
-            <p className="text-gray-500 text-center text-sm mb-8">此動作將永久刪除這則貼文，且無法復原。</p>
+            <p className="text-gray-500 text-center text-sm mb-8">
+              此動作將永久刪除這則貼文，且無法復原。
+              <br />
+              <span className="text-green-700">掛在上面的成片素材會自動放回庫存</span>，可以重新排程，不會報廢。
+            </p>
             <div className="flex space-x-3">
               <button 
                 onClick={() => setDeletingPostId(null)}
@@ -1003,8 +1009,18 @@ export default function PostManagement() {
               <button 
                 onClick={async () => {
                   try {
+                    const target = posts.find(p => p.id === deletingPostId);
                     await deleteDoc(doc(db, 'posts', deletingPostId));
-                    toast.success('已刪除貼文');
+                    // 貼文刪掉，掛在上面的素材一定要放回庫存，否則它會永遠停在 used、
+                    // 排程選單再也挑不到，等於按錯一次就報廢一支成片。
+                    // 先刪貼文再放素材：萬一這步失敗，素材變成「掛著一個已不存在的貼文」，
+                    // isAssetFree() 會自動把它當回庫存，不會卡死。
+                    if (target?.assetId && target.assetId !== 'to_be_added') {
+                      await updateDoc(doc(db, 'assets', target.assetId), { status: 'available', usedInPostId: null });
+                      toast.success('已刪除貼文，素材已放回庫存可重新排程');
+                    } else {
+                      toast.success('已刪除貼文');
+                    }
                     setDeletingPostId(null);
                   } catch (error) {
                     toast.error('刪除失敗');
@@ -1228,20 +1244,22 @@ export default function PostManagement() {
                       <option value="">選擇現有素材...</option>
                       <option value="to_be_added" className="text-blue-600 font-bold">✨ 待補上 (稍後上傳)</option>
                       {assets
-                        .filter(a => 
-                          a.vendorId === formData.vendorId && 
+                        .filter(a =>
+                          a.vendorId === formData.vendorId &&
                           a.type === formData.contentType &&
-                          (a.status === 'available' || a.id === formData.assetId) &&
+                          // 用共用的 isAssetFree()，不要自己寫 status==='available'——
+                          // 那樣會漏掉「掛的貼文已被刪掉」的素材，選單永遠挑不到它
+                          (isAssetFree(a, postIndex) || a.id === formData.assetId) &&
                           a.stage === 'finished'
                         )
                         .map(a => (
                           <option key={a.id} value={a.id}>
-                            [{a.category || '未分類'}] {a.title} {a.status === 'used' ? '(已使用)' : ''} {!a.approved ? '(待審核)' : ''}
+                            [{a.category || '未分類'}] {a.title} {!isAssetFree(a, postIndex) ? '(已使用)' : ''} {!a.approved ? '(待審核)' : ''}
                           </option>
                         ))
                       }
                     </select>
-                    {assets.filter(a => a.vendorId === formData.vendorId && a.type === formData.contentType && a.status === 'available' && a.stage === 'finished').length === 0 && (
+                    {assets.filter(a => a.vendorId === formData.vendorId && a.type === formData.contentType && isAssetFree(a, postIndex) && a.stage === 'finished').length === 0 && (
                       <p className="text-[10px] text-red-500 mt-1 font-bold">⚠️ 此廠商目前無可用{formData.contentType === 'video' ? '影片' : '貼文'}成片素材，請先至資料庫上架</p>
                     )}
                   </div>
