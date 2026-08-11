@@ -507,14 +507,22 @@ export default function CalendarView() {
         )}
       </div>
 
-      {selectedPost && (
-        <PostDetailModal 
-          post={selectedPost}
-          vendor={vendors.find(v => v.id === selectedPost.vendorId)}
-          asset={assets.find(a => a.id === selectedPost.assetId)}
-          onClose={() => setSelectedPost(null)}
-        />
-      )}
+      {selectedPost && (() => {
+        // selectedPost 是點開當下拍的快照，在 modal 裡改完狀態不會自己更新；改抓 posts 這份即時資料，
+        // 不然按了「已發布」畫面還停在「草稿」。貼文剛好被別人刪掉時退回快照，modal 才不會突然空掉。
+        const livePost = posts.find(p => p.id === selectedPost.id) || selectedPost;
+        return (
+          <PostDetailModal
+            post={livePost}
+            vendor={vendors.find(v => v.id === livePost.vendorId)}
+            asset={assets.find(a => a.id === livePost.assetId)}
+            // 帶 assets/vendors 進去＝開啟可編輯模式（改狀態要檢查素材審核、要組 webhook）
+            assets={assets}
+            vendors={vendors}
+            onClose={() => setSelectedPost(null)}
+          />
+        );
+      })()}
       {/* Tracking Export Modal */}
       <TrackingExportModal 
         isOpen={isTrackingModalOpen}

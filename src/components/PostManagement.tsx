@@ -41,6 +41,7 @@ import toast from 'react-hot-toast';
 import TrackingExportModal from './TrackingExportModal';
 import { DismissedHabit, MonthlyAdjustment } from '../types';
 import { visibleVendors, trackedVendorsForMonth, getEffectiveMonthlyTarget } from '../lib/vendorStatus';
+import { setPostStatus, togglePostConfirmation, togglePostPlatformPublished } from '../lib/postActions';
 
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -271,100 +272,11 @@ export default function PostManagement() {
     }
   };
 
-  const toggleStatus = async (post: Post, newStatus: PostStatus) => {
-    if (newStatus === 'published') {
-      if (!post.clientConfirmed) {
-        toast.error('必須先經業主審核確認後才可發布');
-        return;
-      }
-      
-      // Check if the linked asset is approved
-      if (post.assetId && post.assetId !== 'to_be_added') {
-        const asset = assets.find(a => a.id === post.assetId);
-        if (asset && !asset.approved) {
-          toast.error('素材尚未通過審核，無法發布');
-          return;
-        }
-      }
-    }
-
-    if (newStatus === 'scheduled') {
-      // Warning if asset not approved, but don't block
-      if (post.assetId && post.assetId !== 'to_be_added') {
-        const asset = assets.find(a => a.id === post.assetId);
-        if (asset && !asset.approved) {
-          toast('提醒：成片素材尚未審核', { icon: '⚠️', duration: 4000 });
-        }
-      }
-    }
-    
-    try {
-      await updateDoc(doc(db, 'posts', post.id!), { status: newStatus });
-      toast.success(`狀態已更新為 ${newStatus}`);
-
-      // Trigger Make Webhook if status is scheduled or published
-      if (newStatus === 'scheduled' || newStatus === 'published') {
-        const vendor = vendors.find(v => v.id === post.vendorId);
-        const webhookData = {
-          action: 'status_change',
-          postId: post.id,
-          status: newStatus,
-          title: post.title,
-          content: post.content,
-          scheduledAt: post.scheduledAt,
-          vendorName: vendor?.name,
-          platforms: post.platforms,
-          type: post.type,
-          contentType: post.contentType
-        };
-
-        // Try calling the proxy first, then fallback to direct call if configured
-        const fetchFn = globalThis.fetch || window.fetch;
-        fetchFn('/api/webhook/make', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(webhookData)
-        }).then(res => {
-          if (!res.ok) throw new Error('Proxy failed');
-        }).catch(err => {
-          console.warn('Webhook proxy failed, checking for direct URL...', err);
-          // Fallback to direct URL if set in environment (VITE_ prefix for client-side)
-          const directUrl = (import.meta as any).env?.VITE_MAKE_WEBHOOK_URL;
-          if (directUrl) {
-            fetchFn(directUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(webhookData)
-            }).catch(e => console.error('Direct webhook call failed', e));
-          }
-        });
-      }
-    } catch (error) {
-      toast.error('更新失敗');
-    }
-  };
-
-  const toggleConfirmation = async (post: Post, field: 'clientConfirmed' | 'internalConfirmed') => {
-    try {
-      await updateDoc(doc(db, 'posts', post.id!), { [field]: !post[field] });
-    } catch (error) {
-      toast.error('更新失敗');
-    }
-  };
-
-  const togglePlatformPublished = async (post: Post, platform: string) => {
-    try {
-      const current = post.publishedPlatforms || [];
-      const updated = current.includes(platform)
-        ? current.filter(p => p !== platform)
-        : [...current, platform];
-      
-      await updateDoc(doc(db, 'posts', post.id!), { publishedPlatforms: updated });
-      toast.success(`${platform} 發布狀態已更新`);
-    } catch (error) {
-      toast.error('更新失敗');
-    }
-  };
+  // 這三個動作的實作搬到 src/lib/postActions.ts 共用，社群日曆的貼文詳情也要用同一套
+  // （發布前必須過業主審核、素材沒審核不能發、排程/發布要打 Make webhook 的規則只留一份）
+  const toggleStatus = (post: Post, newStatus: PostStatus) => setPostStatus(post, newStatus, { assets, vendors });
+  const toggleConfirmation = (post: Post, field: 'clientConfirmed' | 'internalConfirmed') => togglePostConfirmation(post, field);
+  const togglePlatformPublished = (post: Post, platform: string) => togglePostPlatformPublished(post, platform);
 
   const exportToExcel = () => {
     const exportData = posts.map(post => {
