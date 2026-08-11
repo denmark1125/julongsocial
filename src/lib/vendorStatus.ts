@@ -1,13 +1,22 @@
 import { format } from 'date-fns';
 import { Vendor, Asset, Post } from '../types';
 
+// 終止合作的「終止月」(YYYY-MM)：該月(含)之後不再累計任何新目標/短缺。
+// 只有 status='ended' 且有填 endedAt 才有值；沒填 endedAt 的舊資料回 null，交由各處維持「整家立刻不追蹤」的舊行為。
+function getEndedMonth(vendor: Pick<Vendor, 'status' | 'endedAt'>): string | null {
+  if (vendor.status !== 'ended') return null;
+  return vendor.endedAt ? vendor.endedAt.slice(0, 7) : null;
+}
+
 // 該廠商在指定月份的「有效影音目標」= 月目標 + 該月所有加贈/扣片調整加總（不影響其他月份，月份一過自動失效）
-// 合作起始月之前一律回傳0：新客戶還沒開始拍，不該有任何目標/欠片
+// 合作起始月之前、終止月(含)之後，一律回傳0：還沒開始拍/已經不合作了，不該有任何目標/欠片
 export function getEffectiveMonthlyTarget(
-  vendor: Pick<Vendor, 'monthlyTargetVideos' | 'monthlyAdjustments' | 'cooperationStartMonth'>,
+  vendor: Pick<Vendor, 'monthlyTargetVideos' | 'monthlyAdjustments' | 'cooperationStartMonth' | 'status' | 'endedAt'>,
   month: string
 ): number {
   if (vendor.cooperationStartMonth && month < vendor.cooperationStartMonth) return 0;
+  const endedMonth = getEndedMonth(vendor);
+  if (endedMonth && month >= endedMonth) return 0;
   const base = vendor.monthlyTargetVideos || 0;
   const delta = (vendor.monthlyAdjustments || [])
     .filter(a => a.month === month)
@@ -56,8 +65,14 @@ function pauseOverlapsMonth(pauseHistory: Pick<Vendor, 'pauseHistory'>['pauseHis
 // 針對「特定月份」判斷該廠商是否要計入目標/欠片統計：
 // 只要 pauseHistory 裡任一段冷凍區間與該月有重疊，這個月就整月排除（不論當下即時 status 是否已恢復）
 // 合作起始月之前也整月排除（新客戶還沒開始合作）
-export function isVendorTrackedInMonth(vendor: Pick<Vendor, 'status' | 'excludeFromStats' | 'pauseHistory' | 'cooperationStartMonth'>, month: string): boolean {
-  if (vendor.status === 'ended') return false;
+// 已終止：有填 endedAt 就只排除終止月(含)之後，更早的月份照常追蹤（欠片才不會因為按了終止就整段消失）；
+//         沒填 endedAt 的舊資料維持一律排除
+export function isVendorTrackedInMonth(vendor: Pick<Vendor, 'status' | 'excludeFromStats' | 'pauseHistory' | 'cooperationStartMonth' | 'endedAt'>, month: string): boolean {
+  if (vendor.status === 'ended') {
+    const endedMonth = getEndedMonth(vendor);
+    if (!endedMonth) return false;
+    if (month >= endedMonth) return false;
+  }
   if (vendor.excludeFromStats) return false;
   if (vendor.cooperationStartMonth && month < vendor.cooperationStartMonth) return false;
   return !pauseOverlapsMonth(vendor.pauseHistory, month);
@@ -73,8 +88,9 @@ export function trackedVendorsForMonth(vendors: Vendor[], month: string): Vendor
 // 跟 isVendorTrackedInMonth / trackedVendors 的差別：那兩個都會用「現在即時 status」把冷凍中的廠商整批擋掉，
 // 但冷凍中如果之前留有欠片，一樣要看得到、要能繼續管理/沖銷，不能因為還沒解凍就從清單消失；
 // 「這個月」本身不會疊加新短缺的邏輯在 getDeficitBreakdown 內部已經正確處理（用 isVendorTrackedInMonth 判斷）。
-export function hasVideoTrackingScope(vendor: Pick<Vendor, 'status' | 'excludeFromStats' | 'monthlyTargetVideos' | 'cooperationStartMonth'>, month: string): boolean {
-  if (vendor.status === 'ended') return false;
+// 已終止但有填 endedAt 的一樣留在清單裡（跟冷凍中同待遇），欠片沖銷到0之後才會被呼叫端的 owed===0 過濾掉。
+export function hasVideoTrackingScope(vendor: Pick<Vendor, 'status' | 'excludeFromStats' | 'monthlyTargetVideos' | 'cooperationStartMonth' | 'endedAt'>, month: string): boolean {
+  if (vendor.status === 'ended' && !getEndedMonth(vendor)) return false;
   if (vendor.excludeFromStats) return false;
   if ((vendor.monthlyTargetVideos || 0) <= 0) return false;
   if (vendor.cooperationStartMonth && month < vendor.cooperationStartMonth) return false;
@@ -91,11 +107,13 @@ export function getMonthWeekBucket(date: Date): number {
 }
 
 // 該廠商在指定日期所屬區段的「每週目標支數」：有設定週分佈就用該段，沒有就用月目標平均攤提
-// 合作起始月之前、或當下正在冷凍中，一律回傳0（沒開始合作/暫停合作，沒有節奏可言）——
+// 合作起始月之前、終止月(含)之後、或當下正在冷凍中，一律回傳0（沒開始合作/已終止/暫停合作，沒有節奏可言）——
 // 不然會出現「這個月不列入欠片統計，但撐幾天/催片提醒卻還是照正常節奏算」的自相矛盾
-export function getWeeklyPace(vendor: Pick<Vendor, 'weeklyPattern' | 'monthlyTargetVideos' | 'cooperationStartMonth' | 'pauseHistory'>, date: Date = new Date()): number {
+export function getWeeklyPace(vendor: Pick<Vendor, 'weeklyPattern' | 'monthlyTargetVideos' | 'cooperationStartMonth' | 'pauseHistory' | 'status' | 'endedAt'>, date: Date = new Date()): number {
   const month = format(date, 'yyyy-MM');
   if (vendor.cooperationStartMonth && month < vendor.cooperationStartMonth) return 0;
+  const endedMonth = getEndedMonth(vendor);
+  if (endedMonth && month >= endedMonth) return 0;
   if (pauseOverlapsMonth(vendor.pauseHistory, month)) return 0;
   const pattern = vendor.weeklyPattern;
   if (pattern && pattern.length === 4) {
@@ -106,7 +124,7 @@ export function getWeeklyPace(vendor: Pick<Vendor, 'weeklyPattern' | 'monthlyTar
 }
 
 // 目前庫存量還能撐幾天；沒有設定任何發片目標時無法評估，回傳 null
-export function getStockRunwayDays(vendor: Pick<Vendor, 'weeklyPattern' | 'monthlyTargetVideos' | 'cooperationStartMonth' | 'pauseHistory'>, stock: number, date: Date = new Date()): number | null {
+export function getStockRunwayDays(vendor: Pick<Vendor, 'weeklyPattern' | 'monthlyTargetVideos' | 'cooperationStartMonth' | 'pauseHistory' | 'status' | 'endedAt'>, stock: number, date: Date = new Date()): number | null {
   const weeklyPace = getWeeklyPace(vendor, date);
   if (weeklyPace <= 0) return null;
   return stock / (weeklyPace / 7);
@@ -135,14 +153,24 @@ function prevMonth(month: string): string {
   return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
 }
 
+export interface MonthlyShortfall {
+  month: string;
+  target: number;
+  delivered: number;
+  delta: number;
+  expectedByNow?: number; // 只有「進行中的當月」那筆會有值
+  untracked?: boolean;    // true＝冷凍/終止月：不計新目標，該月交付純粹拿來沖銷歷史欠片（delta 必為 0 或負數）
+}
+
 export interface DeficitBreakdown {
   baseline: number; // 歷史債總額（deficitEntries 加總，或舊版 manualDeficitBaseline）
-  monthlyShortfalls: { month: string; target: number; delivered: number; delta: number; expectedByNow?: number }[]; // 即時追蹤的月份短缺明細（從最後一筆明細的下個月起連續累加到現在，可能為負＝該月超額交付）；expectedByNow只有「進行中的當月」那筆會有值
+  monthlyShortfalls: MonthlyShortfall[]; // 從最後一筆明細的下個月起連續累加到現在的逐月明細（可能為負＝該月超額交付或冷凍期補交）
   totalShortfall: number; // baseline + monthlyShortfalls 加總（還沒扣庫存）
+  autoTrackedFrom: string; // 從這個月(YYYY-MM)起才依貼文管理實際發布狀況自動累加；更早的月份一律以手動回填紀錄為準，系統不會回頭補算
   gapMonths: string[]; // 填過的月份「中間」還缺的月份（例如填了2月跟6月但漏了3~5月），純粹提醒還沒回填，不計入總數；最後一筆之後到現在的月份不算在這裡，那段是連續自動累加的
 }
 
-type OwedVendor = Pick<Vendor, 'id' | 'weeklyPattern' | 'monthlyTargetVideos' | 'manualDeficitBaseline' | 'manualDeficitUpdatedAt' | 'deficitEntries' | 'monthlyAdjustments' | 'status' | 'excludeFromStats' | 'pauseHistory' | 'cooperationStartMonth'>;
+type OwedVendor = Pick<Vendor, 'id' | 'weeklyPattern' | 'monthlyTargetVideos' | 'manualDeficitBaseline' | 'manualDeficitUpdatedAt' | 'deficitEntries' | 'monthlyAdjustments' | 'status' | 'excludeFromStats' | 'pauseHistory' | 'cooperationStartMonth' | 'endedAt'>;
 type OwedPost = Pick<Post, 'vendorId' | 'contentType' | 'status' | 'targetMonth' | 'scheduledAt'>;
 
 // 進行中的當月「照週節奏累積到今天應該交幾支」，取代整月目標去跟已交比較——
@@ -172,6 +200,16 @@ function getExpectedDeliveredSoFar(weeklyPattern: number[] | undefined, effectiv
 //    只有填過的月份「中間」缺的（例如填了2月跟6月但漏了3~5月）才會被列進 gapMonths 提醒，不計入總數。
 // 2) 舊版 manualDeficitBaseline 單一數字：同樣邏輯，從 manualDeficitUpdatedAt 校正當下那個月起連續自動累加到現在
 //    （相容尚未遷移的舊資料）。
+// 該廠商在某個月「已交」的影音支數：影音 + 已發布/已排程 + 歸屬月落在該月（沒填 targetMonth 才退回用排程日判斷）。
+// 草稿不算——還沒定案的東西不能當交付。抽出來共用，讓校正彈窗能拿同一套口徑做稽核。
+export function getDeliveredVideosInMonth(vendorId: string | undefined, posts: OwedPost[], month: string): number {
+  return posts.filter(p =>
+    p.vendorId === vendorId && p.contentType === 'video' &&
+    (p.status === 'published' || p.status === 'scheduled') &&
+    (p.targetMonth ? p.targetMonth === month : (p.scheduledAt || '').slice(0, 7) === month)
+  ).length;
+}
+
 export function getDeficitBreakdown(
   vendor: OwedVendor,
   posts: OwedPost[],
@@ -181,15 +219,17 @@ export function getDeficitBreakdown(
   const entries = vendor.deficitEntries || [];
   const currentRealMonth = format(date, 'yyyy-MM');
 
-  const deliveredInMonth = (m: string) => posts.filter(p =>
-    p.vendorId === vendor.id && p.contentType === 'video' &&
-    (p.status === 'published' || p.status === 'scheduled') &&
-    (p.targetMonth ? p.targetMonth === m : (p.scheduledAt || '').slice(0, 7) === m)
-  ).length;
+  const deliveredInMonth = (m: string) => getDeliveredVideosInMonth(vendor.id, posts, m);
 
-  const liveShortfall = (m: string): { month: string; target: number; delivered: number; delta: number; expectedByNow?: number } => {
-    const target = getEffectiveMonthlyTarget(vendor, m);
+  const liveShortfall = (m: string): MonthlyShortfall => {
     const delivered = deliveredInMonth(m);
+    // 冷凍/終止月：這個月不再產生任何新目標，但該月已發布/已排程的影音是實打實的補交，
+    // 要直接沖銷掉歷史欠片。不能整月跳過——素材一發布就從庫存扣掉了，若這裡不認列，
+    // 「還要再拍」會因為補發而不減反增（冷凍期把欠片拍完這件事會永遠做不完）。
+    if (!isVendorTrackedInMonth(vendor, m)) {
+      return { month: m, target: 0, delivered, delta: -delivered, untracked: true };
+    }
+    const target = getEffectiveMonthlyTarget(vendor, m);
     // 只有「進行中的當月」才用prorate，已經過完的月份維持原邏輯(整月目標 vs 已交)，那些月份本來就該交滿
     if (m === month && m === currentRealMonth) {
       const expectedByNow = getExpectedDeliveredSoFar(vendor.weeklyPattern, target, date);
@@ -220,12 +260,11 @@ export function getDeficitBreakdown(
 
   const months = anchorMonth <= month ? monthsBetweenInclusive(anchorMonth, month) : [];
 
-  const monthlyShortfalls = months
-    .filter(m => isVendorTrackedInMonth(vendor, m)) // 冷凍月不計入短缺
-    .map(liveShortfall);
+  // 冷凍/終止月不再整月剔除——改由 liveShortfall 內部給「目標0、交付照算」，讓補交能沖銷欠片
+  const monthlyShortfalls = months.map(liveShortfall);
 
   const totalShortfall = baseline + monthlyShortfalls.reduce((s, x) => s + x.delta, 0);
-  return { baseline, monthlyShortfalls, totalShortfall, gapMonths };
+  return { baseline, monthlyShortfalls, totalShortfall, gapMonths, autoTrackedFrom: anchorMonth };
 }
 
 // 算庫存的影音素材：不是單純看 status==='available'。
@@ -279,7 +318,7 @@ export interface VideoStockAlert {
 // 判斷邏輯：積欠>0，或合計都撐不到2週 → 真的不夠，最急迫，要安排拍攝；
 //          不欠、合計夠但成片撐不到2週 → 素材躺著沒剪，去催剪輯師優先處理即可，不必額外約拍。
 export function getVideoStockAlert(
-  vendor: Pick<Vendor, 'weeklyPattern' | 'monthlyTargetVideos' | 'cooperationStartMonth' | 'pauseHistory'>,
+  vendor: Pick<Vendor, 'weeklyPattern' | 'monthlyTargetVideos' | 'cooperationStartMonth' | 'pauseHistory' | 'status' | 'endedAt'>,
   vendorVideoAssets: Pick<Asset, 'stage'>[],
   owed: number = 0,
   date: Date = new Date()

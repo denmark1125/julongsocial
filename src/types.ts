@@ -134,6 +134,8 @@ export interface Vendor {
   selfPublishing?: boolean; // Vendor publishes by themselves
   status?: 'active' | 'paused' | 'ended'; // 不填視同 active
   pausedUntil?: string;     // YYYY-MM-DD，冷凍期預計恢復日（僅 status='paused' 時有意義）
+  endedAt?: string;         // YYYY-MM-DD 終止合作日期（僅 status='ended' 時有意義）。該日所屬月份(含)起不再累計新目標/短缺，
+                            // 但既有欠片仍看得到、仍可用後續交付沖銷；沒填這欄的舊資料維持「整家立刻從追蹤中消失」的舊行為
   createdBy: string;
   createdAt: string;
 }
