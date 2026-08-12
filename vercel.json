@@ -16,7 +16,7 @@
       "schedule": "0 1 * * *"
     },
     {
-      "path": "/api/cron/flow-stale-push",
+      "path": "/api/cron/flow-digest-push",
       "schedule": "30 1 * * *"
     }
   ]

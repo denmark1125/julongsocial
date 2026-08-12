@@ -434,11 +434,15 @@ async function getStockAlertRecipients(): Promise<string[]> {
 // 等工作流跑順、大家習慣用系統之後，再把 roles 換成註解裡寫的真正對象即可，呼叫端不用改。
 type FlowNotifyKind = "submitted" | "uploaded" | "client_slow" | "due_soon";
 
+// ⚠️ 四種都還寫死 engineer，等於全部塞給老闆一個人 —— 這是「LINE 好吵」的第三個原因。
+// 角色路由（藏鏡人／小編）還沒做，之後要拆的話改這裡就好。
+// client_slow / due_soon 目前**沒有任何地方會送出**（卡關提醒已於 2026-08-12 拿掉），
+// 型別與文案留著是為了將來要加回來時不用重寫。
 const FLOW_NOTIFY_ROLES: Record<FlowNotifyKind, string[]> = {
   submitted: ["engineer"],   // 未來：藏鏡人 —— 有新片轉成片了，拿去給業主審
   uploaded: ["engineer"],    // 未來：小編 —— 雲端已上傳，可以排程了
-  client_slow: ["engineer"], // 未來：藏鏡人／小編 —— 業主拖太久了，去催
-  due_soon: ["engineer"],    // 未來：小編＋老闆 —— 快到發布日卻還沒片
+  client_slow: ["engineer"], // 停用中
+  due_soon: ["engineer"],    // 停用中
 };
 
 const FLOW_NOTIFY_STYLE: Record<FlowNotifyKind, { title: string; color: string }> = {
@@ -569,70 +573,80 @@ app.post("/api/notify/flow-event", async (req, res) => {
 
 // 每日掃「卡住的片」：業主拖太久、以及快到發布日卻還沒走到可排程。
 // 這是老闆最痛的那一刀——過去要等小編排程時才發現沒片，那時候已經來不及了。
-async function buildFlowStaleMessage(): Promise<any | null> {
+// 每日交片彙總：昨天到今天有哪些片「交片送審」或「上傳雲端」，一天推一則。
+//
+// 為什麼不再即時推：老闆 2026-08-12 回報「LINE 好吵」，剪輯師每轉一支成片就跳一則。
+// 交片這件事本身不急（球在業主那邊，我們也不是收到通知就馬上能做什麼），彙總成一則就夠。
+//
+// 為什麼卡關提醒(業主遲遲未回覆／快到發布日)整個拿掉：老闆 2026-08-12 決定不要這種提醒。
+// 原本的實作還有兩個 bug 讓它特別吵——沒有排除「不列入統計/冷凍中/已終止」的廠商
+// （實測 32 張卡有 31 張是秀姨、小馬的練習片跟已終止的二寶P媽），而且每天重推同一批、
+// 完全沒有去重（有一支已經連推 89 天）。整條拿掉之後這兩個問題自然消失。
+// ⚠️ 如果哪天要把「快到發布日還沒片」加回來，記得先做廠商過濾跟去重，不然會重演。
+async function buildFlowDigestMessage(): Promise<any | null> {
   const [assetsSnap, postsSnap, vendorsSnap] = await Promise.all([
     adminDb.collection("assets").get(),
     adminDb.collection("posts").get(),
     adminDb.collection("vendors").get(),
   ]);
   const posts = postsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
-  const vendorName = (id: string) => vendorsSnap.docs.find((d: any) => d.id === id)?.data()?.name || "未知IP";
   const postById = new Map(posts.map((p: any) => [p.id, p]));
-  const settledPostIds = new Set(
-    posts.filter((p: any) => p.status === "scheduled" || p.status === "published").map((p: any) => p.id)
-  );
+
+  // 只推「還在跑的客戶」。不列入統計(秀姨/小馬等內部練習帳號)、冷凍中、已終止的一律不吵。
+  // 這是原本卡關提醒最大的雜訊來源，新的彙總不能再犯。
+  const today = new Date().toISOString().slice(0, 10);
+  const activeVendor = new Map<string, string>();
+  for (const d of vendorsSnap.docs) {
+    const v: any = d.data();
+    if (v.excludeFromStats) continue;
+    if (v.status === "ended") continue;
+    if (v.status === "paused" && (!v.pausedUntil || v.pausedUntil > today)) continue;
+    activeVendor.set(d.id, v.name || "未知IP");
+  }
 
   const now = new Date();
-  const dayMs = 24 * 60 * 60 * 1000;
-  const bubbles: any[] = [];
+  const since = now.getTime() - 24 * 60 * 60 * 1000;
+  const inWindow = (iso?: string) => !!iso && new Date(iso).getTime() >= since;
 
+  const bubbles: any[] = [];
   for (const d of assetsSnap.docs) {
     const asset: any = { id: d.id, ...d.data() };
-    if (asset.type !== "video" || asset.status === "archived") continue;
-    if (asset.usedInPostId && settledPostIds.has(asset.usedInPostId)) continue;
+    if (asset.type !== "video" || asset.status === "archived" || asset.voidedAt) continue;
+    const vName = activeVendor.get(asset.vendorId);
+    if (!vName) continue;
 
-    const stage = deriveFlowStage(asset);
-    if (stage === "ready") continue;
-
-    const since = asset.flowSince || asset.submittedAt || asset.createdAt;
-    const days = since ? Math.max(0, Math.floor((now.getTime() - new Date(since).getTime()) / dayMs)) : 0;
-    const post: any = asset.usedInPostId ? postById.get(asset.usedInPostId) : null;
-    const scheduledAt = post?.scheduledAt || null;
-    const daysUntilDue = scheduledAt
-      ? Math.floor((new Date(scheduledAt).getTime() - now.getTime()) / dayMs)
-      : null;
-
-    // 一支片只推一則，快到期比業主拖延更急，優先報快到期
-    let kind: FlowNotifyKind | null = null;
-    if (daysUntilDue !== null && daysUntilDue <= DUE_SOON_DAYS) kind = "due_soon";
-    else if (stage === "client_review" && days >= CLIENT_REVIEW_SLOW_DAYS) kind = "client_slow";
+    // 一支片同一天可能又送審又上傳，以較後面那一棒為準，只推一張卡
+    const kind: FlowNotifyKind | null = inWindow(asset.cloudUploadedAt)
+      ? "uploaded"
+      : inWindow(asset.submittedAt)
+        ? "submitted"
+        : null;
     if (!kind) continue;
 
+    const post: any = asset.usedInPostId ? postById.get(asset.usedInPostId) : null;
     bubbles.push({
       kind,
       bubble: buildFlowBubble(kind, {
-        vendorName: vendorName(asset.vendorId),
+        vendorName: vName,
         title: asset.title || "(未命名素材)",
-        stageLabel: FLOW_STAGE_LABEL[stage] || "未知",
-        scheduledAt,
-        days,
-        note: stage === "revising" ? asset.revisionNote : null,
+        stageLabel: FLOW_STAGE_LABEL[deriveFlowStage(asset)] || "未知",
+        scheduledAt: post?.scheduledAt || null,
         revisionCount: asset.revisionCount,
       }),
     });
   }
 
   if (bubbles.length === 0) return null;
-  // LINE carousel 上限 12 個 bubble，超過就截斷（最急的已經排在前面）
-  const ordered = [...bubbles.filter(b => b.kind === "due_soon"), ...bubbles.filter(b => b.kind !== "due_soon")].slice(0, 12);
+  // 可排程的排前面（那是小編真的能動手的），LINE carousel 上限 12
+  const ordered = [...bubbles.filter(b => b.kind === "uploaded"), ...bubbles.filter(b => b.kind !== "uploaded")].slice(0, 12);
   return {
     type: "flex",
-    altText: `【聚浪製作進度】${bubbles.length} 支片卡住了，請確認`,
+    altText: `【聚浪製作進度】今日交片 ${bubbles.length} 支`,
     contents: { type: "carousel", contents: ordered.map(b => b.bubble) },
   };
 }
 
-app.get("/api/cron/flow-stale-push", async (req, res) => {
+app.get("/api/cron/flow-digest-push", async (req, res) => {
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret || req.headers.authorization !== `Bearer ${cronSecret}`) {
     return res.status(401).json({ error: "unauthorized" });
@@ -640,25 +654,24 @@ app.get("/api/cron/flow-stale-push", async (req, res) => {
   if (!adminDb) return res.status(500).json({ error: "Firebase Admin not initialized" });
 
   try {
-    const message = await buildFlowStaleMessage();
-    if (!message) return res.json({ pushed: false, reason: "nothing stuck" });
+    const message = await buildFlowDigestMessage();
+    if (!message) return res.json({ pushed: false, reason: "no handoffs today" });
 
-    // 兩種卡關事件的收件人目前相同，取聯集推一次就好
     const recipients = await getRecipientsByRoles(
-      [...new Set([...FLOW_NOTIFY_ROLES.client_slow, ...FLOW_NOTIFY_ROLES.due_soon])]
+      [...new Set([...FLOW_NOTIFY_ROLES.submitted, ...FLOW_NOTIFY_ROLES.uploaded])]
     );
     if (recipients.length === 0) return res.json({ pushed: false, reason: "no recipients bound" });
 
     await Promise.all(recipients.map((to) => sendLinePushMessage(to, message)));
     res.json({ pushed: true, recipientCount: recipients.length });
   } catch (e: any) {
-    console.error("flow-stale-push failed", e);
+    console.error("flow-digest-push failed", e);
     res.status(500).json({ error: e.message || "unknown error" });
   }
 });
 
 // 後台「測試製作進度推播」用，方便驗證不用等隔天排程
-app.post("/api/admin/test-flow-stale-push", async (req, res) => {
+app.post("/api/admin/test-flow-digest-push", async (req, res) => {
   const { idToken } = req.body;
   if (!idToken) return res.status(400).json({ error: "Missing idToken" });
   if (!adminAuth || !adminDb) return res.status(500).json({ error: "Firebase Admin not initialized" });
@@ -670,8 +683,8 @@ app.post("/api/admin/test-flow-stale-push", async (req, res) => {
       return res.status(403).json({ error: "Unauthorized: engineer only" });
     }
 
-    const message = await buildFlowStaleMessage();
-    if (!message) return res.json({ pushed: false, reason: "nothing stuck" });
+    const message = await buildFlowDigestMessage();
+    if (!message) return res.json({ pushed: false, reason: "no handoffs today" });
 
     const recipients = await getRecipientsByRoles(["engineer"]);
     if (recipients.length === 0) return res.json({ pushed: false, reason: "no recipients bound" });
@@ -679,7 +692,7 @@ app.post("/api/admin/test-flow-stale-push", async (req, res) => {
     await Promise.all(recipients.map((to) => sendLinePushMessage(to, message)));
     res.json({ pushed: true, recipientCount: recipients.length, message });
   } catch (error: any) {
-    console.error("test-flow-stale-push failed", error);
+    console.error("test-flow-digest-push failed", error);
     res.status(500).json({ error: error.message || "Unknown error occurred" });
   }
 });

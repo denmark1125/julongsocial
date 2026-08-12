@@ -9,7 +9,6 @@ import {
   getFlowDaysStuck,
   getFlowDueInfo,
   isFlowStale,
-  notifyFlowEvent,
   sortFlowColumn,
 } from '../lib/assetFlow';
 import {
@@ -429,10 +428,8 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
         })
       );
       toast.success(msg);
-      // 交棒完成才通知下一棒的人。這就是取代「小編用 LINE 追片況」的那一步。
-      // 不 await：通知是盡力而為（失敗自己吞掉 + 每日 cron 會補撈），
-      // 剪輯師不該為了等推播請求而卡在「處理中...」。
-      void notifyFlowEvent(asset.id!, 'submitted');
+      // 這裡故意不推即時通知：老闆 2026-08-12 回報「LINE 好吵」，
+      // 剪輯師每交一支片就跳一則。改由每日 09:30 的 flow-digest-push 彙總成一則。
     } catch (error) {
       console.error('Flow advance failed:', error);
       toast.error('操作失敗，請稍後再試');
@@ -484,7 +481,7 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
           ? '已標記上傳完成，小編可以排程了'
           : '已標記上傳完成，這支列入本月請款'
       );
-      void notifyFlowEvent(asset.id!, 'uploaded');
+      // 同上，不推即時通知，交給每日彙總
     } catch (error) {
       console.error('Mark uploaded failed:', error);
       toast.error('操作失敗，請稍後再試');

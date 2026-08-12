@@ -14,7 +14,7 @@ import {
 import { db, auth } from '../firebase';
 import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking, UserProfile } from '../types';
 import { visibleVendors, trackedVendors, buildPostIndex, getDisplayAssetStatus } from '../lib/vendorStatus';
-import { buildFlowUpdate, notifyFlowEvent } from '../lib/assetFlow';
+import { buildFlowUpdate } from '../lib/assetFlow';
 import { 
   Video, 
   Plus, 
@@ -227,10 +227,7 @@ export default function AssetDatabase() {
         url: conversionUrl || convertingAsset.url || '',
       });
       toast.success('已轉為成片，待業主審核');
-      // 跟剪輯師自己按「轉成片」是同一個交棒事件，一樣要通知下一棒去送業主審。
-      // 不 await：通知是盡力而為（失敗自己吞掉 + 每日 cron 會補撈），
-      // 不能讓使用者為了等一個推播請求卡在畫面上。
-      void notifyFlowEvent(convertingAsset.id!, 'submitted');
+      // 不推即時通知，交給每日 09:30 的彙總（見 server.ts buildFlowDigestMessage）
       setConvertingAsset(null);
       setConversionUrl('');
       setFilterStage('finished');
