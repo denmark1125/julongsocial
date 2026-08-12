@@ -122,6 +122,49 @@ export function buildCloudUploadUpdate(
 }
 
 /**
+ * 剪輯師取消「已上傳雲端」（按錯了、或上傳到一半發現檔案不對）。
+ *
+ * 跟 buildCloudUploadUpdate 對稱的反向動作。之所以非有不可：cloudUploadedAt 一旦寫下去，
+ * 依 firestore.rules 那支素材就**永遠刪不掉**（allow delete 要求它為空），連工程師都不行。
+ * 沒有這條反向路徑，剪輯師按錯一次就得來找我們處理。
+ *
+ * ⚠️ 呼叫端必須自己先擋掉「已納入請款單」的片（editorInvoiceId 有值）——
+ * 那是帳務凍結，不是流程問題。
+ */
+export function buildCloudUploadUndoUpdate(
+  asset: Pick<Asset, 'stage' | 'approved' | 'flowStage' | 'revisionCount' | 'flowLog' | 'cloudUploadedAt'>,
+  opts: AdvanceFlowOptions = {}
+): Record<string, unknown> {
+  const current = deriveFlowStage(asset);
+  const now = opts.now ?? new Date();
+  const nowIso = now.toISOString();
+
+  // ready 的定義是「業主過了 **且** 已上傳」，少一個條件就不該再留在 ready，
+  // 否則它會繼續待在可排程庫存裡，小編排下去才發現雲端根本沒檔案。
+  if (current === 'ready') {
+    return {
+      ...buildFlowUpdate(asset, 'to_upload', { ...opts, note: '取消上傳雲端' }),
+      cloudUploadedAt: '',
+    };
+  }
+
+  // 還沒到 ready（業主還在審）：棒次本來就沒因為上傳而動過，這裡也只要把事實抹掉
+  const entry: FlowLogEntry = {
+    from: current,
+    to: current,
+    at: nowIso,
+    note: '取消上傳雲端',
+  };
+  if (opts.byUid) entry.byUid = opts.byUid;
+  if (opts.byName) entry.byName = opts.byName;
+
+  return {
+    cloudUploadedAt: '',
+    flowLog: [...(asset.flowLog ?? []), entry].slice(-FLOW_LOG_LIMIT),
+  };
+}
+
+/**
  * 交棒完成後發即時 LINE 通知。
  * 通知失敗絕不能讓交棒本身失敗——狀態已經寫進 Firestore 了，
  * 而且每日的 flow-stale cron 還會再撈一次卡住的片，所以這裡只記 log 不擋流程。

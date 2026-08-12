@@ -41,7 +41,10 @@ export function getBillingMonth(asset: Pick<Asset, 'cloudUploadedAt'>): string |
  * EDITOR_BILLING_START_MONTH 之前的片一律排除：那些是這套流程上線前就有 cloudUploadedAt 的存量，
  * 早就用別的方式請過款了。
  */
-export function isBillable(asset: Pick<Asset, 'cloudUploadedAt' | 'editorInvoiceId'>): boolean {
+export function isBillable(asset: Pick<Asset, 'cloudUploadedAt' | 'editorInvoiceId' | 'voidedAt'>): boolean {
+  // 作廢＝這支根本不該存在（多半是建重複了）。不擋在這裡的話，同一個東西的 A/B 兩支都會進請款清單。
+  // ⚠️ 注意「封存」故意不擋：封存是業主暫時不用，剪輯師的工還是要算錢。兩者語意不同，別合併。
+  if (asset.voidedAt) return false;
   if (asset.editorInvoiceId) return false; // 已經請過款
   const month = getBillingMonth(asset);
   return !!month && month >= EDITOR_BILLING_START_MONTH;

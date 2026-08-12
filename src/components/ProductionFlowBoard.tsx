@@ -76,6 +76,8 @@ export default function ProductionFlowBoard({
   const inFlow = assets.filter(a =>
     a.type === 'video' &&
     a.status !== 'archived' &&
+    // 作廢＝這支不該存在（多半是重複建檔），不該再佔看板欄位
+    !a.voidedAt &&
     // 已排程/已發布代表真的用掉了，不再是「在製作中」
     !(a.usedInPostId && settledPostIds.has(a.usedInPostId)) &&
     (vendorFilter === 'all' || a.vendorId === vendorFilter) &&

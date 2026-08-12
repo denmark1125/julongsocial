@@ -273,7 +273,7 @@ export function getDeficitBreakdown(
 // 判斷邏輯（跟月份無關）：available（完全沒掛貼文）＝算庫存；掛在草稿貼文＝也算庫存；
 // 只要掛的貼文已經是「已排程」或「已發布」（不論哪個月），就是真的用掉了，永久從庫存扣掉——
 // 這部分會透過「已交」被算進它排定的那個月，不會漏算也不會跟庫存重複算。
-type StockAsset = Pick<Asset, 'vendorId' | 'type' | 'status' | 'usedInPostId' | 'stage'>;
+type StockAsset = Pick<Asset, 'vendorId' | 'type' | 'status' | 'usedInPostId' | 'stage' | 'voidedAt'>;
 
 export interface PostIndex {
   draftPostIds: Set<string | undefined>;
@@ -295,9 +295,17 @@ export function isAssetOrphaned(asset: Pick<Asset, 'status' | 'usedInPostId'>, i
   return asset.status === 'used' && !!asset.usedInPostId && !index.allPostIds.has(asset.usedInPostId);
 }
 
+// 作廢的素材：庫存、排程選單、請款、剪輯師工作台一律當它不存在。
+// 統一走這一個判斷，不要各處自己寫 !a.voidedAt——素材可不可用有好幾條獨立的路
+// （素材庫顯示/篩選/計數、排程選單、庫存計算、請款清單），只改一條使用者不會有感。
+export function isAssetVoided(asset: Pick<Asset, 'voidedAt'>): boolean {
+  return !!asset.voidedAt;
+}
+
 // 這支素材現在是不是「還可以用」——庫存要不要算它、排程選單能不能挑到它，都用這一條，
 // 不要各處自己寫 status==='available'，不然兩邊會對不起來。
-export function isAssetFree(asset: Pick<Asset, 'status' | 'usedInPostId'>, index: PostIndex): boolean {
+export function isAssetFree(asset: Pick<Asset, 'status' | 'usedInPostId' | 'voidedAt'>, index: PostIndex): boolean {
+  if (isAssetVoided(asset)) return false;
   if (asset.status === 'available') return true;
   if (asset.status !== 'used' || !asset.usedInPostId) return false;
   // 掛在草稿貼文＝還沒定案，隨時可能被刪或換素材，素材其實還沒真的離開庫存
@@ -308,7 +316,9 @@ export function isAssetFree(asset: Pick<Asset, 'status' | 'usedInPostId'>, index
 // 素材庫顯示用的「實際狀態」：孤兒素材要顯示成可使用，不能還掛著已使用的灰底。
 // 注意這裡故意不把「掛在草稿」也算成可使用——那種在素材庫本來就該顯示已使用（它確實連著一則貼文），
 // 只有庫存/排程選單才把它當還能動用。archived 不受影響。
-export function getDisplayAssetStatus<A extends Pick<Asset, 'status' | 'usedInPostId'>>(asset: A, index: PostIndex): A['status'] {
+export function getDisplayAssetStatus<A extends Pick<Asset, 'status' | 'usedInPostId' | 'voidedAt'>>(asset: A, index: PostIndex): A['status'] {
+  // 作廢的維持原狀態顯示（它有自己的分頁跟標籤），不要被改寫成「可使用」
+  if (isAssetVoided(asset)) return asset.status;
   return isAssetOrphaned(asset, index) ? 'available' : asset.status;
 }
 

@@ -4,6 +4,7 @@ import { db, auth } from '../firebase';
 import { Asset, AssetFlowStage, Post, UserProfile, Vendor, deriveFlowStage } from '../types';
 import {
   buildCloudUploadUpdate,
+  buildCloudUploadUndoUpdate,
   buildFlowUpdate,
   getFlowDaysStuck,
   getFlowDueInfo,
@@ -177,7 +178,7 @@ function ClientBadge({ asset }: { asset: Asset }) {
 }
 
 function AssetCard({
-  asset, vendorName, posts, busy, onAdvance, onUpload, showClientBadge,
+  asset, vendorName, posts, busy, onAdvance, onUpload, onUndoUpload, showClientBadge,
 }: {
   // 這個專案沒有安裝 @types/react，JSX.IntrinsicAttributes 不存在，
   // 所以 key 要自己宣告成 prop，否則 tsc 會當成多餘屬性報錯。
@@ -188,6 +189,7 @@ function AssetCard({
   busy: boolean;
   onAdvance?: () => void;
   onUpload?: () => void;
+  onUndoUpload?: () => void;
   showClientBadge?: boolean;
 }) {
   const due = getFlowDueInfo(asset, posts);
@@ -240,6 +242,19 @@ function AssetCard({
       </div>
 
       <FlowSteps asset={asset} busy={busy} onAdvance={onAdvance} onUpload={onUpload} />
+
+      {/* 按錯了要有得反悔。做得低調是刻意的——這是例外操作，不該跟兩個主要步驟搶注意力。
+          已進請款單的不給（帳務凍結），所以那種情況連鈕都不出現。 */}
+      {onUndoUpload && !!asset.cloudUploadedAt && !asset.editorInvoiceId && (
+        <button
+          type="button"
+          onClick={onUndoUpload}
+          disabled={busy}
+          className="mt-2 text-[10px] text-gray-400 hover:text-red-500 underline decoration-dotted underline-offset-2 disabled:opacity-50"
+        >
+          上傳按錯了？取消這個標記
+        </button>
+      )}
     </div>
   );
 }
@@ -352,6 +367,8 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
 
   const myVideos = assets.filter(a =>
     a.type === 'video' &&
+    // 作廢的片不該再出現在剪輯師的工作台，也不會進他的請款清單（見 isBillable）
+    !a.voidedAt &&
     (!myEditorId || !a.editorId || a.editorId === myEditorId) &&
     // 封存＝業主不用這支，我們丟進暫存區。已經上傳過的仍要留著（那是他的請款依據），
     // 還沒做完就被封存的則不該再出現在他的待辦裡。
@@ -418,6 +435,33 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
       void notifyFlowEvent(asset.id!, 'submitted');
     } catch (error) {
       console.error('Flow advance failed:', error);
+      toast.error('操作失敗，請稍後再試');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // 按錯了要能自己收回。沒有這條路的話，cloudUploadedAt 一旦寫下去那支素材就永遠刪不掉
+  // （firestore.rules 的 allow delete 要求它為空），剪輯師只能回頭找我們處理。
+  const undoUploaded = async (asset: Asset) => {
+    if (!auth.currentUser) return;
+    if (asset.editorInvoiceId) {
+      toast.error('這支已經送進請款單了，不能再取消上傳');
+      return;
+    }
+    if (!window.confirm('確定要取消「已上傳雲端」嗎？取消後這支不會列入請款，要重新上傳並再按一次。')) return;
+    setBusyId(asset.id!);
+    try {
+      await updateDoc(
+        doc(db, 'assets', asset.id!),
+        buildCloudUploadUndoUpdate(asset, {
+          byUid: auth.currentUser.uid,
+          byName: userProfile?.displayName || userProfile?.username,
+        })
+      );
+      toast.success('已取消上傳標記');
+    } catch (error) {
+      console.error('Undo upload failed:', error);
       toast.error('操作失敗，請稍後再試');
     } finally {
       setBusyId(null);
@@ -577,7 +621,7 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
           icon={<UploadCloud size={14} />}
           empty="目前沒有待上傳的片"
         >
-          {toUpload.map(a => <AssetCard {...cardProps(a)} onUpload={() => markUploaded(a)} showClientBadge />)}
+          {toUpload.map(a => <AssetCard {...cardProps(a)} onUpload={() => markUploaded(a)} onUndoUpload={() => undoUploaded(a)} showClientBadge />)}
         </Section>
       )}
 
@@ -591,7 +635,7 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
           icon={<PackageCheck size={14} />}
           empty="還沒有完成的片"
         >
-          {done.map(a => <AssetCard {...cardProps(a)} showClientBadge />)}
+          {done.map(a => <AssetCard {...cardProps(a)} onUndoUpload={() => undoUploaded(a)} showClientBadge />)}
         </Section>
       )}
     </div>

@@ -104,6 +104,17 @@ service cloud.firestore {
         .hasAny(['editorFee', 'billableEditorId', 'editorInvoiceId']);
     }
 
+    // 內部人員把 editorInvoiceId 清空 —— 請款單作廢後要讓那批片回到可請款清單。
+    // 原本的凍結是「任何人都不能動已入單素材的計費欄位」，結果作廢單子之後那批片
+    // 既不能重新請款（剪輯師的錢消失）也不能刪，是死結。
+    // 這條鎖真正要防的是「剪輯師自己清掉紀錄重複請款」（見 billableEditorIsSelf 的註解），
+    // 所以只要把剪輯師排除在外，意圖就完整保留了。
+    function internalUnlockingInvoice() {
+      return !isEditorRole()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['editorInvoiceId'])
+        && request.resource.data.get('editorInvoiceId', '') == '';
+    }
+
     // 剪輯師只能把「計費歸屬」蓋成自己 —— 防止共用同一個 IP 的兩位剪輯師互搶對方的片來請款
     function billableEditorIsSelf() {
       return !isEditorRole()
@@ -294,7 +305,7 @@ service cloud.firestore {
       allow update: if isAuthenticated() && isValidAsset(request.resource.data)
         // 請款鎖：已入單的片，金額與綁定關係一律凍結（不分角色，老闆自己也不行 —— 這是帳務完整性，
         // 不是權限問題）。editorInvoiceId 因此只能 unset→set 一次，剪輯師無法清掉重複請款。
-        && (!touchesBillingFields() || !assetInvoiced())
+        && (!touchesBillingFields() || !assetInvoiced() || internalUnlockingInvoice())
         && billableEditorIsSelf()
         && (
           !isEditorRole() || (

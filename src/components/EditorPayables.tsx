@@ -106,9 +106,19 @@ export default function EditorPayables() {
         voidedAt: new Date().toISOString(),
         voidReason: '後台作廢',
       });
-      // ⚠️ 作廢不會解鎖素材上的 editorInvoiceId（規則禁止清空，那是防重複請款的鎖）。
-      // 那批片因此不會自動回到可請款清單，需要工程師個別處理。
-      toast.success('已作廢。該批素材不會自動回到可請款清單，需要工程師處理');
+      // 作廢的單子要把素材上的 editorInvoiceId 一起清掉，那批片才會回到可請款清單。
+      // 不清的話它們既不能重新請款（剪輯師的錢就這樣消失）也不能刪，是死結。
+      // 規則的 internalUnlockingInvoice() 只放行「內部人員、單獨清空這個欄位」，
+      // 防重複請款的原意還在（剪輯師自己清不掉）。
+      const results = await Promise.allSettled(
+        (inv.items || []).map(it => updateDoc(doc(db, 'assets', it.assetId), { editorInvoiceId: '' }))
+      );
+      const failed = results.filter(r => r.status === 'rejected').length;
+      toast.success(
+        failed === 0
+          ? '已作廢，該批素材已回到可請款清單'
+          : `已作廢，但有 ${failed} 支素材沒解鎖成功，請重試或找工程師`
+      );
     } catch (e) {
       console.error('Void failed:', e);
       toast.error('操作失敗（可能是權限規則尚未部署）');

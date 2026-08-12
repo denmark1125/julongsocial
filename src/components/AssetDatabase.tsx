@@ -12,7 +12,7 @@ import {
   getDocs
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking } from '../types';
+import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking, UserProfile } from '../types';
 import { visibleVendors, trackedVendors, buildPostIndex, getDisplayAssetStatus } from '../lib/vendorStatus';
 import { buildFlowUpdate, notifyFlowEvent } from '../lib/assetFlow';
 import { 
@@ -35,6 +35,7 @@ import {
   ClipboardList,
   Users,
   Archive,
+  Ban,
   RotateCcw
 } from 'lucide-react';
 import { toJpeg } from 'html-to-image';
@@ -65,6 +66,8 @@ const handleFirestoreError = (error: unknown, operationType: OperationType, path
 export default function AssetDatabase() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
+  // 強制刪除只開給工程師，所以這頁要知道自己是誰（比照 ShootBookings 的做法）
+  const [me, setMe] = useState<UserProfile | null>(null);
   // 顯示/篩選/計數一律走「實際狀態」而不是 asset.status：貼文被刪掉的素材資料上還留著 used，
   // 直接讀 status 會讓它永遠掛著已使用的灰底、篩選也撈不到，使用者眼中那支片就等於報廢了。
   const postIndex = React.useMemo(() => buildPostIndex(posts), [posts]);
@@ -105,6 +108,14 @@ export default function AssetDatabase() {
   });
 
   const defaultCategories = ['宣傳', '教學', '生活', '活動', '訪談', '開箱', '圖文', '資訊'];
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    return onSnapshot(doc(db, 'users', uid), (snap) => {
+      if (snap.exists()) setMe(snap.data() as UserProfile);
+    });
+  }, []);
 
   useEffect(() => {
     const vUnsubscribe = onSnapshot(collection(db, 'vendors'), (snapshot) => {
@@ -269,23 +280,95 @@ export default function AssetDatabase() {
     }
   };
 
+  // 作廢：處理「同一支片建了兩次」這種狀況。跟封存是兩回事——
+  // 封存的片仍會進剪輯師的請款清單（isBillable 不看 status），所以封存**擋不住重複請款**；
+  // 作廢才會從請款、庫存、排程選單、剪輯師工作台全部消失。
+  const toggleVoid = async (asset: Asset) => {
+    if (asset.voidedAt) {
+      if (!window.confirm('要把這支素材復原嗎？復原後會重新回到庫存與請款清單。')) return;
+      try {
+        await updateDoc(doc(db, 'assets', asset.id!), { voidedAt: '', voidReason: '' });
+        toast.success('已復原');
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, `assets/${asset.id}`);
+      }
+      return;
+    }
+    if (asset.editorInvoiceId) {
+      toast.error('這支已納入剪輯師請款單，不能作廢。');
+      return;
+    }
+    const reason = window.prompt('作廢原因（例如：跟另一支重複、建錯了）', '重複建檔');
+    if (reason === null) return;
+    try {
+      await updateDoc(doc(db, 'assets', asset.id!), {
+        voidedAt: new Date().toISOString(),
+        voidReason: reason.trim(),
+      });
+      toast.success('已作廢，不會列入請款與庫存');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `assets/${asset.id}`);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     const target = assets.find(a => a.id === id);
+    if (!target) return;
 
-    // 剪輯師已經上傳雲端的片＝他已經做完、可以請款了。刪掉等於把他的請款依據抹掉，
-    // 而且不可逆。業主不用這支的話請改按「封存」——封存不影響他的請款紀錄。
-    if (target?.editorInvoiceId) {
-      toast.error('這支已納入剪輯師請款單，不能刪除。請改用「封存」。');
-      return;
-    }
-    if (target?.cloudUploadedAt) {
-      toast.error('剪輯師已標記上傳雲端，刪掉會抹掉他的請款依據。請改用「封存」。');
+    // 已入請款單＝帳務凍結，任何角色都不給刪（規則也擋）
+    if (target.editorInvoiceId) {
+      toast.error('這支已納入剪輯師請款單，不能刪除。請改用「作廢」。');
       return;
     }
 
-    if (!window.confirm('確定要刪除此素材嗎？')) return;
+    // 貼文那頭也要顧：素材被刪掉但貼文還指著它，貼文會變成找不到關聯素材的孤兒
+    // （大發已經有一則已發布的貼文是這樣壞掉的）。
+    const boundPost = target.usedInPostId ? posts.find(p => p.id === target.usedInPostId) : undefined;
+    if (boundPost && boundPost.status !== 'draft') {
+      toast.error('這支已排程／已發布，刪掉會讓那則貼文找不到素材。請改用「作廢」。');
+      return;
+    }
+
+    // 剪輯師已標記上傳雲端＝他可以據此請款，刪掉等於抹掉請款依據，規則也會擋。
+    // 工程師可以強制刪除（多按一次、講清楚後果），其他人請改用作廢。
+    let force = false;
+    if (target.cloudUploadedAt) {
+      if (me?.role !== 'engineer') {
+        toast.error('剪輯師已標記上傳雲端，刪掉會抹掉他的請款依據。請改用「作廢」。');
+        return;
+      }
+      if (!window.confirm(
+        [
+          '這支剪輯師已標記「上傳雲端」，可以據此請款。',
+          '',
+          '強制刪除會讓它從請款清單永久消失。確定要刪除嗎？',
+          '（若只是想讓它不列入請款與庫存，請改用「作廢」，紀錄會留著）',
+        ].join('\n')
+      )) return;
+      force = true;
+    } else if (!window.confirm('確定要刪除此素材嗎？')) {
+      return;
+    }
+
     try {
-      await deleteDoc(doc(db, 'assets', id));
+      // 規則要求 cloudUploadedAt 為空才准刪，所以強制刪除得先解鎖。
+      // 解鎖後若刪除失敗，一定要把時間戳寫回去，不能留下「已解鎖但沒刪掉」的半吊子狀態
+      // ——那會讓這支片安靜地從剪輯師的請款依據裡消失。
+      if (force) {
+        await updateDoc(doc(db, 'assets', id), { cloudUploadedAt: '' });
+      }
+      try {
+        await deleteDoc(doc(db, 'assets', id));
+      } catch (delErr) {
+        if (force) {
+          await updateDoc(doc(db, 'assets', id), { cloudUploadedAt: target.cloudUploadedAt });
+        }
+        throw delErr;
+      }
+      // 掛在草稿貼文上的話，順手把貼文的關聯清掉，不然貼文會指向一個不存在的素材
+      if (boundPost) {
+        await updateDoc(doc(db, 'posts', boundPost.id!), { assetId: '' });
+      }
       toast.success('已刪除');
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `assets/${id}`);
@@ -298,9 +381,16 @@ export default function AssetDatabase() {
     const matchesVendor = filterVendor === 'all' || a.vendorId === filterVendor;
     // 這條決定素材出不出現在「可使用／已使用」分頁，一定要用實際狀態——
     // 用 a.status 的話，貼文被刪掉的素材會卡在「已使用」分頁裡出不來，等於使用者永遠找不回它
-    const matchesStatus = filterStatus === 'all'
-      ? effStatus(a) !== 'archived'
-      : effStatus(a) === filterStatus;
+    // 作廢的片只在「作廢」分頁出現，其餘分頁（含「全部」）一律不顯示，
+    // 否則使用者會在可使用清單裡看到已經宣告不要的東西
+    const voided = !!a.voidedAt;
+    const matchesStatus = filterStatus === 'voided'
+      ? voided
+      : voided
+        ? false
+        : filterStatus === 'all'
+          ? effStatus(a) !== 'archived'
+          : effStatus(a) === filterStatus;
     const matchesStage = a.stage === filterStage || (!a.stage && filterStage === 'finished');
     return matchesTab && matchesSearch && matchesVendor && matchesStatus && matchesStage;
   });
@@ -654,6 +744,15 @@ export default function AssetDatabase() {
                   </>
                 )}
                 <button
+                  onClick={() => setFilterStatus('voided')}
+                  className={cn(
+                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                    filterStatus === 'voided' ? "bg-red-500 text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"
+                  )}
+                >
+                  作廢
+                </button>
+                <button
                   onClick={() => setFilterStatus('archived')}
                   className={cn(
                     "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
@@ -740,7 +839,7 @@ export default function AssetDatabase() {
                   effStatus(asset) === 'available' ? "bg-[#8A8A6A]/10 text-[#8A8A6A] border border-[#8A8A6A]/20" : 
                   "bg-gray-100 text-gray-500 border border-gray-200"
                 )}>
-                  {asset.stage === 'raw' ? '待剪輯' : effStatus(asset) === 'available' ? '可使用' : '已使用'}
+                  {asset.voidedAt ? '已作廢' : asset.stage === 'raw' ? '待剪輯' : effStatus(asset) === 'available' ? '可使用' : '已使用'}
                 </span>
               </div>
             </div>
@@ -799,8 +898,19 @@ export default function AssetDatabase() {
                     </button>
                   )}
                   <span className="text-[10px] text-gray-400">{new Date(asset.createdAt).toLocaleDateString()}</span>
+                  {asset.voidedAt && (
+                    <span className="text-[10px] font-bold text-red-500">已作廢{asset.voidReason ? `・${asset.voidReason}` : ''}</span>
+                  )}
                 </div>
                 <div className="flex items-center space-x-2">
+                  {/* 作廢跟封存並排，但語意完全不同：封存＝暫時不用、仍可請款；作廢＝這支不該存在、不請款不算庫存 */}
+                  <button
+                    onClick={() => toggleVoid(asset)}
+                    className={cn("transition-colors", asset.voidedAt ? "text-red-500 hover:text-green-600" : "text-gray-400 hover:text-red-500")}
+                    title={asset.voidedAt ? '復原作廢' : '作廢（重複建檔／建錯，不列入請款與庫存）'}
+                  >
+                    <Ban size={effStatus(asset) === 'used' ? 14 : 18} />
+                  </button>
                   <button 
                     onClick={() => toggleArchive(asset)}
                     className="text-gray-400 hover:text-[#5A5A40] transition-colors"

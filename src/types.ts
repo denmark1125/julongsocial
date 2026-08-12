@@ -303,6 +303,13 @@ export interface Asset {
   filmingDate?: string;
   category?: string; // e.g., '宣傳片', '教學'
   status: 'available' | 'used' | 'archived';
+  // 作廢：這支素材不該存在（建重複了／建錯了）。跟「封存」是兩回事，別搞混：
+  //   封存(archived) ＝ 業主暫時不用、可能回收；仍算剪輯師的工，**仍可請款**。
+  //   作廢(voidedAt) ＝ 不請款、不算庫存、不出現在任何清單，但紀錄留著可回溯。
+  // 刻意用欄位而不是加進 status enum：status 有 firestore.rules 的白名單驗證、
+  // 又散在數十處判斷裡，加值的風險遠高於加欄位。
+  voidedAt?: string;
+  voidReason?: string;
   usedInPostId?: string;
   approved: boolean;
   /** @deprecated 拖曳排序已移除（拖一筆會覆寫整份清單且永不清除，反而讓新急件永遠排在後面）。改用 isUrgent。 */
