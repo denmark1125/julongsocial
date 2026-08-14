@@ -313,6 +313,28 @@ export function isAssetFree(asset: Pick<Asset, 'status' | 'usedInPostId' | 'void
   return isAssetOrphaned(asset, index);
 }
 
+/**
+ * 這支素材能不能被「挑來掛到貼文上」。
+ *
+ * ⚠️ 跟 isAssetFree() 是兩個不同的問題，對「掛在草稿上」的素材答案剛好相反：
+ *   - 庫存 isAssetFree()：掛草稿＝還沒真的交付出去，仍要算進庫存，否則欠片會被低估。
+ *   - 排程選單（這一條）：掛草稿＝已經被那則貼文佔走了，不能再挑。
+ *     兩邊共用同一條判斷的話，一支片會同時出現在兩則貼文的選單裡，
+ *     實務上就是同一支影片被重複上架。
+ *
+ * 被刪掉的貼文留下的孤兒素材兩邊都算可用——那是真的沒人在用。
+ */
+export function isAssetSelectable(
+  asset: Pick<Asset, 'status' | 'usedInPostId' | 'voidedAt'>,
+  index: PostIndex
+): boolean {
+  if (isAssetVoided(asset)) return false;
+  if (asset.status === 'available') return true;
+  if (asset.status !== 'used' || !asset.usedInPostId) return false;
+  // 掛在任何「還存在」的貼文上（草稿也算）就是被佔走了
+  return isAssetOrphaned(asset, index);
+}
+
 // 素材庫顯示用的「實際狀態」：孤兒素材要顯示成可使用，不能還掛著已使用的灰底。
 // 注意這裡故意不把「掛在草稿」也算成可使用——那種在素材庫本來就該顯示已使用（它確實連著一則貼文），
 // 只有庫存/排程選單才把它當還能動用。archived 不受影響。

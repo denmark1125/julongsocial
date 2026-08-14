@@ -41,7 +41,7 @@ import { format, isPast, isToday, addDays, parseISO, getDay, setHours, setMinute
 import toast from 'react-hot-toast';
 import TrackingExportModal from './TrackingExportModal';
 import { DismissedHabit, MonthlyAdjustment } from '../types';
-import { visibleVendors, trackedVendorsForMonth, getEffectiveMonthlyTarget, isAssetFree, buildPostIndex } from '../lib/vendorStatus';
+import { visibleVendors, trackedVendorsForMonth, getEffectiveMonthlyTarget, isAssetSelectable, buildPostIndex } from '../lib/vendorStatus';
 import { setPostStatus, togglePostConfirmation, togglePostPlatformPublished } from '../lib/postActions';
 
 import { clsx, type ClassValue } from 'clsx';
@@ -1287,19 +1287,21 @@ export default function PostManagement() {
                         .filter(a =>
                           a.vendorId === formData.vendorId &&
                           a.type === formData.contentType &&
-                          // 用共用的 isAssetFree()，不要自己寫 status==='available'——
-                          // 那樣會漏掉「掛的貼文已被刪掉」的素材，選單永遠挑不到它
-                          (isAssetFree(a, postIndex) || a.id === formData.assetId) &&
+                          // 用 isAssetSelectable() 而不是 isAssetFree()：
+                          // 掛在草稿上的素材在「庫存」上仍算可用（還沒交付），但在這個選單裡
+                          // 已經被那則草稿佔走了，再挑一次就會兩則貼文共用同一支片而重複上架。
+                          // `|| a.id === formData.assetId` 是讓目前這則自己掛的那支留在選單裡。
+                          (isAssetSelectable(a, postIndex) || a.id === formData.assetId) &&
                           a.stage === 'finished'
                         )
                         .map(a => (
                           <option key={a.id} value={a.id}>
-                            [{a.category || '未分類'}] {a.title} {!isAssetFree(a, postIndex) ? '(已使用)' : ''} {!a.approved ? '(待審核)' : ''}
+                            [{a.category || '未分類'}] {a.title} {!isAssetSelectable(a, postIndex) ? '(目前這則正在用)' : ''} {!a.approved ? '(待審核)' : ''}
                           </option>
                         ))
                       }
                     </select>
-                    {assets.filter(a => a.vendorId === formData.vendorId && a.type === formData.contentType && isAssetFree(a, postIndex) && a.stage === 'finished').length === 0 && (
+                    {assets.filter(a => a.vendorId === formData.vendorId && a.type === formData.contentType && isAssetSelectable(a, postIndex) && a.stage === 'finished').length === 0 && (
                       <p className="text-[10px] text-red-500 mt-1 font-bold">⚠️ 此廠商目前無可用{formData.contentType === 'video' ? '影片' : '貼文'}成片素材，請先至資料庫上架</p>
                     )}
                   </div>
