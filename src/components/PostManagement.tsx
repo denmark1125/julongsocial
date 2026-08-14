@@ -5,9 +5,10 @@ import {
   onSnapshot, 
   addDoc, 
   updateDoc, 
-  deleteDoc, 
-  doc, 
-  orderBy 
+  deleteDoc,
+  doc,
+  orderBy,
+  writeBatch
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Post, Vendor, PostStatus, Asset } from '../types';
@@ -250,27 +251,42 @@ export default function PostManagement() {
         updatedAt: new Date().toISOString()
       };
 
+      // 貼文與素材的掛載狀態一定要一起成功或一起失敗。
+      // 舊寫法是三個 await 依序打，只要後面那步被規則擋下（例如素材缺欄位驗證不過），
+      // 前面「把舊素材放回庫存」已經生效了 —— 貼文沒改到，素材卻被放掉，兩邊就此對不起來。
+      const batch = writeBatch(db);
+      const postRef = editingPost ? doc(db, 'posts', editingPost.id!) : doc(collection(db, 'posts'));
+      const usable = (id?: string) => !!id && id !== 'to_be_added';
+
       if (editingPost) {
-        // If changing asset, update old and new asset status
-        if (editingPost.assetId && editingPost.assetId !== formData.assetId && editingPost.assetId !== 'to_be_added') {
-          await updateDoc(doc(db, 'assets', editingPost.assetId), { status: 'available', usedInPostId: null });
+        batch.update(postRef, data);
+        if (usable(editingPost.assetId) && editingPost.assetId !== formData.assetId) {
+          batch.update(doc(db, 'assets', editingPost.assetId!), { status: 'available', usedInPostId: null });
         }
-        if (formData.assetId && formData.assetId !== 'to_be_added' && editingPost.assetId !== formData.assetId) {
-          await updateDoc(doc(db, 'assets', formData.assetId), { status: 'used', usedInPostId: editingPost.id });
+        if (usable(formData.assetId) && editingPost.assetId !== formData.assetId) {
+          batch.update(doc(db, 'assets', formData.assetId), { status: 'used', usedInPostId: postRef.id });
         }
-        await updateDoc(doc(db, 'posts', editingPost.id!), data);
-        toast.success('貼文已更新');
       } else {
-        const docRef = await addDoc(collection(db, 'posts'), data);
-        if (formData.assetId && formData.assetId !== 'to_be_added') {
-          await updateDoc(doc(db, 'assets', formData.assetId), { status: 'used', usedInPostId: docRef.id });
+        batch.set(postRef, data);
+        if (usable(formData.assetId)) {
+          batch.update(doc(db, 'assets', formData.assetId), { status: 'used', usedInPostId: postRef.id });
         }
-        toast.success('貼文已建立');
       }
+
+      await batch.commit();
+      toast.success(editingPost ? '貼文已更新' : '貼文已建立');
       setIsModalOpen(false);
       setEditingPost(null);
     } catch (error) {
-      toast.error('儲存失敗');
+      // 原本只丟一句「儲存失敗」，錯誤整個被吞掉，出事時完全查不出是哪一步、為什麼。
+      // 權限被拒是這裡最常見的死因（素材缺欄位過不了 isValidAsset），要講白讓人能回報。
+      console.error('Post save failed:', error);
+      const code = (error as { code?: string })?.code;
+      toast.error(
+        code === 'permission-denied'
+          ? '儲存失敗：權限被拒，通常是這則貼文掛的素材資料不完整，請把貼文標題回報給工程師'
+          : `儲存失敗${code ? `（${code}）` : ''}`
+      );
     }
   };
 

@@ -183,12 +183,17 @@ service cloud.firestore {
     }
 
     function isValidAsset(data) {
-      return data.keys().hasAll(['vendorId', 'title', 'type', 'status', 'approved', 'createdBy', 'stage', 'createdAt']) &&
+      // ⚠️ stage 刻意不放進 hasAll：2026-08-12 查出全庫有 28 支舊素材根本沒有這個欄位，
+      // 而 hasAll 是「整份文件」的檢查，缺一欄就等於那支素材**任何更新都被拒絕**——
+      // 症狀是編輯貼文時換素材會噴「儲存失敗」，而且完全看不出原因。
+      // 程式端本來就容忍缺 stage（vendorStatus 把它當成片、deriveFlowStage 也推得出來），
+      // 規則沒理由比程式更嚴。新增欄位時一律走「選填 + 型別檢查」，不要再往 hasAll 加。
+      return data.keys().hasAll(['vendorId', 'title', 'type', 'status', 'approved', 'createdBy', 'createdAt']) &&
              data.vendorId is string &&
              isValidString(data.title, 200) &&
              data.type in ['video', 'post'] &&
              data.status in ['available', 'used', 'archived'] &&
-             data.stage in ['raw', 'finished'] &&
+             (!('stage' in data) || data.stage in ['raw', 'finished']) &&
              data.approved is bool &&
              data.createdBy is string &&
              data.createdAt is string &&
