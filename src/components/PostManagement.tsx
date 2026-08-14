@@ -1055,7 +1055,13 @@ export default function PostManagement() {
                     // 完全查不出是權限被拒、還是資料格式被 SDK 擋下。
                     console.error('Post delete failed:', error);
                     const code = (error as { code?: string })?.code;
-                    toast.error(`刪除失敗${code ? `（${code}）` : ''}`);
+                    // 刪貼文的規則是 isManager()，員工(employee)按下去一定被拒。
+                    // 以前只回一句「刪除失敗」，當事人只會以為系統壞了，一直重按。
+                    toast.error(
+                      code === 'permission-denied'
+                        ? '刪除失敗：你的帳號沒有刪除貼文的權限（需要主管以上），請找主管處理'
+                        : `刪除失敗${code ? `（${code}）` : ''}`
+                    );
                   }
                 }}
                 className="flex-1 bg-red-500 text-white py-3 rounded-2xl font-bold shadow-lg hover:bg-red-600 transition-all"
