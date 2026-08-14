@@ -879,7 +879,10 @@ export default function VendorManagement() {
                       type="button"
                       onClick={() => setFormData({
                         ...formData,
-                        pauseHistory: [...formData.pauseHistory, { from: format(new Date(), 'yyyy-MM-dd'), until: undefined }]
+                        // 「還沒恢復」就整個不要放 until 這個 key。
+                        // 寫 until: undefined 會讓存檔時整個 pauseHistory 陣列被 Firestore 拒收
+                        // （SDK 對 undefined 是丟例外，不是忽略），連帶整筆廠商設定都存不進去。
+                        pauseHistory: [...formData.pauseHistory, { from: format(new Date(), 'yyyy-MM-dd') }]
                       })}
                       className="text-xs text-cyan-700 font-bold flex items-center hover:underline whitespace-nowrap"
                     >

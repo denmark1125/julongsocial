@@ -242,7 +242,7 @@ export default function PostManagement() {
     if (!auth.currentUser) return;
 
     try {
-      const data = {
+      const raw = {
         ...formData,
         scheduledAt: formData.scheduledAt || '',
         targetMonth: formData.targetMonth || selectedMonth,
@@ -250,6 +250,13 @@ export default function PostManagement() {
         createdAt: editingPost?.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
+      // formData 是 Partial<Post>，任何一個沒填的欄位都可能是 undefined，
+      // 而 Firestore SDK 預設寫入 undefined 會直接丟例外（安全規則根本輪不到）。
+      // 這裡統一濾掉，避免「某個欄位剛好沒值」就整筆存不進去。
+      // 要「清空」某個欄位請明確寫 ''，不要靠 undefined。
+      const data = Object.fromEntries(
+        Object.entries(raw).filter(([, v]) => v !== undefined)
+      ) as typeof raw;
 
       // 貼文與素材的掛載狀態一定要一起成功或一起失敗。
       // 舊寫法是三個 await 依序打，只要後面那步被規則擋下（例如素材缺欄位驗證不過），
@@ -1044,7 +1051,11 @@ export default function PostManagement() {
                     }
                     setDeletingPostId(null);
                   } catch (error) {
-                    toast.error('刪除失敗');
+                    // 不要再把錯誤吞掉：之前只丟一句「刪除失敗」，
+                    // 完全查不出是權限被拒、還是資料格式被 SDK 擋下。
+                    console.error('Post delete failed:', error);
+                    const code = (error as { code?: string })?.code;
+                    toast.error(`刪除失敗${code ? `（${code}）` : ''}`);
                   }
                 }}
                 className="flex-1 bg-red-500 text-white py-3 rounded-2xl font-bold shadow-lg hover:bg-red-600 transition-all"
@@ -1209,7 +1220,9 @@ export default function PostManagement() {
                         <button
                           key={type}
                           type="button"
-                          onClick={() => setFormData({ ...formData, contentType: type as 'post' | 'video', assetId: undefined })}
+                          // 用 '' 而不是 undefined：Firestore SDK 預設寫入 undefined 會直接丟例外
+                          // （連安全規則都碰不到），以前切換內容類型後存檔必炸、還被 catch 吞成「儲存失敗」。
+                          onClick={() => setFormData({ ...formData, contentType: type as 'post' | 'video', assetId: '' })}
                           className={cn(
                             "flex-1 py-2 rounded-xl text-sm font-bold transition-all",
                             formData.contentType === type ? "bg-[#5A5A40] text-white" : "bg-gray-100 text-gray-400"
