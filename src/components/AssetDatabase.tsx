@@ -38,7 +38,8 @@ import {
   Archive,
   Ban,
   RotateCcw,
-  MessageSquareText
+  MessageSquareText,
+  Flame
 } from 'lucide-react';
 import { toJpeg } from 'html-to-image';
 import download from 'downloadjs';
@@ -312,6 +313,15 @@ export default function AssetDatabase() {
         buildFlowUpdate(asset, to, { byUid: auth.currentUser?.uid })
       );
       toast.success(reviewPassed ? '已取消審核' : '已通過審核');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `assets/${asset.id}`);
+    }
+  };
+
+  const toggleUrgent = async (asset: Asset) => {
+    try {
+      await updateDoc(doc(db, 'assets', asset.id!), { isUrgent: !asset.isUrgent });
+      toast.success(asset.isUrgent ? '已取消急件' : '已標記為急件');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `assets/${asset.id}`);
     }
@@ -944,6 +954,17 @@ export default function AssetDatabase() {
               </div>
               <div className="flex items-center justify-between pt-4 border-t border-black/5">
                 <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => toggleUrgent(asset)}
+                    title={asset.isUrgent ? '取消急件' : '標記急件'}
+                    className={cn(
+                      "px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1",
+                      asset.isUrgent ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-400 hover:text-red-500"
+                    )}
+                  >
+                    <Flame size={12} /><span>急件</span>
+                  </button>
                   {asset.stage === 'raw' ? (
                     <button
                       onClick={() => setConvertingAsset(asset)}
