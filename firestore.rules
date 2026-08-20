@@ -110,7 +110,7 @@ service cloud.firestore {
     // 這條鎖真正要防的是「剪輯師自己清掉紀錄重複請款」（見 billableEditorIsSelf 的註解），
     // 所以只要把剪輯師排除在外，意圖就完整保留了。
     function internalUnlockingInvoice() {
-      return !isEditorRole()
+      return isManager()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['editorInvoiceId'])
         && request.resource.data.get('editorInvoiceId', '') == '';
     }
@@ -297,6 +297,12 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /vendorSecrets/{vendorId} {
+      allow read: if isAuthenticated() && !isEditorRole();
+      allow create, update: if isManager();
+      allow delete: if isAdmin();
+    }
+
     match /posts/{postId} {
       allow read: if isAuthenticated() && editorCanAccessVendor(resource.data.vendorId);
       allow create: if isAuthenticated() && !isEditorRole() && isValidPost(request.resource.data);
@@ -312,6 +318,7 @@ service cloud.firestore {
         // 不是權限問題）。editorInvoiceId 因此只能 unset→set 一次，剪輯師無法清掉重複請款。
         && (!touchesBillingFields() || !assetInvoiced() || internalUnlockingInvoice())
         && billableEditorIsSelf()
+        && (isEditorRole() || isManager() || !touchesBillingFields())
         && (
           !isEditorRole() || (
             editorCanAccessVendor(resource.data.vendorId) &&

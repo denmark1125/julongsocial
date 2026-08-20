@@ -14,7 +14,7 @@ import {
 import { db, auth } from '../firebase';
 import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking, UserProfile } from '../types';
 import { visibleVendors, trackedVendors, buildPostIndex, getDisplayAssetStatus } from '../lib/vendorStatus';
-import { buildFlowUpdate } from '../lib/assetFlow';
+import { buildFlowUpdate, getClientApprovalTarget } from '../lib/assetFlow';
 import { 
   Video, 
   Plus, 
@@ -240,7 +240,7 @@ export default function AssetDatabase() {
   // 取消審核則退回「業主審核中」；要明確記錄業主意見請用製作進度看板的「要改」。
   const toggleApproval = async (asset: Asset) => {
     try {
-      const to = asset.approved ? 'client_review' : 'ready';
+      const to = asset.approved ? 'client_review' : getClientApprovalTarget(asset);
       await updateDoc(
         doc(db, 'assets', asset.id!),
         buildFlowUpdate(asset, to, { byUid: auth.currentUser?.uid })

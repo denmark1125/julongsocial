@@ -8,11 +8,12 @@ import {
   updateDoc,
   deleteDoc,
   doc,
+  writeBatch,
   serverTimestamp,
   orderBy
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Vendor, SocialAccount, OperationType, Editor, PauseRecord, UserProfile } from '../types';
+import { Vendor, SocialAccount, OperationType, Editor, PauseRecord, UserProfile, VendorSecrets, socialAccountKey } from '../types';
 import { Plus, Trash2, Edit2, ExternalLink, Shield, X, Eye, EyeOff, Users, ChevronDown, ChevronUp, Settings2, Snowflake, RotateCcw, PowerOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { clsx, type ClassValue } from 'clsx';
@@ -34,6 +35,7 @@ export default function VendorManagement() {
   const [newEditorName, setNewEditorName] = useState('');
   const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
+  const [vendorSecrets, setVendorSecrets] = useState<Record<string, Record<string, string>>>({});
   const [visibleFormPasswords, setVisibleFormPasswords] = useState<Record<number, boolean>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [statusTab, setStatusTab] = useState<StatusTab>('active');
@@ -88,6 +90,23 @@ export default function VendorManagement() {
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'vendorSecrets'), snapshot => {
+      const map: Record<string, Record<string, string>> = {};
+      snapshot.docs.forEach(d => { map[d.id] = (d.data() as VendorSecrets).passwords || {}; });
+      setVendorSecrets(map);
+    }, error => console.error('Firestore Error (vendorSecrets):', error));
+    return () => unsubscribe();
+  }, []);
+
+  const resolvePassword = (vendorId: string | undefined, acc: SocialAccount): string => {
+    if (vendorId) {
+      const value = vendorSecrets[vendorId]?.[socialAccountKey(acc)];
+      if (typeof value === 'string') return value;
+    }
+    return acc.password || '';
+  };
 
   const handleAddEditor = async () => {
     if (!newEditorName.trim()) return;
@@ -206,8 +225,15 @@ export default function VendorManagement() {
         statusFields.pausedUntil = openRecord?.until || '';
       }
 
+      const accountsForVendor: SocialAccount[] = formData.socialAccounts.map(({ platform, username }) => ({ platform, username }));
+      const passwordMap: Record<string, string> = {};
+      formData.socialAccounts.forEach(acc => {
+        if (acc.password) passwordMap[socialAccountKey(acc)] = acc.password;
+      });
+
       const data = {
         ...formData,
+        socialAccounts: accountsForVendor,
         ...statusFields,
         createdBy: auth.currentUser.uid,
         createdAt: new Date().toISOString()
@@ -216,14 +242,17 @@ export default function VendorManagement() {
       const previousEditorId = editingVendor?.editorId;
       let savedVendorId = editingVendor?.id;
 
-      if (editingVendor) {
-        await updateDoc(doc(db, 'vendors', editingVendor.id!), data);
-        toast.success('廠商資料已更新');
-      } else {
-        const docRef = await addDoc(collection(db, 'vendors'), data);
-        savedVendorId = docRef.id;
-        toast.success('廠商資料已建立');
-      }
+      const vendorRef = editingVendor ? doc(db, 'vendors', editingVendor.id!) : doc(collection(db, 'vendors'));
+      savedVendorId = vendorRef.id;
+      const batch = writeBatch(db);
+      editingVendor ? batch.update(vendorRef, data) : batch.set(vendorRef, data);
+      batch.set(doc(db, 'vendorSecrets', savedVendorId), {
+        passwords: passwordMap,
+        updatedAt: new Date().toISOString(),
+        updatedBy: auth.currentUser.uid,
+      });
+      await batch.commit();
+      toast.success(editingVendor ? '廠商資料已更新' : '廠商資料已建立');
 
       // 模擬存檔後的廠商清單(不用等 onSnapshot 回來)，用來重算剪輯師的廠商存取範圍
       const savedVendor: Vendor = { ...(data as Vendor), id: savedVendorId };
@@ -434,7 +463,7 @@ export default function VendorManagement() {
                     setEditingVendor(vendor);
                     setFormData({
                       name: vendor.name,
-                      socialAccounts: vendor.socialAccounts,
+                      socialAccounts: vendor.socialAccounts.map(a => ({ ...a, password: resolvePassword(vendor.id, a) })),
                       postingHabits: vendor.postingHabits || [],
                       cooperationItems: vendor.cooperationItems || [],
                       monthlyTargetPosts: vendor.monthlyTargetPosts || 0,
@@ -589,7 +618,7 @@ export default function VendorManagement() {
                     <div className="flex items-center space-x-2">
                       <div className="flex items-center text-gray-400">
                         <Shield size={14} className="mr-1" />
-                        <span className="font-mono">{isVisible ? acc.password : '••••••'}</span>
+                        <span className="font-mono">{isVisible ? (resolvePassword(vendor.id, acc) || '（未設定）') : '••••••'}</span>
                       </div>
                       <button 
                         onClick={() => setVisiblePasswords(prev => ({ ...prev, [passwordKey]: !isVisible }))}

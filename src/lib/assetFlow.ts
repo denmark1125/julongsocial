@@ -35,6 +35,10 @@ export interface AdvanceFlowOptions {
   now?: Date;
 }
 
+export function getClientApprovalTarget(asset: Pick<Asset, 'cloudUploadedAt'>): 'to_upload' | 'ready' {
+  return asset.cloudUploadedAt ? 'ready' : 'to_upload';
+}
+
 /**
  * 產生推進到下一棒要寫進 Firestore 的欄位。
  * 一定會連帶寫入 FLOW_STAGE_COMPAT 對應的 stage/approved，

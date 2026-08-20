@@ -49,6 +49,7 @@ export const DEFAULT_EDITOR_FEE = 900;
 // 結清的，不該再湧進系統的第一張請款單。
 // ⚠️ 這個值只有在整套功能重新上線時才需要動，平常不要改：往前調會讓已經結清的舊片重新變成可請款。
 export const EDITOR_BILLING_START_MONTH = '2026-08';
+export const EDITOR_INVOICING_ENABLED = false;
 
 /**
  * 請款單明細＝送單當下的快照。
@@ -131,7 +132,19 @@ export interface VersionLog {
 export interface SocialAccount {
   platform: string;
   username: string;
+  /** @deprecated 密碼改存 vendorSecrets/{vendorId}；只為舊資料遷移保留。 */
   password?: string;
+}
+
+export interface VendorSecrets {
+  id?: string;
+  passwords: Record<string, string>;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export function socialAccountKey(acc: Pick<SocialAccount, 'platform' | 'username'>): string {
+  return `${acc.platform}␟${acc.username}`;
 }
 
 export interface PostingHabit {

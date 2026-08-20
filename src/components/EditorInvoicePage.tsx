@@ -4,7 +4,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import {
-  Asset, DEFAULT_EDITOR_FEE, EditorInvoice, UserProfile, Vendor,
+  Asset, DEFAULT_EDITOR_FEE, EDITOR_INVOICING_ENABLED, EditorInvoice, UserProfile, Vendor,
 } from '../types';
 import {
   billingMonthOptions, buildInvoiceItems, getAssetFee, getBillingMonth,
@@ -179,6 +179,16 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
       setSubmitting(false);
     }
   };
+
+  if (!EDITOR_INVOICING_ENABLED) {
+    return (
+      <div className="bg-white rounded-3xl shadow-sm border border-black/5 p-12 text-center space-y-3">
+        <Receipt size={30} className="mx-auto text-[#5A5A40]" />
+        <h3 className="text-lg font-bold serif text-[#5A5A40]">請款功能準備中</h3>
+        <p className="text-xs text-gray-500">目前仍沿用原本對帳方式；資料盤點完成後會由公司通知正式啟用。</p>
+      </div>
+    );
+  }
 
   if (vendorIds.length === 0) {
     return (

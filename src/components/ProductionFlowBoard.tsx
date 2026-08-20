@@ -13,7 +13,7 @@ import {
   FLOW_STAGE_OWNER,
   FLOW_OWNER_LABEL,
 } from '../types';
-import { buildFlowUpdate, getFlowDaysStuck, getFlowDueInfo, isFlowStale, sortFlowColumn } from '../lib/assetFlow';
+import { buildFlowUpdate, getClientApprovalTarget, getFlowDaysStuck, getFlowDueInfo, isFlowStale, sortFlowColumn } from '../lib/assetFlow';
 import { Scissors, UserCheck, PenLine, Clock, Flame, CalendarClock, ThumbsUp } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -272,7 +272,7 @@ export default function ProductionFlowBoard({
                             <button
                               // 剪輯師可能在業主審核期間就先上傳了（我們在 LINE 上請他傳，不等後台）。
                               // 那種情況下業主一通過就等於兩個條件都成立，直接進可排程，不要再叫他按一次。
-                              onClick={() => a.cloudUploadedAt
+                              onClick={() => getClientApprovalTarget(a) === 'ready'
                                 ? advance(a, 'ready', '業主已通過，這支已上傳過雲端，直接可排程')
                                 : advance(a, 'to_upload', '已記錄業主通過，等剪輯師上傳雲端')}
                               disabled={busyId === a.id}
