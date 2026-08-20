@@ -12,9 +12,9 @@ import {
   getDocs
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking, UserProfile } from '../types';
+import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking, UserProfile, deriveFlowStage } from '../types';
 import { visibleVendors, trackedVendors, buildPostIndex, getDisplayAssetStatus } from '../lib/vendorStatus';
-import { buildFlowUpdate, getClientApprovalTarget } from '../lib/assetFlow';
+import { buildFlowUpdate, buildSubmitUndoUpdate, getClientApprovalTarget } from '../lib/assetFlow';
 import { 
   Video, 
   Plus, 
@@ -218,6 +218,7 @@ export default function AssetDatabase() {
   // 交棒看板就會顯示錯的「球在誰手上」。
   const handleConvert = async () => {
     if (!convertingAsset) return;
+    if (!window.confirm(`確定要把「${convertingAsset.title}」標記為已剪完並送審嗎？`)) return;
     try {
       await updateDoc(doc(db, 'assets', convertingAsset.id!), {
         ...buildFlowUpdate(convertingAsset, 'client_review', {
@@ -236,10 +237,30 @@ export default function AssetDatabase() {
     }
   };
 
+  const undoConvert = async (asset: Asset) => {
+    if (deriveFlowStage(asset) !== 'client_review' || asset.cloudUploadedAt || asset.editorInvoiceId || asset.usedInPostId) {
+      toast.error('這支已進入上傳、請款或貼文流程，不能直接退回');
+      return;
+    }
+    if (!window.confirm(`確定要把「${asset.title}」退回待剪嗎？`)) return;
+    try {
+      await updateDoc(doc(db, 'assets', asset.id!), buildSubmitUndoUpdate(asset, {
+        byUid: auth.currentUser?.uid,
+        note: '內部撤回誤按轉成片',
+      }));
+      toast.success('已退回待剪');
+      setFilterStage('raw');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `assets/${asset.id}`);
+    }
+  };
+
   // 「已審核」＝業主過了且雲端也上傳好了，可以拿去排程（等同交棒鏈的 ready）。
   // 取消審核則退回「業主審核中」；要明確記錄業主意見請用製作進度看板的「要改」。
   const toggleApproval = async (asset: Asset) => {
     try {
+      // 業主審核與剪輯師上傳是兩條獨立事實：沒上傳時只能進 to_upload，
+      // 不能在這裡補 cloudUploadedAt，否則同事按審核就會替剪輯師產生請款資格。
       const to = asset.approved ? 'client_review' : getClientApprovalTarget(asset);
       await updateDoc(
         doc(db, 'assets', asset.id!),
@@ -871,15 +892,22 @@ export default function AssetDatabase() {
                       轉為成片
                     </button>
                   ) : (
-                    <button
-                      onClick={() => toggleApproval(asset)}
-                      className={cn(
-                        "px-3 py-1 rounded-lg text-[10px] font-bold transition-colors",
-                        asset.approved ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-400"
+                    <>
+                      <button
+                        onClick={() => toggleApproval(asset)}
+                        className={cn(
+                          "px-3 py-1 rounded-lg text-[10px] font-bold transition-colors",
+                          asset.approved ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-400"
+                        )}
+                      >
+                        {asset.approved ? '已審核' : '待審核'}
+                      </button>
+                      {deriveFlowStage(asset) === 'client_review' && !asset.cloudUploadedAt && !asset.editorInvoiceId && !asset.usedInPostId && (
+                        <button onClick={() => undoConvert(asset)} className="px-3 py-1 rounded-lg text-[10px] font-bold text-red-500 bg-red-50 hover:bg-red-100">
+                          誤按，退回待剪
+                        </button>
                       )}
-                    >
-                      {asset.approved ? '已審核' : '待審核'}
-                    </button>
+                    </>
                   )}
                   {asset.stage === 'finished' && (effStatus(asset) === 'available' || (effStatus(asset) === 'used' && !asset.usedInPostId)) && (
                     <button

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, updateDoc, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Asset, Editor, EditorInvoice, Vendor } from '../types';
 import {
   billingMonthOptions, getAssetFee, getBillableEditorId, getBillingMonth,
-  isBillable, monthLabel, summarizeByEditor,
+  isBillable, monthLabel, needsLegacyReview, summarizeByEditor,
 } from '../lib/editorBilling';
 import {
   Wallet, CheckCircle2, Clock, AlertCircle, Ban, ChevronDown, ChevronRight,
@@ -65,10 +65,12 @@ export default function EditorPayables() {
     (acc, r) => ({
       unsubmitted: acc.unsubmitted + r.unsubmittedAmount,
       submitted: acc.submitted + r.submittedAmount,
+      approved: acc.approved + r.approvedAmount,
+      processing: acc.processing + r.processingAmount,
       paid: acc.paid + r.paidAmount,
       all: acc.all + r.totalAmount,
     }),
-    { unsubmitted: 0, submitted: 0, paid: 0, all: 0 }
+    { unsubmitted: 0, submitted: 0, approved: 0, processing: 0, paid: 0, all: 0 }
   );
 
   const monthInvoices = invoices.filter(i => i.billingMonth === month && i.status !== 'void');
@@ -98,30 +100,80 @@ export default function EditorPayables() {
     }
   };
 
+  const advanceInvoice = async (inv: EditorInvoice, status: 'approved' | 'payment_processing') => {
+    setBusyId(inv.id!);
+    const now = new Date().toISOString();
+    const uid = auth.currentUser?.uid || '';
+    try {
+      await updateDoc(doc(db, 'editorInvoices', inv.id!), status === 'approved'
+        ? { status, approvedAt: now, approvedByUid: uid }
+        : { status, processingAt: now, processingByUid: uid });
+      toast.success(status === 'approved' ? '請款單已核准' : '已進入付款處理');
+    } catch (e) {
+      console.error('Advance invoice failed:', e);
+      toast.error('操作失敗（可能是權限規則尚未部署）');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const voidInvoice = async (inv: EditorInvoice) => {
     setBusyId(inv.id!);
     try {
-      await updateDoc(doc(db, 'editorInvoices', inv.id!), {
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'editorInvoices', inv.id!), {
         status: 'void',
         voidedAt: new Date().toISOString(),
         voidReason: '後台作廢',
       });
-      // 作廢的單子要把素材上的 editorInvoiceId 一起清掉，那批片才會回到可請款清單。
-      // 不清的話它們既不能重新請款（剪輯師的錢就這樣消失）也不能刪，是死結。
-      // 規則的 internalUnlockingInvoice() 只放行「內部人員、單獨清空這個欄位」，
-      // 防重複請款的原意還在（剪輯師自己清不掉）。
-      const results = await Promise.allSettled(
-        (inv.items || []).map(it => updateDoc(doc(db, 'assets', it.assetId), { editorInvoiceId: '' }))
-      );
-      const failed = results.filter(r => r.status === 'rejected').length;
-      toast.success(
-        failed === 0
-          ? '已作廢，該批素材已回到可請款清單'
-          : `已作廢，但有 ${failed} 支素材沒解鎖成功，請重試或找工程師`
-      );
+      for (const it of inv.items || []) {
+        batch.update(doc(db, 'assets', it.assetId), { editorInvoiceId: '' });
+      }
+      await batch.commit();
+      toast.success('已完整作廢，該批素材已回到可請款清單');
     } catch (e) {
       console.error('Void failed:', e);
       toast.error('操作失敗（可能是權限規則尚未部署）');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const legacyReview = useMemo(
+    () => videoAssets.filter(needsLegacyReview)
+      .sort((a, b) => (a.cloudUploadedAt || '').localeCompare(b.cloudUploadedAt || '')),
+    [videoAssets]
+  );
+
+  const settleLegacy = async (asset: Asset, status: 'paid' | 'unpaid') => {
+    setBusyId(`legacy-${asset.id}`);
+    try {
+      const now = new Date().toISOString();
+      const common = {
+        legacySettlementStatus: status,
+        legacyReviewedAt: now,
+        legacyReviewedByUid: auth.currentUser?.uid || '',
+      };
+      if (status === 'paid') {
+        const raw = window.prompt('舊制實際已結清金額', String(getAssetFee(asset)));
+        if (raw === null) return;
+        const amount = Math.round(Number(raw));
+        if (!Number.isFinite(amount) || amount < 0 || amount > 100000) {
+          toast.error('金額格式不正確');
+          return;
+        }
+        const source = window.prompt('結清依據（例如：8月勞報單、LINE 對帳）', '傳統記帳') ?? '';
+        await updateDoc(doc(db, 'assets', asset.id!), {
+          ...common, legacySettledAt: now, legacySettledAmount: amount, legacySettlementSource: source,
+        });
+        toast.success('已標記舊制結清，不會再進系統請款');
+      } else {
+        await updateDoc(doc(db, 'assets', asset.id!), common);
+        toast.success('已轉入系統請款，剪輯師現在可看見');
+      }
+    } catch (e) {
+      console.error('Legacy review failed:', e);
+      toast.error('盤點更新失敗（可能是權限規則尚未部署）');
     } finally {
       setBusyId(null);
     }
@@ -156,7 +208,10 @@ export default function EditorPayables() {
           片名: it.title,
           上傳日: it.cloudUploadedAt ? format(parseISO(it.cloudUploadedAt), 'yyyy-MM-dd') : '',
           金額: it.amount,
-          狀態: inv.status === 'paid' ? '已請款' : '已送出，待付款',
+          狀態: inv.status === 'paid' ? '已付款'
+            : inv.status === 'payment_processing' ? '付款處理中'
+            : inv.status === 'approved' ? '公司已核准'
+            : '已送出，待公司核准',
           使用狀態: live ? usageLabel(live) : '素材已刪除',
           請款單號: inv.id?.slice(-8).toUpperCase() || '',
         });
@@ -166,7 +221,9 @@ export default function EditorPayables() {
     const summaryRows = summaries.map(r => ({
       剪輯師: r.editorName,
       未送單支數: r.unsubmittedCount, 未送單金額: r.unsubmittedAmount,
-      待付款支數: r.submittedCount, 待付款金額: r.submittedAmount,
+      待核准支數: r.submittedCount, 待核准金額: r.submittedAmount,
+      已核准支數: r.approvedCount, 已核准金額: r.approvedAmount,
+      付款中支數: r.processingCount, 付款中金額: r.processingAmount,
       已請款支數: r.paidCount, 已請款金額: r.paidAmount,
       合計支數: r.totalCount, 合計金額: r.totalAmount,
     }));
@@ -179,15 +236,16 @@ export default function EditorPayables() {
   };
 
   const stats = [
-    { label: '本月應付合計', value: totals.all, icon: Wallet, color: 'text-[#5A5A40]', bg: 'bg-[#5A5A40]/10' },
     { label: '未請款（等剪輯師送單）', value: totals.unsubmitted, icon: AlertCircle, color: 'text-[#A67C52]', bg: 'bg-[#A67C52]/10' },
-    { label: '已送出待付款', value: totals.submitted, icon: Clock, color: 'text-[#8B7355]', bg: 'bg-[#8B7355]/10' },
+    { label: '待公司核准', value: totals.submitted, icon: Clock, color: 'text-[#8B7355]', bg: 'bg-[#8B7355]/10' },
+    { label: '公司已核准', value: totals.approved, icon: CheckCircle2, color: 'text-blue-700', bg: 'bg-blue-50' },
+    { label: '付款處理中', value: totals.processing, icon: Wallet, color: 'text-purple-700', bg: 'bg-purple-50' },
     { label: '已請款', value: totals.paid, icon: CheckCircle2, color: 'text-[#8A8A6A]', bg: 'bg-[#8A8A6A]/10' },
   ];
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         {stats.map((s, i) => (
           <div key={i} className="bg-white p-4 rounded-2xl border border-black/5 shadow-sm">
             <div className={`p-2 rounded-lg w-fit mb-2 ${s.bg}`}>
@@ -198,6 +256,27 @@ export default function EditorPayables() {
           </div>
         ))}
       </div>
+
+      {legacyReview.length > 0 && (
+        <div className="bg-amber-50 rounded-2xl border border-amber-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-amber-200">
+            <h3 className="text-sm font-bold text-amber-800">舊帳待盤點 · {legacyReview.length} 支</h3>
+            <p className="text-[11px] text-amber-700 mt-1">切帳日前上傳的片預設不開放請款。請逐支確認舊制是否已付款。</p>
+          </div>
+          <div className="divide-y divide-amber-200/70 max-h-80 overflow-y-auto">
+            {legacyReview.map(a => (
+              <div key={a.id} className="px-5 py-3 bg-white/60 flex items-center gap-3 flex-wrap">
+                <div className="flex-1 min-w-52">
+                  <p className="text-xs font-bold text-gray-700">{vendors.find(v => v.id === a.vendorId)?.name || '未知 IP'}｜{a.title}</p>
+                  <p className="text-[10px] text-gray-500">{a.cloudUploadedAt ? format(parseISO(a.cloudUploadedAt), 'yyyy-MM-dd HH:mm') : ''} 上傳 · 預設 {money(getAssetFee(a))}</p>
+                </div>
+                <button onClick={() => settleLegacy(a, 'paid')} disabled={busyId === `legacy-${a.id}`} className="px-3 py-1.5 rounded-lg bg-gray-700 text-white text-[10px] font-bold disabled:opacity-40">舊制已結清</button>
+                <button onClick={() => settleLegacy(a, 'unpaid')} disabled={busyId === `legacy-${a.id}`} className="px-3 py-1.5 rounded-lg bg-amber-600 text-white text-[10px] font-bold disabled:opacity-40">尚未付，轉系統請款</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
@@ -263,9 +342,11 @@ export default function EditorPayables() {
                       )}
                       {r.submittedCount > 0 && (
                         <span className="text-[#8B7355] font-bold">
-                          待付款 {r.submittedCount} 支 {money(r.submittedAmount)}
+                          待核准 {r.submittedCount} 支 {money(r.submittedAmount)}
                         </span>
                       )}
+                      {r.approvedCount > 0 && <span className="text-blue-700 font-bold">已核准 {r.approvedCount} 支 {money(r.approvedAmount)}</span>}
+                      {r.processingCount > 0 && <span className="text-purple-700 font-bold">付款中 {r.processingCount} 支 {money(r.processingAmount)}</span>}
                       {r.paidCount > 0 && (
                         <span className="text-[#8A8A6A]">
                           已請款 {r.paidCount} 支 {money(r.paidAmount)}
@@ -291,21 +372,21 @@ export default function EditorPayables() {
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 text-[9px] font-bold border border-green-200">
                                   <CheckCircle2 size={9} /> 已請款
                                 </span>
+                              ) : inv.status === 'approved' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[9px] font-bold border border-blue-200">公司已核准</span>
+                              ) : inv.status === 'payment_processing' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 text-[9px] font-bold border border-purple-200">付款處理中</span>
                               ) : (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[9px] font-bold border border-amber-200">
-                                  <Clock size={9} /> 待付款
+                                  <Clock size={9} /> 待公司核准
                                 </span>
                               )}
                             </div>
                             {inv.status !== 'paid' && (
                               <div className="flex items-center gap-1.5">
-                                <button
-                                  onClick={() => markPaid(inv)}
-                                  disabled={busyId === inv.id}
-                                  className="flex items-center gap-1 bg-[#5A5A40] text-white px-3 py-1.5 rounded-lg text-[10px] font-bold hover:bg-[#4a4a35] disabled:opacity-40"
-                                >
-                                  <CheckCircle2 size={10} /> 標記已請款
-                                </button>
+                                {inv.status === 'submitted' && <button onClick={() => advanceInvoice(inv, 'approved')} disabled={busyId === inv.id} className="flex items-center gap-1 bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold disabled:opacity-40">公司核准</button>}
+                                {inv.status === 'approved' && <button onClick={() => advanceInvoice(inv, 'payment_processing')} disabled={busyId === inv.id} className="flex items-center gap-1 bg-purple-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold disabled:opacity-40">開始付款處理</button>}
+                                {inv.status === 'payment_processing' && <button onClick={() => markPaid(inv)} disabled={busyId === inv.id} className="flex items-center gap-1 bg-[#5A5A40] text-white px-3 py-1.5 rounded-lg text-[10px] font-bold disabled:opacity-40"><CheckCircle2 size={10} /> 確認已付款</button>}
                                 <button
                                   onClick={() => voidInvoice(inv)}
                                   disabled={busyId === inv.id}

@@ -2,6 +2,7 @@ import { format, parseISO } from 'date-fns';
 import {
   Asset,
   DEFAULT_EDITOR_FEE,
+  EDITOR_BILLING_CUTOVER_AT,
   EDITOR_BILLING_START_MONTH,
   EditorInvoiceItem,
   Vendor,
@@ -41,13 +42,33 @@ export function getBillingMonth(asset: Pick<Asset, 'cloudUploadedAt'>): string |
  * EDITOR_BILLING_START_MONTH 之前的片一律排除：那些是這套流程上線前就有 cloudUploadedAt 的存量，
  * 早就用別的方式請過款了。
  */
-export function isBillable(asset: Pick<Asset, 'cloudUploadedAt' | 'editorInvoiceId' | 'voidedAt'>): boolean {
+export function isBeforeBillingCutover(asset: Pick<Asset, 'cloudUploadedAt'>): boolean {
+  if (!asset.cloudUploadedAt) return false;
+  const uploaded = Date.parse(asset.cloudUploadedAt);
+  const cutover = Date.parse(EDITOR_BILLING_CUTOVER_AT);
+  return Number.isFinite(uploaded) && uploaded < cutover;
+}
+
+export function needsLegacyReview(
+  asset: Pick<Asset, 'cloudUploadedAt' | 'editorInvoiceId' | 'voidedAt' | 'legacySettlementStatus'>
+): boolean {
+  return !!asset.cloudUploadedAt && !asset.editorInvoiceId && !asset.voidedAt &&
+    isBeforeBillingCutover(asset) &&
+    (!asset.legacySettlementStatus || asset.legacySettlementStatus === 'needs_review');
+}
+
+export function isBillable(asset: Pick<Asset,
+  'cloudUploadedAt' | 'editorInvoiceId' | 'voidedAt' | 'legacySettlementStatus'
+>): boolean {
   // 作廢＝這支根本不該存在（多半是建重複了）。不擋在這裡的話，同一個東西的 A/B 兩支都會進請款清單。
   // ⚠️ 注意「封存」故意不擋：封存是業主暫時不用，剪輯師的工還是要算錢。兩者語意不同，別合併。
   if (asset.voidedAt) return false;
   if (asset.editorInvoiceId) return false; // 已經請過款
   const month = getBillingMonth(asset);
-  return !!month && month >= EDITOR_BILLING_START_MONTH;
+  if (!month || month < EDITOR_BILLING_START_MONTH) return false;
+  // 切帳日前的存量片逐支盤點：只有明確確認「舊制尚未付」才轉入系統請款。
+  if (isBeforeBillingCutover(asset)) return asset.legacySettlementStatus === 'unpaid';
+  return true;
 }
 
 /** 某位剪輯師某個月還沒請款的片 */
@@ -137,6 +158,10 @@ export interface EditorMonthSummary {
   /** 已送單、我們還沒付 */
   submittedCount: number;
   submittedAmount: number;
+  approvedCount: number;
+  approvedAmount: number;
+  processingCount: number;
+  processingAmount: number;
   /** 已標記請款完成 */
   paidCount: number;
   paidAmount: number;
@@ -168,6 +193,8 @@ export function summarizeByEditor(
         editorId, editorName: editorName(editorId),
         unsubmittedCount: 0, unsubmittedAmount: 0,
         submittedCount: 0, submittedAmount: 0,
+        approvedCount: 0, approvedAmount: 0,
+        processingCount: 0, processingAmount: 0,
         paidCount: 0, paidAmount: 0,
         totalCount: 0, totalAmount: 0,
       };
@@ -190,6 +217,12 @@ export function summarizeByEditor(
     if (inv.status === 'paid') {
       r.paidCount += inv.itemCount;
       r.paidAmount += inv.totalAmount;
+    } else if (inv.status === 'approved') {
+      r.approvedCount += inv.itemCount;
+      r.approvedAmount += inv.totalAmount;
+    } else if (inv.status === 'payment_processing') {
+      r.processingCount += inv.itemCount;
+      r.processingAmount += inv.totalAmount;
     } else {
       r.submittedCount += inv.itemCount;
       r.submittedAmount += inv.totalAmount;
@@ -197,8 +230,8 @@ export function summarizeByEditor(
   }
 
   for (const r of rows.values()) {
-    r.totalCount = r.unsubmittedCount + r.submittedCount + r.paidCount;
-    r.totalAmount = r.unsubmittedAmount + r.submittedAmount + r.paidAmount;
+    r.totalCount = r.unsubmittedCount + r.submittedCount + r.approvedCount + r.processingCount + r.paidCount;
+    r.totalAmount = r.unsubmittedAmount + r.submittedAmount + r.approvedAmount + r.processingAmount + r.paidAmount;
   }
 
   return Array.from(rows.values())

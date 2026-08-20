@@ -168,6 +168,26 @@ export function buildCloudUploadUndoUpdate(
   };
 }
 
+/** 業主通過後的下一棒：只有剪輯師已確認上傳，才能直接可排程。 */
+export function getClientApprovalTarget(asset: Pick<Asset, 'cloudUploadedAt'>): 'to_upload' | 'ready' {
+  return asset.cloudUploadedAt ? 'ready' : 'to_upload';
+}
+
+/**
+ * 撤回誤按的「交片送審／轉為成片」。只適用於尚在 client_review、且還沒有進入
+ * 上傳、請款、排程的素材；呼叫端必須先做這三項檢查。
+ */
+export function buildSubmitUndoUpdate(
+  asset: Pick<Asset, 'stage' | 'approved' | 'flowStage' | 'revisionCount' | 'flowLog' | 'cloudUploadedAt'>,
+  opts: AdvanceFlowOptions = {}
+): Record<string, unknown> {
+  return {
+    ...buildFlowUpdate(asset, 'to_edit', { ...opts, note: opts.note || '撤回誤按送審' }),
+    submittedAt: '',
+    submittedBy: '',
+  };
+}
+
 /**
  * 交棒完成後發即時 LINE 通知。
  *

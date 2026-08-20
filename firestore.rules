@@ -101,7 +101,10 @@ service cloud.firestore {
 
     function touchesBillingFields() {
       return request.resource.data.diff(resource.data).affectedKeys()
-        .hasAny(['editorFee', 'billableEditorId', 'editorInvoiceId']);
+        .hasAny(['editorFee', 'billableEditorId', 'editorInvoiceId',
+                 'legacySettlementStatus', 'legacySettledAt', 'legacySettledAmount',
+                 'legacySettlementNote', 'legacySettlementSource',
+                 'legacyReviewedAt', 'legacyReviewedByUid']);
     }
 
     // 內部人員把 editorInvoiceId 清空 —— 請款單作廢後要讓那批片回到可請款清單。
@@ -212,6 +215,13 @@ service cloud.firestore {
              (!('editorFee' in data) || (data.editorFee is int && data.editorFee >= 0 && data.editorFee <= 100000)) &&
              (!('billableEditorId' in data) || data.billableEditorId is string) &&
              (!('editorInvoiceId' in data) || data.editorInvoiceId is string) &&
+             (!('legacySettlementStatus' in data) || data.legacySettlementStatus in ['paid', 'unpaid', 'needs_review']) &&
+             (!('legacySettledAt' in data) || data.legacySettledAt is string) &&
+             (!('legacySettledAmount' in data) || (data.legacySettledAmount is int && data.legacySettledAmount >= 0 && data.legacySettledAmount <= 100000)) &&
+             (!('legacySettlementNote' in data) || data.legacySettlementNote is string) &&
+             (!('legacySettlementSource' in data) || data.legacySettlementSource is string) &&
+             (!('legacyReviewedAt' in data) || data.legacyReviewedAt is string) &&
+             (!('legacyReviewedByUid' in data) || data.legacyReviewedByUid is string) &&
              (!('isUrgent' in data) || data.isUrgent is bool);
     }
 
@@ -253,14 +263,37 @@ service cloud.firestore {
              // 規則沒有迴圈，逐筆明細驗不了。金額造假的最後防線是這個上限
              // ＋ asset 端的 editorFee <= 100000 ＋ 老闆付款前肉眼複核。
              data.totalAmount is int && data.totalAmount >= 0 && data.totalAmount <= 1000000 &&
-             data.status in ['submitted', 'paid', 'void'] &&
+             data.status in ['submitted', 'approved', 'payment_processing', 'paid', 'void'] &&
              data.submittedAt is string &&
              data.createdAt is string &&
              (!('note' in data) || data.note is string) &&
+             (!('approvedAt' in data) || data.approvedAt is string) &&
+             (!('approvedByUid' in data) || data.approvedByUid is string) &&
+             (!('processingAt' in data) || data.processingAt is string) &&
+             (!('processingByUid' in data) || data.processingByUid is string) &&
              (!('paidAt' in data) || data.paidAt is string) &&
              (!('paidByUid' in data) || data.paidByUid is string) &&
              (!('voidedAt' in data) || data.voidedAt is string) &&
-             (!('voidReason' in data) || data.voidReason is string);
+             (!('voidReason' in data) || data.voidReason is string) &&
+             (data.status != 'approved' || (
+               data.approvedAt is string && data.approvedByUid is string
+             )) &&
+             (data.status != 'payment_processing' || (
+               data.approvedAt is string && data.approvedByUid is string &&
+               data.processingAt is string && data.processingByUid is string
+             )) &&
+             (data.status != 'paid' || (
+               data.paidAt is string && data.paidByUid is string
+             )) &&
+             (data.status != 'void' || (
+               data.voidedAt is string && data.voidReason is string
+             ));
+    }
+
+    function isValidEditorInvoiceTransition() {
+      return (resource.data.status == 'submitted' && request.resource.data.status in ['approved', 'void'])
+        || (resource.data.status == 'approved' && request.resource.data.status in ['payment_processing', 'void'])
+        || (resource.data.status == 'payment_processing' && request.resource.data.status in ['paid', 'void']);
     }
 
     function isValidLineUser(data) {
@@ -297,6 +330,11 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // 2026-08-19 新增：客戶社群帳號密碼從 vendor 文件搬出來的落點（文件 id ＝ vendorId）。
+    // 原因見 types.ts 的 VendorSecrets：Firestore 沒有欄位級讀取控制，密碼跟廠商資料同一份
+    // 文件時，EditorAssetQueue 的整份文件訂閱會讓外包剪輯師的瀏覽器裡直接有明碼密碼。
+    // 邊界刻意跟 billingContracts 一致——擋 editor 就好，不收成 isManager()：
+    // 廠商管理分頁 employee 也進得去，小編要用客戶帳號發文，收太緊會擋到真實工作流。
     match /vendorSecrets/{vendorId} {
       allow read: if isAuthenticated() && !isEditorRole();
       allow create, update: if isManager();
@@ -318,6 +356,8 @@ service cloud.firestore {
         // 不是權限問題）。editorInvoiceId 因此只能 unset→set 一次，剪輯師無法清掉重複請款。
         && (!touchesBillingFields() || !assetInvoiced() || internalUnlockingInvoice())
         && billableEditorIsSelf()
+        // 一般 employee 可以維護素材流程，但不能碰剪輯費、請款鎖或新舊帳結算。
+        // editor 需要在自己的請款流程寫 editorFee/editorInvoiceId；manager 以上負責財務覆核。
         && (isEditorRole() || isManager() || !touchesBillingFields())
         && (
           !isEditorRole() || (
@@ -364,6 +404,7 @@ service cloud.firestore {
       // 標記已請款／作廢：manager 以上，且明細與金額全程不可變動
       allow update: if isManager()
         && isValidEditorInvoice(request.resource.data)
+        && isValidEditorInvoiceTransition()
         && request.resource.data.editorId == resource.data.editorId
         && request.resource.data.billingMonth == resource.data.billingMonth
         && request.resource.data.items == resource.data.items
@@ -387,30 +428,42 @@ service cloud.firestore {
       allow delete: if isManager();
     }
 
+    // 2026-08-19 收斂：原本 read 是 isAuthenticated()，代表**外包剪輯師登入後就讀得到
+    // 全部客戶的合約金額、月結應收與付款狀態**。UI 靠 App.tsx 的 TAB_ROLES.billing 把帳務
+    // 分頁藏起來，但規則不管 UI——devtools 發一個查詢就全拿。
+    // 改成排除 editor 角色而不是直接收成 isManager()：Dashboard 的「待核收帳款」卡片
+    // employee 也看得到(Dashboard.tsx:520)，收成 isManager() 會讓內部員工的儀表板
+    // 靜靜地 permission-denied。要不要連 employee 一起擋是產品決定，不在這次止血範圍。
     match /billingContracts/{id} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && !isEditorRole();
       allow create: if isManager() && isValidBillingContract(request.resource.data);
       allow update: if isManager() && isValidBillingContract(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /billingRecords/{id} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && !isEditorRole();
       allow create: if isManager() && isValidBillingRecord(request.resource.data);
       allow update: if isManager() && isValidBillingRecord(request.resource.data);
       allow delete: if isAdmin();
     }
 
+    // 2026-08-19 收斂：原本 create 是 `if true`＝未認證的公開寫入面，任何人都能往這兩個
+    // collection 灌文件(身分綁定資料，之後客戶身分若走 LINE 就是偽造面)。
+    // 真正的寫入者是 server.ts 的 LINE follow webhook，它走 admin SDK **完全不受規則管**，
+    // 所以關掉客戶端 create 不影響綁定流程(已確認前端沒有任何 addDoc 到這兩個 collection)。
+    // read 同時收成 manager：客戶端只有員工管理頁(users 分頁＝engineer/manager)在讀，
+    // 內容是同事的 LINE 顯示名稱與頭像，沒有理由讓外包剪輯師讀得到。
     match /line_users/{id} {
-      allow read: if isAuthenticated();
-      allow create: if true; 
+      allow read: if isManager();
+      allow create: if isManager() && isValidLineUser(request.resource.data);
       allow update: if isManager() && isValidLineUser(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /line_connections/{id} {
-      allow read: if isAuthenticated();
-      allow create: if true; 
+      allow read: if isManager();
+      allow create: if isManager();
       allow update: if isManager();
       allow delete: if isAdmin();
     }

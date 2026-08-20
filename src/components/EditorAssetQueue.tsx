@@ -6,6 +6,7 @@ import {
   buildCloudUploadUpdate,
   buildCloudUploadUndoUpdate,
   buildFlowUpdate,
+  buildSubmitUndoUpdate,
   getFlowDaysStuck,
   getFlowDueInfo,
   isFlowStale,
@@ -13,7 +14,7 @@ import {
 } from '../lib/assetFlow';
 import {
   Scissors, Film, CheckCircle2, UploadCloud, Clock, Flame,
-  CalendarClock, ChevronDown, ChevronRight, PackageCheck,
+  CalendarClock, ChevronDown, ChevronRight, ChevronLeft, PackageCheck, Search, X,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -177,7 +178,7 @@ function ClientBadge({ asset }: { asset: Asset }) {
 }
 
 function AssetCard({
-  asset, vendorName, posts, busy, onAdvance, onUpload, onUndoUpload, showClientBadge,
+  asset, vendorName, posts, busy, onAdvance, onUpload, onUndoSubmit, onUndoUpload, showClientBadge,
 }: {
   // 這個專案沒有安裝 @types/react，JSX.IntrinsicAttributes 不存在，
   // 所以 key 要自己宣告成 prop，否則 tsc 會當成多餘屬性報錯。
@@ -188,6 +189,7 @@ function AssetCard({
   busy: boolean;
   onAdvance?: () => void;
   onUpload?: () => void;
+  onUndoSubmit?: () => void;
   onUndoUpload?: () => void;
   showClientBadge?: boolean;
 }) {
@@ -241,6 +243,17 @@ function AssetCard({
       </div>
 
       <FlowSteps asset={asset} busy={busy} onAdvance={onAdvance} onUpload={onUpload} />
+
+      {onUndoSubmit && deriveFlowStage(asset) === 'client_review' && !asset.cloudUploadedAt && !asset.editorInvoiceId && !asset.usedInPostId && (
+        <button
+          type="button"
+          onClick={onUndoSubmit}
+          disabled={busy}
+          className="mt-2 text-[10px] text-gray-400 hover:text-red-500 underline decoration-dotted underline-offset-2 disabled:opacity-50"
+        >
+          送審按錯了？撤回到待剪
+        </button>
+      )}
 
       {/* 按錯了要有得反悔。做得低調是刻意的——這是例外操作，不該跟兩個主要步驟搶注意力。
           已進請款單的不給（帳務凍結），所以那種情況連鈕都不出現。 */}
@@ -311,6 +324,10 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
   const [posts, setPosts] = useState<Post[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [vendorFilter, setVendorFilter] = useState<string>('all');
+  const [search, setSearch] = useState('');
+  const [urgentOnly, setUrgentOnly] = useState(false);
+  const [sortBy, setSortBy] = useState<'flow' | 'newest' | 'vendor'>('flow');
+  const [page, setPage] = useState(1);
   // null＝使用者還沒自己選過，這時自動落在「有事要做」的那一頁，不要開在空白頁
   const [tab, setTab] = useState<Bucket | null>(null);
 
@@ -390,7 +407,10 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
   const activeVendorId =
     vendorFilter !== 'all' && filterVendorIds.includes(vendorFilter) ? vendorFilter : 'all';
 
-  const visible = activeVendorId === 'all' ? displayed : displayed.filter(a => a.vendorId === activeVendorId);
+  const keyword = search.trim().toLowerCase();
+  const visible = (activeVendorId === 'all' ? displayed : displayed.filter(a => a.vendorId === activeVendorId))
+    .filter(a => !urgentOnly || a.isUrgent)
+    .filter(a => !keyword || (a.title || '').toLowerCase().includes(keyword) || vendorName(a.vendorId).toLowerCase().includes(keyword));
 
   // 待辦數不含「已完成」——那區是唯讀的，算進去會讓剪輯師以為自己還有事要做
   const pendingCount = (vendorId: string) =>
@@ -399,7 +419,12 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
       return (vendorId === 'all' || a.vendorId === vendorId) && !!b && ACTIONABLE.includes(b);
     }).length;
 
-  const inBucket = (b: Bucket) => sortFlowColumn(visible.filter(a => bucketOf(a) === b), posts);
+  const inBucket = (b: Bucket) => {
+    const list = visible.filter(a => bucketOf(a) === b);
+    if (sortBy === 'newest') return [...list].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    if (sortBy === 'vendor') return [...list].sort((a, b) => vendorName(a.vendorId).localeCompare(vendorName(b.vendorId), 'zh-Hant'));
+    return sortFlowColumn(list, posts);
+  };
 
   const toEdit = inBucket('to_edit');
   const toUpload = inBucket('to_upload');
@@ -409,6 +434,13 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
   const activeTab: Bucket =
     tab ?? (toEdit.length > 0 ? 'to_edit' : toUpload.length > 0 ? 'to_upload' : 'to_edit');
 
+  const currentList = activeTab === 'to_edit' ? toEdit : activeTab === 'to_upload' ? toUpload : done;
+  const pageCount = Math.max(1, Math.ceil(currentList.length / 5));
+  const activePage = Math.min(page, pageCount);
+  const pagedList = currentList.slice((activePage - 1) * 5, activePage * 5);
+
+  useEffect(() => { setPage(1); }, [activeTab, activeVendorId, search, urgentOnly, sortBy]);
+
   const thisMonth = format(new Date(), 'yyyy-MM');
   // 本月已上傳＝本月可請款的支數。用本地時區換算，不可以用 ISO 字串裁切（差 8 小時會算到上個月）
   const uploadedThisMonth = myVideos.filter(a =>
@@ -417,6 +449,7 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
 
   const advance = async (asset: Asset) => {
     if (!auth.currentUser) return;
+    if (!window.confirm(`確定「${asset.title}」已經剪完，要交片送審嗎？\n\n送出後會移到「待上傳雲端」，若誤按可在尚未上傳前撤回。`)) return;
     const msg = '已送審，等待業主回覆';
     setBusyId(asset.id!);
     try {
@@ -433,6 +466,28 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
     } catch (error) {
       console.error('Flow advance failed:', error);
       toast.error('操作失敗，請稍後再試');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const undoSubmit = async (asset: Asset) => {
+    if (!auth.currentUser) return;
+    if (deriveFlowStage(asset) !== 'client_review' || asset.cloudUploadedAt || asset.editorInvoiceId || asset.usedInPostId) {
+      toast.error('這支已進入後續流程，不能直接撤回，請聯絡管理員');
+      return;
+    }
+    if (!window.confirm(`確定要把「${asset.title}」撤回到待剪嗎？`)) return;
+    setBusyId(asset.id!);
+    try {
+      await updateDoc(doc(db, 'assets', asset.id!), buildSubmitUndoUpdate(asset, {
+        byUid: auth.currentUser.uid,
+        byName: userProfile?.displayName || userProfile?.username,
+      }));
+      toast.success('已撤回到待剪');
+    } catch (error) {
+      console.error('Undo submit failed:', error);
+      toast.error('撤回失敗，請稍後再試');
     } finally {
       setBusyId(null);
     }
@@ -569,6 +624,22 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
         </div>
       )}
 
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[170px]">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜尋片名或 IP"
+            className="w-full pl-8 pr-8 py-2 rounded-xl text-xs bg-white border border-black/5 focus:outline-none focus:border-[#5A5A40]/30" />
+          {search && <button type="button" onClick={() => setSearch('')} aria-label="清除搜尋" className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500"><X size={13} /></button>}
+        </div>
+        <button type="button" onClick={() => setUrgentOnly(v => !v)} className={urgentOnly
+          ? 'px-3 py-2 rounded-xl text-[11px] font-bold bg-red-500 text-white'
+          : 'px-3 py-2 rounded-xl text-[11px] font-bold bg-white border border-black/5 text-gray-500'}>只看急件</button>
+        <select value={sortBy} onChange={e => setSortBy(e.target.value as 'flow' | 'newest' | 'vendor')}
+          className="px-3 py-2 rounded-xl text-[11px] font-bold bg-white border border-black/5 text-gray-500 focus:outline-none">
+          <option value="flow">預設順序</option><option value="newest">最新加入</option><option value="vendor">依 IP</option>
+        </select>
+      </div>
+
       {/* 大分頁而不是三個區塊疊在一起：手機上一路捲到底才看得到「待上傳雲端」，
           而那正是最常用的一區。一次只顯示一類，捲動長度就固定了。 */}
       <div className="grid grid-cols-3 gap-2">
@@ -603,7 +674,7 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
           icon={<Film size={14} />}
           empty="目前沒有待剪的原始素材"
         >
-          {toEdit.map(a => <AssetCard {...cardProps(a)} onAdvance={() => advance(a)} />)}
+          {pagedList.map(a => <AssetCard {...cardProps(a)} onAdvance={() => advance(a)} />)}
         </Section>
       )}
 
@@ -618,7 +689,7 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
           icon={<UploadCloud size={14} />}
           empty="目前沒有待上傳的片"
         >
-          {toUpload.map(a => <AssetCard {...cardProps(a)} onUpload={() => markUploaded(a)} onUndoUpload={() => undoUploaded(a)} showClientBadge />)}
+          {pagedList.map(a => <AssetCard {...cardProps(a)} onUpload={() => markUploaded(a)} onUndoSubmit={() => undoSubmit(a)} onUndoUpload={() => undoUploaded(a)} showClientBadge />)}
         </Section>
       )}
 
@@ -632,8 +703,18 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
           icon={<PackageCheck size={14} />}
           empty="還沒有完成的片"
         >
-          {done.map(a => <AssetCard {...cardProps(a)} onUndoUpload={() => undoUploaded(a)} showClientBadge />)}
+          {pagedList.map(a => <AssetCard {...cardProps(a)} onUndoUpload={() => undoUploaded(a)} showClientBadge />)}
         </Section>
+      )}
+
+      {currentList.length > 5 && (
+        <div className="flex items-center justify-center gap-3 pt-1">
+          <button type="button" disabled={activePage <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}
+            className="p-2 rounded-xl bg-white border border-black/5 text-[#5A5A40] disabled:opacity-30" aria-label="上一頁"><ChevronLeft size={16} /></button>
+          <span className="text-xs font-bold text-gray-500">第 {activePage} / {pageCount} 頁・每頁 5 支</span>
+          <button type="button" disabled={activePage >= pageCount} onClick={() => setPage(p => Math.min(pageCount, p + 1))}
+            className="p-2 rounded-xl bg-white border border-black/5 text-[#5A5A40] disabled:opacity-30" aria-label="下一頁"><ChevronRight size={16} /></button>
+        </div>
       )}
     </div>
   );

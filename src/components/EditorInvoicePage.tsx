@@ -33,6 +33,20 @@ function StatusBadge({ status }: { status: EditorInvoice['status'] }) {
       </span>
     );
   }
+  if (status === 'approved') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[10px] font-bold border border-blue-200">
+        <ShieldCheck size={10} /> 公司已核准
+      </span>
+    );
+  }
+  if (status === 'payment_processing') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 text-[10px] font-bold border border-purple-200">
+        <Wallet size={10} /> 付款處理中
+      </span>
+    );
+  }
   return (
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-bold border border-amber-200">
       <Send size={10} /> 已送出，待付款

@@ -49,7 +49,15 @@ export const DEFAULT_EDITOR_FEE = 900;
 // 結清的，不該再湧進系統的第一張請款單。
 // ⚠️ 這個值只有在整套功能重新上線時才需要動，平常不要改：往前調會讓已經結清的舊片重新變成可請款。
 export const EDITOR_BILLING_START_MONTH = '2026-08';
+
+/**
+ * 新舊帳的精確切點（台北時間）。這個時間以前上傳的片不會因為「剛好同月」就自動進請款，
+ * 必須先由管理端逐支標成 legacySettlementStatus=unpaid；已用舊制付過的標成 paid。
+ */
+export const EDITOR_BILLING_CUTOVER_AT = '2026-08-21T00:00:00+08:00';
+/** 部署與資料遷移完成前維持 false；最後一道人工開關。 */
 export const EDITOR_INVOICING_ENABLED = false;
+export type LegacySettlementStatus = 'paid' | 'unpaid' | 'needs_review';
 
 /**
  * 請款單明細＝送單當下的快照。
@@ -74,9 +82,13 @@ export interface EditorInvoice {
   items: EditorInvoiceItem[];
   itemCount: number;       // = items.length，列表/統計不用展開陣列
   totalAmount: number;     // = sum(items.amount)，凍結
-  status: 'submitted' | 'paid' | 'void';
+  status: 'submitted' | 'approved' | 'payment_processing' | 'paid' | 'void';
   submittedAt: string;
   note?: string;
+  approvedAt?: string;
+  approvedByUid?: string;
+  processingAt?: string;
+  processingByUid?: string;
   paidAt?: string;
   paidByUid?: string;
   voidedAt?: string;
@@ -132,17 +144,37 @@ export interface VersionLog {
 export interface SocialAccount {
   platform: string;
   username: string;
-  /** @deprecated 密碼改存 vendorSecrets/{vendorId}；只為舊資料遷移保留。 */
+  /**
+   * @deprecated 2026-08-19 起密碼改存 `vendorSecrets/{vendorId}`，見 VendorSecrets。
+   * 這個欄位只為了讀舊資料而保留（尚未回填的廠商），新的存檔一律不寫它。
+   * 讀密碼請走 VendorManagement 的 resolvePassword()，不要直接讀這裡。
+   */
   password?: string;
 }
 
+/**
+ * 客戶社群帳號的密碼，獨立成一個 collection（文件 id ＝ vendorId）。
+ *
+ * 為什麼不留在 vendor 文件裡：**Firestore 沒有欄位級讀取控制**。密碼只要跟廠商資料同一份
+ * 文件，任何讀得到 vendor 的人就一定讀得到密碼——而 EditorAssetQueue.tsx 對每個指派廠商
+ * 開的是整份文件訂閱（`{ ...snap.data() }`），所以外包剪輯師的瀏覽器裡一直都有客戶的
+ * IG/FB/TikTok 明碼密碼。2026-08-19 實測：主要剪輯師負責 11 家，可讀到 11 組。
+ *
+ * 邊界跟 billingContracts 一致：擋 editor，內部角色照舊（小編要用客戶帳號發文）。
+ */
 export interface VendorSecrets {
   id?: string;
+  /** key ＝ socialAccountKey(帳號)，value ＝ 明碼密碼 */
   passwords: Record<string, string>;
   updatedAt: string;
   updatedBy: string;
 }
 
+/**
+ * 密碼在 VendorSecrets.passwords 裡的 key。用 platform+username 而不是陣列索引：
+ * 索引會因為刪除/重排而錯位，把 A 帳號的密碼配到 B 帳號上。
+ * 每次存檔都整份重建這張表，所以改帳號名稱不會留下孤兒。
+ */
 export function socialAccountKey(acc: Pick<SocialAccount, 'platform' | 'username'>): string {
   return `${acc.platform}␟${acc.username}`;
 }
@@ -175,6 +207,14 @@ export interface MonthlyAdjustment {
   createdAt: string;
 }
 
+export interface VendorTargetChange {
+  fromMonth: string;  // YYYY-MM，從這個月(含)起生效，直到下一筆變更為止
+  videos: number;     // 該期間每月影音支數
+  posts: number;      // 該期間每月圖文篇數
+  reason?: string;    // 原因，例如「8月起合約調整為4支」
+  createdAt: string;
+}
+
 export interface DeficitEntry {
   month: string;   // YYYY-MM，通常是系統開始自動追蹤前、已經確定積欠的歷史月份
   owed: number;     // 該筆對起始欠片的加減，正數＝欠這麼多支、負數＝沖銷/抵銷這麼多支（直接加總進 baseline，不是delta）
@@ -188,8 +228,10 @@ export interface Vendor {
   socialAccounts: SocialAccount[];
   postingHabits?: PostingHabit[];
   cooperationItems: CooperationItem[];
-  monthlyTargetPosts?: number;
-  monthlyTargetVideos?: number;
+  monthlyTargetPosts?: number;   // 現行合約的每月圖文篇數＝targetHistory 最新一筆的數字；沒有 targetHistory 的舊資料就是唯一基準
+  monthlyTargetVideos?: number;  // 同上，現行合約的每月影音支數
+  targetHistory?: VendorTargetChange[]; // 合約片數的逐月變更紀錄；有這欄時取代 monthlyTargetVideos/Posts 當各月基準，
+                                        // 只有變動的月份才留一筆，變更只影響 fromMonth(含)之後，不回溯改寫歷史月份的目標與欠片
   cooperationStartMonth?: string; // YYYY-MM，合作正式起算月；該月之前不列入任何目標/欠片/庫存追蹤，避免新客戶還沒開始拍就先冒出欠片
   weeklyPattern?: number[]; // 長度4，[第1週,第2週,第3週,第4週]目標影音支數（自然月每7天一段，第4段吸收月底剩餘天數）；不填則用 monthlyTargetVideos/4 平均攤提
   assignedUserIds?: string[]; // 指派負責此IP的同事 uid（用於庫存警示通知過濾；engineer/manager 一律看得到全部，不需被指派）
@@ -336,6 +378,14 @@ export interface Asset {
   editorFee?: number;       // 這支的剪輯費（未填＝DEFAULT_EDITOR_FEE）。納入請款單後凍結
   billableEditorId?: string; // 計費歸屬，在上傳當下定案（不能事後查 vendor.editorId，那是即時值，換剪輯師會讓舊片的請款跑掉）
   editorInvoiceId?: string;  // 已納入哪張請款單。有值＝已請款過，規則保證只能 unset→set
+  // 新舊帳盤點。切帳日前的片必須逐支確認；未填視同 needs_review，不會出現在剪輯師請款頁。
+  legacySettlementStatus?: LegacySettlementStatus;
+  legacySettledAt?: string;
+  legacySettledAmount?: number;
+  legacySettlementNote?: string;
+  legacySettlementSource?: string;
+  legacyReviewedAt?: string;
+  legacyReviewedByUid?: string;
   flowLog?: FlowLogEntry[]; // 交棒歷程（取代過去匯出時手打、關窗即失的備註）
   submittedBy?: string; // 剪輯師送審時的 uid
   submittedAt?: string; // 剪輯師送審時間
