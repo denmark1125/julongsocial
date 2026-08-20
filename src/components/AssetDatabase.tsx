@@ -7,6 +7,7 @@ import {
   orderBy,
   deleteDoc,
   doc,
+  setDoc,
   updateDoc,
   where,
   getDocs
@@ -36,7 +37,8 @@ import {
   Users,
   Archive,
   Ban,
-  RotateCcw
+  RotateCcw,
+  MessageSquareText
 } from 'lucide-react';
 import { toJpeg } from 'html-to-image';
 import download from 'downloadjs';
@@ -66,6 +68,10 @@ const handleFirestoreError = (error: unknown, operationType: OperationType, path
 export default function AssetDatabase() {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
+  const [reviewNotes, setReviewNotes] = useState<Record<string, { text: string; updatedAt: string; updatedByName: string }>>({});
+  const [noteAsset, setNoteAsset] = useState<Asset | null>(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
   // 強制刪除只開給工程師，所以這頁要知道自己是誰（比照 ShootBookings 的做法）
   const [me, setMe] = useState<UserProfile | null>(null);
   // 顯示/篩選/計數一律走「實際狀態」而不是 asset.status：貼文被刪掉的素材資料上還留著 used，
@@ -130,6 +136,10 @@ export default function AssetDatabase() {
       setPosts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Post)));
     });
 
+    const notesUnsubscribe = onSnapshot(collection(db, 'assetReviewNotes'), (snapshot) => {
+      setReviewNotes(Object.fromEntries(snapshot.docs.map(note => [note.id, note.data() as { text: string; updatedAt: string; updatedByName: string }])));
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'assetReviewNotes'));
+
     const q = query(collection(db, 'assets'), orderBy('createdAt', 'desc'));
     const aUnsubscribe = onSnapshot(q, (snapshot) => {
       setAssets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
@@ -140,9 +150,43 @@ export default function AssetDatabase() {
     return () => {
       vUnsubscribe();
       pUnsubscribe();
+      notesUnsubscribe();
       aUnsubscribe();
     };
   }, []);
+
+  const openReviewNote = (asset: Asset) => {
+    setNoteAsset(asset);
+    setNoteDraft(reviewNotes[asset.id!]?.text || '');
+  };
+
+  const saveReviewNote = async () => {
+    if (!noteAsset?.id || !auth.currentUser) return;
+    setSavingNote(true);
+    try {
+      const noteRef = doc(db, 'assetReviewNotes', noteAsset.id);
+      const text = noteDraft.trim();
+      if (text) {
+        await setDoc(noteRef, {
+          assetId: noteAsset.id,
+          vendorId: noteAsset.vendorId,
+          text,
+          updatedAt: new Date().toISOString(),
+          updatedByUid: auth.currentUser.uid,
+          updatedByName: me?.displayName || me?.username || auth.currentUser.email || '內部同事',
+        });
+        toast.success('審片備註已儲存');
+      } else {
+        await deleteDoc(noteRef);
+        toast.success('審片備註已清除');
+      }
+      setNoteAsset(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `assetReviewNotes/${noteAsset.id}`);
+    } finally {
+      setSavingNote(false);
+    }
+  };
 
   // 藏鏡人上傳素材＝拍攝真的完成了；不能靠他們額外記得回「拍攝進度」頁按完成，
   // 直接在這裡自動核銷該廠商目前有效的預約，交件數跟著這批上傳累加。
@@ -881,6 +925,21 @@ export default function AssetDatabase() {
                   "font-bold leading-tight line-clamp-2",
                   effStatus(asset) === 'used' ? "text-sm text-gray-500" : "text-lg"
                 )}>{asset.title}</h4>
+                {reviewNotes[asset.id!] && (
+                  <button
+                    type="button"
+                    onClick={() => openReviewNote(asset)}
+                    className="mt-2 w-full flex items-start gap-2 rounded-xl bg-amber-50/70 px-3 py-2 text-left hover:bg-amber-50"
+                  >
+                    <MessageSquareText size={13} className="mt-0.5 shrink-0 text-amber-600" />
+                    <span className="min-w-0">
+                      <span className="block text-[11px] leading-relaxed text-amber-900 line-clamp-2">{reviewNotes[asset.id!].text}</span>
+                      <span className="block mt-1 text-[9px] text-amber-600/70">
+                        {reviewNotes[asset.id!].updatedByName}・{new Date(reviewNotes[asset.id!].updatedAt).toLocaleDateString()}
+                      </span>
+                    </span>
+                  </button>
+                )}
               </div>
               <div className="flex items-center justify-between pt-4 border-t border-black/5">
                 <div className="flex items-center space-x-2">
@@ -902,6 +961,19 @@ export default function AssetDatabase() {
                       >
                         {asset.approved ? '已審核' : '待審核'}
                       </button>
+                      {!asset.approved && (
+                        <button
+                          type="button"
+                          onClick={() => openReviewNote(asset)}
+                          title="記錄尚未審片的原因"
+                          className={cn(
+                            "px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1",
+                            reviewNotes[asset.id!] ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-400 hover:text-gray-600"
+                          )}
+                        >
+                          <MessageSquareText size={12} /><span>備註</span>
+                        </button>
+                      )}
                       {deriveFlowStage(asset) === 'client_review' && !asset.cloudUploadedAt && !asset.editorInvoiceId && !asset.usedInPostId && (
                         <button
                           onClick={() => undoConvert(asset)}
@@ -1546,6 +1618,35 @@ export default function AssetDatabase() {
                   </p>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {noteAsset && (
+        <div className="fixed inset-0 z-[70] bg-black/40 p-4 flex items-center justify-center" onMouseDown={() => !savingNote && setNoteAsset(null)}>
+          <div className="w-full max-w-lg rounded-[28px] bg-white p-6 shadow-2xl" onMouseDown={event => event.stopPropagation()}>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-amber-600">內部審片備註</p>
+                <h3 className="mt-1 text-lg font-bold text-[#5A5A40]">{noteAsset.title}</h3>
+              </div>
+              <button type="button" onClick={() => setNoteAsset(null)} disabled={savingNote} className="text-gray-300 hover:text-gray-500"><X size={20} /></button>
+            </div>
+            <p className="mt-4 text-xs text-gray-500">記下目前尚未審核的原因，例如：資料夾沒有素材、等待業主回覆、需要補拍。</p>
+            <textarea
+              autoFocus
+              rows={5}
+              value={noteDraft}
+              onChange={event => setNoteDraft(event.target.value)}
+              placeholder="輸入尚未審片的原因…"
+              className="mt-3 w-full resize-none rounded-2xl border border-black/10 bg-[#F5F5F0]/60 p-4 text-sm leading-relaxed outline-none focus:border-[#5A5A40]/40"
+            />
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <p className="text-[10px] text-gray-400">清空內容並儲存，即可刪除這則備註。</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setNoteAsset(null)} disabled={savingNote} className="px-4 py-2 rounded-xl text-xs font-bold text-gray-500 hover:bg-gray-50">取消</button>
+                <button type="button" onClick={saveReviewNote} disabled={savingNote} className="px-5 py-2 rounded-xl bg-[#5A5A40] text-xs font-bold text-white disabled:opacity-50">{savingNote ? '儲存中…' : '儲存備註'}</button>
+              </div>
             </div>
           </div>
         </div>

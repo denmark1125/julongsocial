@@ -373,6 +373,11 @@ service cloud.firestore {
         && resource.data.get('editorInvoiceId', '') == '';
     }
 
+    // 尚未審片原因屬公司內部工作紀錄；外包剪輯師不可讀取或寫入。
+    match /assetReviewNotes/{assetId} {
+      allow read, create, update, delete: if isAuthenticated() && !isEditorRole();
+    }
+
     match /editors/{editorId} {
       allow read: if isAuthenticated();
       // 請款單引用 editorId/editorName，這份名冊等於薪酬對象清單，剪輯師本人絕不該能改。
