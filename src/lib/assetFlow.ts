@@ -39,6 +39,12 @@ export function getClientApprovalTarget(asset: Pick<Asset, 'cloudUploadedAt'>): 
   return asset.cloudUploadedAt ? 'ready' : 'to_upload';
 }
 
+/** 業主是否已通過。不能只看 approved：to_upload 代表已通過、但尚未上傳，approved 仍為 false。 */
+export function isClientApproved(asset: Pick<Asset, 'stage' | 'approved' | 'flowStage'>): boolean {
+  const stage = deriveFlowStage(asset);
+  return stage === 'to_upload' || stage === 'ready';
+}
+
 /**
  * 產生推進到下一棒要寫進 Firestore 的欄位。
  * 一定會連帶寫入 FLOW_STAGE_COMPAT 對應的 stage/approved，

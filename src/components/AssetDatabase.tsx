@@ -15,7 +15,7 @@ import {
 import { db, auth } from '../firebase';
 import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking, UserProfile, deriveFlowStage } from '../types';
 import { visibleVendors, trackedVendors, buildPostIndex, getDisplayAssetStatus } from '../lib/vendorStatus';
-import { buildFlowUpdate, buildSubmitUndoUpdate, getClientApprovalTarget } from '../lib/assetFlow';
+import { buildFlowUpdate, buildSubmitUndoUpdate, getClientApprovalTarget, isClientApproved } from '../lib/assetFlow';
 import { 
   Video, 
   Plus, 
@@ -305,12 +305,13 @@ export default function AssetDatabase() {
     try {
       // 業主審核與剪輯師上傳是兩條獨立事實：沒上傳時只能進 to_upload，
       // 不能在這裡補 cloudUploadedAt，否則同事按審核就會替剪輯師產生請款資格。
-      const to = asset.approved ? 'client_review' : getClientApprovalTarget(asset);
+      const reviewPassed = isClientApproved(asset);
+      const to = reviewPassed ? 'client_review' : getClientApprovalTarget(asset);
       await updateDoc(
         doc(db, 'assets', asset.id!),
         buildFlowUpdate(asset, to, { byUid: auth.currentUser?.uid })
       );
-      toast.success(asset.approved ? '已取消審核' : '已通過審核');
+      toast.success(reviewPassed ? '已取消審核' : '已通過審核');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `assets/${asset.id}`);
     }
@@ -956,12 +957,12 @@ export default function AssetDatabase() {
                         onClick={() => toggleApproval(asset)}
                         className={cn(
                           "px-3 py-1 rounded-lg text-[10px] font-bold transition-colors",
-                          asset.approved ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-400"
+                          isClientApproved(asset) ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-400"
                         )}
                       >
-                        {asset.approved ? '已審核' : '待審核'}
+                        {isClientApproved(asset) ? '已審核' : '待審核'}
                       </button>
-                      {!asset.approved && (
+                      {!isClientApproved(asset) && (
                         <button
                           type="button"
                           onClick={() => openReviewNote(asset)}
@@ -985,7 +986,7 @@ export default function AssetDatabase() {
                       )}
                     </>
                   )}
-                  {asset.stage === 'finished' && (effStatus(asset) === 'available' || (effStatus(asset) === 'used' && !asset.usedInPostId)) && (
+                  {asset.stage === 'finished' && !isClientApproved(asset) && (effStatus(asset) === 'available' || (effStatus(asset) === 'used' && !asset.usedInPostId)) && (
                     <button
                       onClick={() => toggleManualComplete(asset)}
                       title={effStatus(asset) === 'used' ? '取消完成，解鎖回可使用' : '標記完成（不排日期直接視為已使用）'}
