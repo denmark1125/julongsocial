@@ -903,16 +903,13 @@ export default function AssetDatabase() {
                         {asset.approved ? '已審核' : '待審核'}
                       </button>
                       {deriveFlowStage(asset) === 'client_review' && !asset.cloudUploadedAt && !asset.editorInvoiceId && !asset.usedInPostId && (
-                        <details className="relative">
-                          <summary className="list-none cursor-pointer px-2 py-1 text-[10px] text-gray-400 hover:text-gray-600">
-                            更多
-                          </summary>
-                          <div className="absolute right-0 z-20 mt-1 min-w-[96px] rounded-xl border border-black/5 bg-white p-1 shadow-lg">
-                            <button onClick={() => undoConvert(asset)} className="w-full px-3 py-2 rounded-lg text-left text-[10px] text-gray-500 hover:bg-gray-50 hover:text-gray-700">
-                              退回待剪
-                            </button>
-                          </div>
-                        </details>
+                        <button
+                          onClick={() => undoConvert(asset)}
+                          title="退回待剪"
+                          className="px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1 bg-gray-100 text-gray-400 hover:bg-gray-200 hover:text-gray-600"
+                        >
+                          <RotateCcw size={12} /> <span>退回</span>
+                        </button>
                       )}
                     </>
                   )}
