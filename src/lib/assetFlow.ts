@@ -168,11 +168,6 @@ export function buildCloudUploadUndoUpdate(
   };
 }
 
-/** 業主通過後的下一棒：只有剪輯師已確認上傳，才能直接可排程。 */
-export function getClientApprovalTarget(asset: Pick<Asset, 'cloudUploadedAt'>): 'to_upload' | 'ready' {
-  return asset.cloudUploadedAt ? 'ready' : 'to_upload';
-}
-
 /**
  * 撤回誤按的「交片送審／轉為成片」。只適用於尚在 client_review、且還沒有進入
  * 上傳、請款、排程的素材；呼叫端必須先做這三項檢查。
