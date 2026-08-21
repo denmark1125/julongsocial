@@ -10,7 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Vendor, Asset, Post, ShootBooking, BookingReason, UserProfile, DeficitEntry } from '../types';
-import { getDeficitBreakdown, getEffectiveMonthlyTarget, getOwedVideoCount, getAvailableVideoAssets, hasVideoTrackingScope, isVendorTrackedInMonth, getDeliveredVideosInMonth } from '../lib/vendorStatus';
+import { getContractTargets, getDeficitBreakdown, getEffectiveMonthlyTarget, getOwedVideoCount, getAvailableVideoAssets, hasVideoTrackingScope, isVendorTrackedInMonth, getDeliveredVideosInMonth } from '../lib/vendorStatus';
 import { Film, Plus, Check, CalendarClock, AlertTriangle, Pencil, X, Trash2 } from 'lucide-react';
 import ProductionFlowBoard from './ProductionFlowBoard';
 import { clsx, type ClassValue } from 'clsx';
@@ -344,7 +344,10 @@ export default function ShootBookings() {
                       // 冷凍/終止月完全沒交片時 delta=0，印成「＋08月補交 0」只是雜訊，直接不顯示
                       .filter(ms => !(ms.untracked && ms.delivered === 0))
                       .map(ms => {
-                        const adj = ms.target - (row.vendor.monthlyTargetVideos || 0);
+                        // 基準要取「該月的合約片數」而不是當下的 monthlyTargetVideos——合約中途改片數(8月起8→4)時，
+                        // 用當下值會把「合約變更」誤標成加贈/扣片，推導文字會說謊
+                        const monthBase = getContractTargets(row.vendor, ms.month).videos;
+                        const adj = ms.target - monthBase;
                         return (
                           <span key={ms.month}>
                             {/* 月份那一小段要綁在一起，不然會斷成行尾「− 08」＋下一行「月補交 2」。
@@ -354,7 +357,7 @@ export default function ShootBookings() {
                               {ms.delta >= 0 ? '+' : '−'} {ms.month.slice(5)}月
                               {ms.untracked ? `補交 ${Math.abs(ms.delta)}` : `未達標 ${Math.ceil(Math.abs(ms.delta))}`}
                             </span>
-                            {!ms.untracked && `（目標 ${ms.target}${adj !== 0 ? `＝月目標 ${row.vendor.monthlyTargetVideos || 0}${adj > 0 ? '＋加贈' : '−扣片'} ${Math.abs(adj)}` : ''} − 已交 ${ms.delivered}）`}
+                            {!ms.untracked && `（目標 ${ms.target}${adj !== 0 ? `＝月目標 ${monthBase}${adj > 0 ? '＋加贈' : '−扣片'} ${Math.abs(adj)}` : ''} − 已交 ${ms.delivered}）`}
                           </span>
                         );
                       })}

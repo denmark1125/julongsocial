@@ -41,7 +41,7 @@ import { format, isPast, isToday, addDays, parseISO, getDay, setHours, setMinute
 import toast from 'react-hot-toast';
 import TrackingExportModal from './TrackingExportModal';
 import { DismissedHabit, MonthlyAdjustment } from '../types';
-import { visibleVendors, trackedVendorsForMonth, getEffectiveMonthlyTarget, isAssetSelectable, buildPostIndex } from '../lib/vendorStatus';
+import { visibleVendors, trackedVendorsForMonth, getContractTargets, getEffectiveMonthlyTarget, isAssetSelectable, buildPostIndex } from '../lib/vendorStatus';
 import { setPostStatus, togglePostConfirmation, togglePostPlatformPublished } from '../lib/postActions';
 
 import { clsx, type ClassValue } from 'clsx';
@@ -399,11 +399,13 @@ export default function PostManagement() {
     const postCount = vendorMonthPosts.filter(p => p.contentType === 'post').length;
     const videoCount = vendorMonthPosts.filter(p => p.contentType === 'video').length;
     
-    const targetPosts = vendor.monthlyTargetPosts || 0;
+    // 合約片數可能中途變更(例如自然風8月起影音8→4)，所以基準要按「這個月」取，不能用當下的單一欄位
+    const monthBase = getContractTargets(vendor, selectedMonth);
+    const targetPosts = monthBase.posts;
     const targetVideos = getEffectiveMonthlyTarget(vendor, selectedMonth);
     // 只有廠商從來沒設定過任何基本目標時才 fallback 成8；如果基本目標有設定、只是這個月被加贈/扣片調整打到0，
     // 要如實顯示0，不能被fallback蓋掉——否則會跟拍攝進度頁算出來的「這個月目標其實是0」互相矛盾
-    const hasBaseTarget = (vendor.monthlyTargetPosts || 0) > 0 || (vendor.monthlyTargetVideos || 0) > 0;
+    const hasBaseTarget = monthBase.posts > 0 || monthBase.videos > 0;
     const totalTarget = hasBaseTarget ? (targetPosts + targetVideos) : 8;
 
     const totalCount = vendorMonthPosts.length;

@@ -13,18 +13,22 @@ import {
   orderBy
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Vendor, SocialAccount, OperationType, Editor, PauseRecord, UserProfile, VendorSecrets, socialAccountKey } from '../types';
+import { Vendor, SocialAccount, OperationType, Editor, PauseRecord, UserProfile, VendorTargetChange, VendorSecrets, socialAccountKey } from '../types';
 import { Plus, Trash2, Edit2, ExternalLink, Shield, X, Eye, EyeOff, Users, ChevronDown, ChevronUp, Settings2, Snowflake, RotateCcw, PowerOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { getEffectiveVendorStatus } from '../lib/vendorStatus';
+import { getContractTargets, getEffectiveVendorStatus } from '../lib/vendorStatus';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
 type StatusTab = 'active' | 'paused' | 'ended';
+
+// 第一次變更合約片數時，會自動把「原本的數字」補成一筆基準紀錄墊在最前面，這樣歷史月份才有東西可以對照。
+// 廠商沒填合作起始月(自然風就是空的)時用這個哨兵月份，語意等同 pauseHistory 的 '9999-12-31'。
+const BASELINE_FROM_MONTH = '1970-01';
 
 export default function VendorManagement() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -44,6 +48,9 @@ export default function VendorManagement() {
   const [pauseUntilInput, setPauseUntilInput] = useState('');
   const [endModalVendor, setEndModalVendor] = useState<Vendor | null>(null);
   const [endedAtInput, setEndedAtInput] = useState('');
+  const [targetChangeMonth, setTargetChangeMonth] = useState('');
+  const [targetChangeReason, setTargetChangeReason] = useState('');
+  const currentMonth = format(new Date(), 'yyyy-MM');
   const [formData, setFormData] = useState({
     name: '',
     socialAccounts: [{ platform: 'IG', username: '', password: '' }],
@@ -51,6 +58,7 @@ export default function VendorManagement() {
     cooperationItems: [] as string[],
     monthlyTargetPosts: 8,
     monthlyTargetVideos: 0,
+    targetHistory: [] as VendorTargetChange[],
     cooperationStartMonth: '',
     weeklyPattern: null as number[] | null,
     excludeFromStats: false,
@@ -225,6 +233,46 @@ export default function VendorManagement() {
         statusFields.pausedUntil = openRecord?.until || '';
       }
 
+      // 合約片數被改動時，一定要留下逐月變更紀錄，不能只覆蓋單一欄位——
+      // 月目標是「從錨點月即時重算到今天」的，直接改會把歷史每個月的目標與欠片一起改寫
+      let targetHistory: VendorTargetChange[] = [...formData.targetHistory];
+      const prevVideos = editingVendor?.monthlyTargetVideos || 0;
+      const prevPosts = editingVendor?.monthlyTargetPosts || 0;
+      const targetsChanged = Boolean(editingVendor) &&
+        (formData.monthlyTargetVideos !== prevVideos || formData.monthlyTargetPosts !== prevPosts);
+
+      if (targetsChanged) {
+        if (!targetChangeMonth) {
+          toast.error('每月片數有變動，請先選「從哪個月開始生效」');
+          return;
+        }
+        if (targetHistory.length === 0) {
+          // 沒有任何紀錄時先把「原本的數字」補成基準，否則變更月之前的月份會找不到對照而拿到新數字
+          targetHistory.push({
+            fromMonth: editingVendor!.cooperationStartMonth || BASELINE_FROM_MONTH,
+            videos: prevVideos,
+            posts: prevPosts,
+            reason: '原始合約（系統自動記錄）',
+            createdAt: new Date().toISOString()
+          });
+        }
+        targetHistory = [
+          ...targetHistory.filter(r => r.fromMonth !== targetChangeMonth),
+          {
+            fromMonth: targetChangeMonth,
+            videos: formData.monthlyTargetVideos,
+            posts: formData.monthlyTargetPosts,
+            createdAt: new Date().toISOString(),
+            // reason 空白就整個 key 不要放：Firestore SDK 對 undefined 是丟例外不是忽略，
+            // 會讓整筆廠商設定存不進去（pauseHistory 踩過同一個雷）
+            ...(targetChangeReason.trim() ? { reason: targetChangeReason.trim() } : {})
+          }
+        ].sort((a, b) => a.fromMonth.localeCompare(b.fromMonth));
+      }
+
+      // 單一欄位維持「現行合約」語意＝最新一筆變更的數字，給沒有 targetHistory 的舊資料與外部腳本 fallback
+      const latestTargets = targetHistory.length > 0 ? targetHistory[targetHistory.length - 1] : null;
+
       const accountsForVendor: SocialAccount[] = formData.socialAccounts.map(({ platform, username }) => ({ platform, username }));
       const passwordMap: Record<string, string> = {};
       formData.socialAccounts.forEach(acc => {
@@ -234,6 +282,8 @@ export default function VendorManagement() {
       const data = {
         ...formData,
         socialAccounts: accountsForVendor,
+        targetHistory,
+        ...(latestTargets ? { monthlyTargetVideos: latestTargets.videos, monthlyTargetPosts: latestTargets.posts } : {}),
         ...statusFields,
         createdBy: auth.currentUser.uid,
         createdAt: new Date().toISOString()
@@ -266,6 +316,8 @@ export default function VendorManagement() {
 
       setIsModalOpen(false);
       setEditingVendor(null);
+      setTargetChangeMonth('');
+      setTargetChangeReason('');
       setFormData({ 
         name: '', 
         socialAccounts: [{ platform: 'IG', username: '', password: '' }], 
@@ -273,6 +325,7 @@ export default function VendorManagement() {
         cooperationItems: [],
         monthlyTargetPosts: 8,
         monthlyTargetVideos: 0,
+        targetHistory: [],
         cooperationStartMonth: '',
         weeklyPattern: null,
         excludeFromStats: false,
@@ -391,6 +444,16 @@ export default function VendorManagement() {
   ];
   const displayedVendors = vendors.filter(v => getEffectiveVendorStatus(v) === statusTab);
 
+  // 表單裡的片數跟存檔前的值不一樣＝這次要記一筆合約變更，生效月份才變成必填
+  const targetsChangedInForm = Boolean(editingVendor) && (
+    formData.monthlyTargetVideos !== (editingVendor?.monthlyTargetVideos || 0) ||
+    formData.monthlyTargetPosts !== (editingVendor?.monthlyTargetPosts || 0)
+  );
+  // 手填欠片紀錄會把該月(含)以前凍結成固定數字，改合約片數對那些月份沒有作用，要當場講清楚
+  const deficitLockMonth = (editingVendor?.deficitEntries || [])
+    .reduce<string | null>((max, e) => (!max || e.month > max ? e.month : max), null);
+  const sortedTargetHistory = [...formData.targetHistory].sort((a, b) => a.fromMonth.localeCompare(b.fromMonth));
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -409,6 +472,8 @@ export default function VendorManagement() {
             onClick={() => {
               setEditingVendor(null);
               setShowAdvanced(false);
+              setTargetChangeMonth('');
+              setTargetChangeReason('');
               setFormData({
                 name: '',
                 socialAccounts: [{ platform: 'IG', username: '', password: '' }],
@@ -416,6 +481,7 @@ export default function VendorManagement() {
                 cooperationItems: [],
                 monthlyTargetPosts: 8,
                 monthlyTargetVideos: 0,
+                targetHistory: [],
                 cooperationStartMonth: '',
                 weeklyPattern: null,
                 excludeFromStats: false,
@@ -476,6 +542,7 @@ export default function VendorManagement() {
                       cooperationItems: vendor.cooperationItems || [],
                       monthlyTargetPosts: vendor.monthlyTargetPosts || 0,
                       monthlyTargetVideos: vendor.monthlyTargetVideos || 0,
+                      targetHistory: vendor.targetHistory || [],
                       cooperationStartMonth: vendor.cooperationStartMonth || '',
                       weeklyPattern: vendor.weeklyPattern && vendor.weeklyPattern.length === 4 ? vendor.weeklyPattern : null,
                       excludeFromStats: vendor.excludeFromStats || false,
@@ -485,6 +552,8 @@ export default function VendorManagement() {
                       editorName: vendor.editorName || '',
                       selfPublishing: vendor.selfPublishing || false
                     });
+                    setTargetChangeMonth('');
+                    setTargetChangeReason('');
                     setShowAdvanced(Boolean(vendor.selfPublishing));
                     setIsModalOpen(true);
                   }}
@@ -601,16 +670,31 @@ export default function VendorManagement() {
                 </div>
               )}
 
+              {/* 顯示「這個月」實際生效的合約片數，不是單一欄位——合約中途改過片數時兩者會不一樣 */}
               <div className="flex gap-4 mb-2">
                 <div className="bg-blue-50 p-2 rounded-xl flex-1 border border-blue-100">
                   <div className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">圖文目標</div>
-                  <div className="text-sm font-bold text-blue-700">{vendor.monthlyTargetPosts || 0} <span className="text-[10px] font-normal">/ 月</span></div>
+                  <div className="text-sm font-bold text-blue-700">{getContractTargets(vendor, currentMonth).posts} <span className="text-[10px] font-normal">/ 月</span></div>
                 </div>
                 <div className="bg-orange-50 p-2 rounded-xl flex-1 border border-orange-100">
                   <div className="text-[10px] text-orange-400 font-bold uppercase tracking-wider">影音目標</div>
-                  <div className="text-sm font-bold text-orange-700">{vendor.monthlyTargetVideos || 0} <span className="text-[10px] font-normal">/ 月</span></div>
+                  <div className="text-sm font-bold text-orange-700">{getContractTargets(vendor, currentMonth).videos} <span className="text-[10px] font-normal">/ 月</span></div>
                 </div>
               </div>
+              {(() => {
+                // 已經排定、但還沒生效的合約變更，先在卡片上預告，免得看到的數字跟剛剛改的對不起來
+                const upcoming = [...(vendor.targetHistory || [])]
+                  .filter(r => r.fromMonth > currentMonth)
+                  .sort((a, b) => a.fromMonth.localeCompare(b.fromMonth))[0];
+                if (!upcoming) return null;
+                return (
+                  <p className="text-[10.5px] text-amber-600 mb-2 leading-relaxed">
+                    <span className="whitespace-nowrap">{upcoming.fromMonth} 起改為</span>
+                    {' '}<span className="whitespace-nowrap">影音 {upcoming.videos} 支</span>
+                    {' '}<span className="whitespace-nowrap">圖文 {upcoming.posts} 篇</span>
+                  </p>
+                );
+              })()}
 
               <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">社群帳號</div>
               {vendor.socialAccounts.map((acc, idx) => {
@@ -825,6 +909,76 @@ export default function VendorManagement() {
                       className="w-full p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-[#5A5A40]"
                       placeholder="例如: 4"
                     />
+                  </div>
+                </div>
+
+                <div className="bg-[#F5F5F0]/70 p-4 rounded-2xl border border-gray-200 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-bold text-gray-700">合約片數變更紀錄</span>
+                    {targetsChangedInForm && (
+                      <span className="text-[11px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 shrink-0 whitespace-nowrap">
+                        片數已改動
+                      </span>
+                    )}
+                  </div>
+
+                  {sortedTargetHistory.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {sortedTargetHistory.map((rec) => (
+                        <div key={rec.fromMonth} className="flex items-start justify-between gap-2 bg-white rounded-xl px-3 py-2 border border-gray-100">
+                          <p className="text-xs text-gray-600 leading-relaxed">
+                            <span className="font-bold text-gray-800 whitespace-nowrap">
+                              {rec.fromMonth === BASELINE_FROM_MONTH ? '最初' : `${rec.fromMonth} 起`}
+                            </span>
+                            {' '}<span className="whitespace-nowrap">影音 {rec.videos} 支</span>
+                            {' '}<span className="whitespace-nowrap">圖文 {rec.posts} 篇</span>
+                            {rec.reason && <span className="text-gray-400">　{rec.reason}</span>}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setFormData({ ...formData, targetHistory: formData.targetHistory.filter(r => r.fromMonth !== rec.fromMonth) })}
+                            className="p-1 text-gray-300 hover:text-red-500 shrink-0"
+                            title="刪除這筆變更紀錄"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      還沒有變更紀錄，上面的數字就是每一個月的合約片數。改動數字並選好生效月份存檔後，系統會自動把原本的數字存成一筆基準，歷史月份就不會被改到。
+                    </p>
+                  )}
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1.5">這次變更從哪個月開始生效</label>
+                    <input
+                      type="month"
+                      value={targetChangeMonth}
+                      onChange={(e) => setTargetChangeMonth(e.target.value)}
+                      disabled={!targetsChangedInForm}
+                      className="w-full p-3 bg-white rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#5A5A40] disabled:bg-gray-50 disabled:text-gray-300"
+                    />
+                    <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+                      從這個月起套用上面的片數；更早的月份不受影響，已結算的目標與欠片不會被改寫。
+                      {!targetsChangedInForm && '（先改上面的每月片數才需要填）'}
+                    </p>
+                    {targetsChangedInForm && deficitLockMonth && targetChangeMonth && targetChangeMonth <= deficitLockMonth && (
+                      <p className="text-xs text-red-500 mt-1 leading-relaxed">
+                        <span className="whitespace-nowrap">⚠️ {deficitLockMonth}（含）以前</span>
+                        已由手填欠片紀錄鎖定，改這裡不會影響欠片總數，要調整請到拍攝進度頁的「校正起始欠片」。
+                      </p>
+                    )}
+                    {targetsChangedInForm && (
+                      <input
+                        type="text"
+                        value={targetChangeReason}
+                        onChange={(e) => setTargetChangeReason(e.target.value)}
+                        placeholder="變更原因（選填），例如：8月起合約調整為4支"
+                        className="w-full mt-2 p-3 bg-white rounded-xl border border-gray-200 focus:ring-2 focus:ring-[#5A5A40] text-sm"
+                      />
+                    )}
                   </div>
                 </div>
 
