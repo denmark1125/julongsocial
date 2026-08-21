@@ -79,6 +79,26 @@ service cloud.firestore {
       return !isEditorRole() || vendorId in editorAssignedVendors();
     }
 
+    // 2026-08-20 逐片指派：一支片可以指名給非該廠商預設剪輯師的人做。
+    // 存取判斷因此不能只看廠商，還要認「這支片指名給我」。
+    //
+    // ⚠️ myEditorId() != '' 這個條件缺不得：myEditorId() 讀的是 users/{uid}.linkedEditorId，
+    // 剪輯師帳號若沒綁 editors 標籤會回空字串，而大多數素材的 editorId 也是空的，
+    // 少了它就變成 '' == '' 恆真 —— 那個帳號會讀得到全庫所有未指派的素材。
+    function assetAssignedToMe(data) {
+      return isEditorRole()
+        && myEditorId() != ''
+        && data.get('editorId', '') == myEditorId();
+    }
+
+    // 素材的存取邊界：廠商在我範圍內，或這支片指名給我。
+    // 注意這不會讓被指名的人看到該廠商的其他片 —— 逐文件評估，一支算一支。
+    function editorCanAccessAsset(data) {
+      return !isEditorRole()
+        || (data.vendorId in editorAssignedVendors())
+        || assetAssignedToMe(data);
+    }
+
     // 剪輯師對 assets 只能碰這幾個欄位（交片送審、上傳雲端、請款金額），其餘欄位一律不可變動。
     // flowStage/flowSince/flowLog 是交棒鏈本體，cloudUploadedAt 是「已上傳雲端」的時間戳，
     // editorFee/billableEditorId/editorInvoiceId 是請款用的三個欄位。
@@ -122,6 +142,9 @@ service cloud.firestore {
     function billableEditorIsSelf() {
       return !isEditorRole()
         || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['billableEditorId'])
+        // 清空是合法的：取消上傳會把凍結的計費歸屬一起解除，之後可能改派給別人再重新凍結。
+        // 這不會製造搶片管道——剪輯師清掉後重新上傳，寫進去的還是他自己。
+        || request.resource.data.get('billableEditorId', '') == ''
         || request.resource.data.billableEditorId == myEditorId();
     }
 
@@ -129,6 +152,12 @@ service cloud.firestore {
     // 工程師可以個別在 users/{uid}.canEditDeficitBaseline 開權限給特定人（不需要是 manager）
     function canEditDeficitBaseline() {
       return isAuthenticated() && (isAdmin() || getUserData().get('canEditDeficitBaseline', false) == true);
+    }
+
+    // 改派剪輯師。editorId 原本在規則裡完全裸奔（只有型別檢查），
+    // 加這條是為了擋「已經請款了還去改歸屬」＝事後改帳。
+    function touchesEditorAssignment() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasAny(['editorId']);
     }
 
     function touchesDeficitBaseline() {
@@ -159,6 +188,9 @@ service cloud.firestore {
              (!('monthlyTargetPosts' in data) || data.monthlyTargetPosts is int) &&
              (!('monthlyTargetVideos' in data) || data.monthlyTargetVideos is int) &&
              (!('editorId' in data) || data.editorId is string) &&
+             // 廠商名稱快照：給讀不到 vendor 文件的被指名剪輯師用（見 types.ts Asset.vendorName）。
+             // 刻意不加進 isEditorAssetUpdate() 白名單——剪輯師不能自己改這個顯示名稱。
+             (!('vendorName' in data) || data.vendorName is string) &&
              // 認列月份（YYYY-MM）：手動標記完成時寫入，讓那支片計入該月已交。
              // 不放進 isEditorAssetUpdate() 白名單——剪輯師不能自己決定認列哪個月。
              (!('recognizedMonth' in data) || data.recognizedMonth is string) &&
@@ -352,7 +384,7 @@ service cloud.firestore {
     }
 
     match /assets/{assetId} {
-      allow read: if isAuthenticated() && editorCanAccessVendor(resource.data.vendorId);
+      allow read: if isAuthenticated() && editorCanAccessAsset(resource.data);
       allow create: if isAuthenticated() && !isEditorRole() && isValidAsset(request.resource.data);
       allow update: if isAuthenticated() && isValidAsset(request.resource.data)
         // 請款鎖：已入單的片，金額與綁定關係一律凍結（不分角色，老闆自己也不行 —— 這是帳務完整性，
@@ -362,10 +394,14 @@ service cloud.firestore {
         // 一般 employee 可以維護素材流程，但不能碰剪輯費、請款鎖或新舊帳結算。
         // editor 需要在自己的請款流程寫 editorFee/editorInvoiceId；manager 以上負責財務覆核。
         && (isEditorRole() || isManager() || !touchesBillingFields())
+        // 改派剪輯師＝改帳務歸屬的前置，已入單的片一律凍結（不分角色）。
+        // 刻意不塞進 touchesBillingFields()：那條的效果是「只有 editor/manager 能碰」，
+        // 會把 employee 擋掉，但改派本來就要讓小編做得到。
+        && (!touchesEditorAssignment() || !assetInvoiced())
         && (
           !isEditorRole() || (
-            editorCanAccessVendor(resource.data.vendorId) &&
-            editorCanAccessVendor(request.resource.data.vendorId) &&
+            editorCanAccessAsset(resource.data) &&
+            editorCanAccessAsset(request.resource.data) &&
             isEditorAssetUpdate()
           )
         );
