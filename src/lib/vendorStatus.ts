@@ -200,26 +200,51 @@ function getExpectedDeliveredSoFar(weeklyPattern: number[] | undefined, effectiv
 //    只有填過的月份「中間」缺的（例如填了2月跟6月但漏了3~5月）才會被列進 gapMonths 提醒，不計入總數。
 // 2) 舊版 manualDeficitBaseline 單一數字：同樣邏輯，從 manualDeficitUpdatedAt 校正當下那個月起連續自動累加到現在
 //    （相容尚未遷移的舊資料）。
-// 該廠商在某個月「已交」的影音支數：影音 + 已發布/已排程 + 歸屬月落在該月（沒填 targetMonth 才退回用排程日判斷）。
-// 草稿不算——還沒定案的東西不能當交付。抽出來共用，讓校正彈窗能拿同一套口徑做稽核。
-export function getDeliveredVideosInMonth(vendorId: string | undefined, posts: OwedPost[], month: string): number {
-  return posts.filter(p =>
+// 該廠商在某個月「已交」的影音支數，兩個來源相加：
+//   ① 貼文：影音 + 已發布/已排程 + 歸屬月落在該月（沒填 targetMonth 才退回用排程日判斷）。草稿不算。
+//   ② 手動標記完成的素材：有些 IP（例如杜永霖）片做完了但上片時間由客戶決定，遲遲沒有貼文。
+//      這種片按「標記完成」並選認列月份，就從那個月認列。
+//
+// ⚠️ 為什麼 ②「只認沒有 usedInPostId 的素材」：掛在貼文上的素材由 ① 那側計算，
+//    兩個來源同時算到同一支就會灌水。手動完成本來就會把 usedInPostId 清成 null。
+//
+// ⚠️ assets 是必填而不是選填：漏傳只會讓數字默默少算、不會報錯，
+//    這個專案已經因為「數字錯了但沒人發現」吃過好幾次虧。寧可編譯不過。
+export function getDeliveredVideosInMonth(
+  vendorId: string | undefined,
+  posts: OwedPost[],
+  assets: DeliveredAsset[],
+  month: string
+): number {
+  const fromPosts = posts.filter(p =>
     p.vendorId === vendorId && p.contentType === 'video' &&
     (p.status === 'published' || p.status === 'scheduled') &&
     (p.targetMonth ? p.targetMonth === month : (p.scheduledAt || '').slice(0, 7) === month)
   ).length;
+
+  const fromManualComplete = assets.filter(a =>
+    a.vendorId === vendorId && a.type === 'video' && !a.voidedAt &&
+    a.status === 'used' && !a.usedInPostId &&
+    a.recognizedMonth === month
+  ).length;
+
+  return fromPosts + fromManualComplete;
 }
+
+/** 計算已交時需要看的素材欄位 */
+export type DeliveredAsset = Pick<Asset, 'vendorId' | 'type' | 'status' | 'usedInPostId' | 'voidedAt' | 'recognizedMonth'>;
 
 export function getDeficitBreakdown(
   vendor: OwedVendor,
   posts: OwedPost[],
+  assets: DeliveredAsset[],
   month: string = format(new Date(), 'yyyy-MM'),
   date: Date = new Date()
 ): DeficitBreakdown {
   const entries = vendor.deficitEntries || [];
   const currentRealMonth = format(date, 'yyyy-MM');
 
-  const deliveredInMonth = (m: string) => getDeliveredVideosInMonth(vendor.id, posts, m);
+  const deliveredInMonth = (m: string) => getDeliveredVideosInMonth(vendor.id, posts, assets, m);
 
   const liveShortfall = (m: string): MonthlyShortfall => {
     const delivered = deliveredInMonth(m);
@@ -365,10 +390,11 @@ export function getAvailableVideoAssets<A extends StockAsset>(
 export function getOwedVideoCount(
   vendor: OwedVendor,
   posts: OwedPost[],
+  assets: DeliveredAsset[],
   totalStock: number,
   month: string = format(new Date(), 'yyyy-MM')
 ): number {
-  const { totalShortfall } = getDeficitBreakdown(vendor, posts, month);
+  const { totalShortfall } = getDeficitBreakdown(vendor, posts, assets, month);
   return Math.max(0, Math.ceil(totalShortfall - totalStock));
 }
 

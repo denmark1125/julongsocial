@@ -377,13 +377,13 @@ async function buildStockAlertMessage(): Promise<any | null> {
     .filter((v: any) => hasVideoTrackingScope(v, month))
     .map((vendor: any) => {
       const vendorAssets = getAvailableVideoAssets(vendor.id, assets, posts);
-      const owed = getOwedVideoCount(vendor, posts, vendorAssets.length);
+      const owed = getOwedVideoCount(vendor, posts, assets, vendorAssets.length);
       const alert = getVideoStockAlert(vendor, vendorAssets, owed);
       const hasUpcomingBooking = bookings.some((b: any) =>
         b.vendorId === vendor.id && b.status === "booked" &&
         b.scheduledDate >= today && b.scheduledDate <= sevenDaysFromNow
       );
-      const monthEntry = getDeficitBreakdown(vendor, posts, month).monthlyShortfalls.find((e: any) => e.month === month);
+      const monthEntry = getDeficitBreakdown(vendor, posts, assets, month).monthlyShortfalls.find((e: any) => e.month === month);
       const monthProgress = { target: monthEntry?.target ?? 0, delivered: monthEntry?.delivered ?? 0 };
       return { vendor, alert, hasUpcomingBooking, monthProgress };
     })

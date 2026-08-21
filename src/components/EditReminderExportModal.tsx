@@ -29,7 +29,7 @@ export default function EditReminderExportModal({ isOpen, onClose, vendors, asse
     return trackedVendors(vendors)
       .map(vendor => {
         const vendorVideoAssets = getAvailableVideoAssets(vendor.id!, assets, posts);
-        const owed = getOwedVideoCount(vendor, posts, vendorVideoAssets.length);
+        const owed = getOwedVideoCount(vendor, posts, assets, vendorVideoAssets.length);
         const alert = getVideoStockAlert(vendor, vendorVideoAssets, owed);
         return { vendor, alert };
       })

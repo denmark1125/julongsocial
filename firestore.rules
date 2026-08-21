@@ -159,6 +159,9 @@ service cloud.firestore {
              (!('monthlyTargetPosts' in data) || data.monthlyTargetPosts is int) &&
              (!('monthlyTargetVideos' in data) || data.monthlyTargetVideos is int) &&
              (!('editorId' in data) || data.editorId is string) &&
+             // 認列月份（YYYY-MM）：手動標記完成時寫入，讓那支片計入該月已交。
+             // 不放進 isEditorAssetUpdate() 白名單——剪輯師不能自己決定認列哪個月。
+             (!('recognizedMonth' in data) || data.recognizedMonth is string) &&
              (!('editorName' in data) || data.editorName is string) &&
              (!('selfPublishing' in data) || data.selfPublishing is bool);
     }

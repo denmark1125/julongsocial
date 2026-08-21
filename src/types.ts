@@ -351,6 +351,20 @@ export interface Asset {
   id?: string;
   vendorId: string;
   editorId?: string; // Link to freelance editor
+  /**
+   * 認列月份（YYYY-MM）。按「標記完成」時選定，預設當月；取消完成時清空。
+   *
+   * 為什麼需要：有些 IP（例如杜永霖）片子做完了、但上片時間由客戶決定，遲遲沒有貼文。
+   * 已交的計算原本只認貼文，所以按「完成」只會把素材從庫存扣掉、卻不算交付，
+   * 欠片反而 +1 —— 等於做完一支片被罰一次。
+   *
+   * 有了這個欄位，已交＝貼文 ＋ 已完成且有認列月份的素材，按完成對欠片就是中性的
+   * （已交+1、庫存-1，互相抵銷）。
+   *
+   * 防重複計算：只認 status='used' 且**沒有** usedInPostId 的素材。
+   * 掛在貼文上的素材由貼文那側計算，兩邊不會同時算到同一支。
+   */
+  recognizedMonth?: string;
   title: string;
   url?: string;
   type: AssetType;

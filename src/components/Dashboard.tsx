@@ -152,9 +152,9 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
     .filter(v => hasVideoTrackingScope(v, dashboardMonth))
     .map(vendor => {
     const vendorVideoAssets = getAvailableVideoAssets(vendor.id!, assets, posts);
-    const owed = getOwedVideoCount(vendor, posts, vendorVideoAssets.length);
+    const owed = getOwedVideoCount(vendor, posts, assets, vendorVideoAssets.length);
     const alert = getVideoStockAlert(vendor, vendorVideoAssets, owed);
-    const currentMonthEntry = getDeficitBreakdown(vendor, posts, dashboardMonth).monthlyShortfalls.find(e => e.month === dashboardMonth);
+    const currentMonthEntry = getDeficitBreakdown(vendor, posts, assets, dashboardMonth).monthlyShortfalls.find(e => e.month === dashboardMonth);
     const activeBooking = bookings
       .filter(b => b.vendorId === vendor.id && b.status === 'booked')
       .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate))[0] || null;

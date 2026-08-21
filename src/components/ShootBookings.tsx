@@ -88,9 +88,9 @@ export default function ShootBookings() {
         (p.targetMonth ? p.targetMonth === currentMonth : (p.scheduledAt || '').slice(0, 7) === currentMonth)
       ).length;
       const stock = getAvailableVideoAssets(v.id!, assets, posts).length;
-      const breakdown = getDeficitBreakdown(v, posts, currentMonth);
+      const breakdown = getDeficitBreakdown(v, posts, assets, currentMonth);
       // 用共用的getOwedVideoCount(內部已無條件進位)，不要自己重算，避免跟Dashboard/LINE推播的欠片數字對不起來
-      const owed = getOwedVideoCount(v, posts, stock, currentMonth);
+      const owed = getOwedVideoCount(v, posts, assets, stock, currentMonth);
       const active = bookings
         .filter(b => b.vendorId === v.id && b.status === 'booked')
         .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate))[0] || null;
@@ -547,7 +547,7 @@ export default function ShootBookings() {
         const liveVendor = vendors.find(v => v.id === deficitModalVendor.id) || deficitModalVendor;
         const entries = [...(liveVendor.deficitEntries || [])].sort((a, b) => b.month.localeCompare(a.month));
         const total = entries.reduce((s, e) => s + (e.owed || 0), 0);
-        const gapMonths = getDeficitBreakdown(liveVendor, posts, currentMonth).gapMonths;
+        const gapMonths = getDeficitBreakdown(liveVendor, posts, assets, currentMonth).gapMonths;
         return (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-3xl w-full max-w-md max-h-[90vh] overflow-auto shadow-2xl">
@@ -624,7 +624,7 @@ export default function ShootBookings() {
                       // 拿系統依貼文管理的實算值做對照：手填數字一旦存在，該月就以手填為準、之後改貼文歸屬月也不會連動，
                       // 所以要把「系統會算成幾支」擺出來，落差才看得見（同月可能有多筆加減，只在正數那筆比對）
                       const sysTarget = getEffectiveMonthlyTarget(liveVendor, e.month);
-                      const sysDelivered = getDeliveredVideosInMonth(liveVendor.id, posts, e.month);
+                      const sysDelivered = getDeliveredVideosInMonth(liveVendor.id, posts, assets, e.month);
                       const sysShortfall = sysTarget - sysDelivered;
                       const diverges = e.owed >= 0 && sysShortfall !== e.owed;
                       return (

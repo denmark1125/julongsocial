@@ -163,7 +163,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     // ERP裡的鈴鐺不分派任何人都看得到全部（跟催不分你我）；assignedUserIds只用來過濾未來的LINE推播，不影響這裡
     vendors.filter(v => hasVideoTrackingScope(v, format(now, 'yyyy-MM'))).forEach(v => {
       const vendorVideoAssets = getAvailableVideoAssets(v.id!, assets, posts);
-      const owed = getOwedVideoCount(v, posts, vendorVideoAssets.length);
+      const owed = getOwedVideoCount(v, posts, assets, vendorVideoAssets.length);
       const alert = getVideoStockAlert(v, vendorVideoAssets, owed);
       if (alert.severity === 'shoot') {
         list.push({
