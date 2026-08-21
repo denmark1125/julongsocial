@@ -4,7 +4,8 @@ import { db, auth } from '../firebase';
 import { Asset, Editor, EditorInvoice, Vendor } from '../types';
 import {
   billingMonthOptions, getAssetFee, getBillableEditorId, getBillingMonth,
-  isBillable, monthLabel, needsLegacyReview, summarizeByEditor,
+  groupByVendor, isBillable, isLegacyNeverUploaded, monthLabel, needsLegacyReview,
+  summarizeByEditor,
 } from '../lib/editorBilling';
 import {
   Wallet, CheckCircle2, Clock, AlertCircle, Ban, ChevronDown, ChevronRight,
@@ -144,6 +145,59 @@ export default function EditorPayables() {
       .sort((a, b) => (a.cloudUploadedAt || '').localeCompare(b.cloudUploadedAt || '')),
     [videoAssets]
   );
+  // 兩種舊帳的處理方式不同，所以畫面上要分開：
+  // 已上傳的可以「轉系統請款」（有 cloudUploadedAt 才算得出請款月份）；
+  // 從沒上傳的不行——那種要嘛是舊制付過了，要嘛請剪輯師自己按上傳雲端進本月。
+  const legacyUploaded = useMemo(() => legacyReview.filter(a => !!a.cloudUploadedAt), [legacyReview]);
+  const legacyNeverUploaded = useMemo(() => legacyReview.filter(isLegacyNeverUploaded), [legacyReview]);
+  const legacyNeverGroups = useMemo(
+    () => groupByVendor(legacyNeverUploaded, id => vendors.find(v => v.id === id)?.name || '未知 IP'),
+    [legacyNeverUploaded, vendors]
+  );
+
+  /**
+   * 整組標記舊制已結清。秀姨一家就有 24 支，逐支點兩個 prompt 等於 48 次輸入，
+   * 沒有批次的話這個功能實務上不會有人用。
+   * 金額與依據問一次套用整組；仍然逐支寫入，帳上每支都有自己的結清紀錄。
+   */
+  const settleLegacyBatch = async (list: Asset[], vendorName: string) => {
+    const raw = window.prompt(`「${vendorName}」這 ${list.length} 支，每支的舊制結清金額`, String(getAssetFee(list[0])));
+    if (raw === null) return;
+    const amount = Math.round(Number(raw));
+    if (!Number.isFinite(amount) || amount < 0 || amount > 100000) {
+      toast.error('金額格式不正確');
+      return;
+    }
+    const source = window.prompt('結清依據（例如：8月勞報單、LINE 對帳）', '傳統記帳') ?? '';
+    if (!window.confirm(
+      `確定把「${vendorName}」的 ${list.length} 支標記為舊制已結清？
+合計 ${money(amount * list.length)}。
+
+` +
+      `標記後這些片會從剪輯師的工作台消失，而且不會再進系統請款。`
+    )) return;
+
+    setBusyId(`legacy-batch-${list[0].id}`);
+    try {
+      const now = new Date().toISOString();
+      const batch = writeBatch(db);
+      list.forEach(a => batch.update(doc(db, 'assets', a.id!), {
+        legacySettlementStatus: 'paid',
+        legacyReviewedAt: now,
+        legacyReviewedByUid: auth.currentUser?.uid || '',
+        legacySettledAt: now,
+        legacySettledAmount: amount,
+        legacySettlementSource: source,
+      }));
+      await batch.commit();
+      toast.success(`已標記 ${list.length} 支舊制結清`);
+    } catch (e) {
+      console.error('Legacy batch settle failed:', e);
+      toast.error('批次盤點失敗（可能是權限規則尚未部署）');
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const settleLegacy = async (asset: Asset, status: 'paid' | 'unpaid') => {
     setBusyId(`legacy-${asset.id}`);
@@ -257,14 +311,14 @@ export default function EditorPayables() {
         ))}
       </div>
 
-      {legacyReview.length > 0 && (
+      {legacyUploaded.length > 0 && (
         <div className="bg-amber-50 rounded-2xl border border-amber-200 overflow-hidden">
           <div className="px-5 py-4 border-b border-amber-200">
-            <h3 className="text-sm font-bold text-amber-800">舊帳待盤點 · {legacyReview.length} 支</h3>
+            <h3 className="text-sm font-bold text-amber-800">舊帳待盤點 · 已上傳 {legacyUploaded.length} 支</h3>
             <p className="text-[11px] text-amber-700 mt-1">切帳日前上傳的片預設不開放請款。請逐支確認舊制是否已付款。</p>
           </div>
           <div className="divide-y divide-amber-200/70 max-h-80 overflow-y-auto">
-            {legacyReview.map(a => (
+            {legacyUploaded.map(a => (
               <div key={a.id} className="px-5 py-3 bg-white/60 flex items-center gap-3 flex-wrap">
                 <div className="flex-1 min-w-52">
                   <p className="text-xs font-bold text-gray-700">{vendors.find(v => v.id === a.vendorId)?.name || '未知 IP'}｜{a.title}</p>
@@ -272,6 +326,54 @@ export default function EditorPayables() {
                 </div>
                 <button onClick={() => settleLegacy(a, 'paid')} disabled={busyId === `legacy-${a.id}`} className="px-3 py-1.5 rounded-lg bg-gray-700 text-white text-[10px] font-bold disabled:opacity-40">舊制已結清</button>
                 <button onClick={() => settleLegacy(a, 'unpaid')} disabled={busyId === `legacy-${a.id}`} className="px-3 py-1.5 rounded-lg bg-amber-600 text-white text-[10px] font-bold disabled:opacity-40">尚未付，轉系統請款</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 從沒上傳過雲端的舊帳。這種片沒有 cloudUploadedAt，算不出請款月份，所以不提供
+          「轉系統請款」——真的還沒付的話，請剪輯師照正常流程按上傳雲端，那就會進本月。 */}
+      {legacyNeverUploaded.length > 0 && (
+        <div className="bg-sky-50 rounded-2xl border border-sky-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-sky-200">
+            <h3 className="text-sm font-bold text-sky-800">舊帳待盤點 · 從沒上傳雲端 {legacyNeverUploaded.length} 支</h3>
+            <p className="text-[11px] text-sky-700 mt-1 leading-relaxed">
+              這些片已經交片，但剪輯師從來沒按過「上傳雲端」，多半是當年在系統外（LINE／勞報單）就領過錢了。
+              標記結清後會從他的工作台消失，並留下金額與依據，日後查得到。
+              <span className="font-bold">若其實還沒付，不要標在這裡</span>——請剪輯師照正常流程按「上傳雲端」，那支就會進本月請款。
+            </p>
+          </div>
+          <div className="max-h-96 overflow-y-auto divide-y divide-sky-200/70">
+            {legacyNeverGroups.map(g => (
+              <div key={g.vendorId} className="bg-white/60">
+                <div className="px-5 py-2.5 flex items-center justify-between gap-3 flex-wrap bg-sky-100/60">
+                  <span className="text-xs font-bold text-sky-900 shrink-0 whitespace-nowrap">{g.vendorName} · {g.assets.length} 支</span>
+                  <button
+                    onClick={() => settleLegacyBatch(g.assets, g.vendorName)}
+                    disabled={busyId === `legacy-batch-${g.assets[0].id}`}
+                    className="shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg bg-sky-700 text-white text-[10px] font-bold disabled:opacity-40"
+                  >
+                    整組標舊制已結清
+                  </button>
+                </div>
+                {g.assets.map(a => (
+                  <div key={a.id} className="px-5 py-2.5 flex items-center gap-3 flex-wrap border-t border-sky-100">
+                    <div className="flex-1 min-w-52">
+                      <p className="text-xs font-bold text-gray-700">{a.title}</p>
+                      <p className="text-[10px] text-gray-500">
+                        {a.createdAt ? `${format(parseISO(a.createdAt), 'yyyy-MM-dd')} 建檔` : ''} · 預設 {money(getAssetFee(a))}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => settleLegacy(a, 'paid')}
+                      disabled={busyId === `legacy-${a.id}`}
+                      className="shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg bg-gray-700 text-white text-[10px] font-bold disabled:opacity-40"
+                    >
+                      舊制已結清
+                    </button>
+                  </div>
+                ))}
               </div>
             ))}
           </div>

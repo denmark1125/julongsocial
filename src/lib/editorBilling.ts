@@ -1,6 +1,7 @@
 import { format, parseISO } from 'date-fns';
 import {
   Asset,
+  deriveFlowStage,
   DEFAULT_EDITOR_FEE,
   EDITOR_BILLING_CUTOVER_AT,
   EDITOR_BILLING_START_MONTH,
@@ -49,12 +50,47 @@ export function isBeforeBillingCutover(asset: Pick<Asset, 'cloudUploadedAt'>): b
   return Number.isFinite(uploaded) && uploaded < cutover;
 }
 
-export function needsLegacyReview(
-  asset: Pick<Asset, 'cloudUploadedAt' | 'editorInvoiceId' | 'voidedAt' | 'legacySettlementStatus'>
-): boolean {
-  return !!asset.cloudUploadedAt && !asset.editorInvoiceId && !asset.voidedAt &&
-    isBeforeBillingCutover(asset) &&
-    (!asset.legacySettlementStatus || asset.legacySettlementStatus === 'needs_review');
+/** 盤點時要看的素材欄位 */
+export type LegacyReviewAsset = Pick<Asset,
+  'cloudUploadedAt' | 'editorInvoiceId' | 'voidedAt' | 'legacySettlementStatus' |
+  'stage' | 'approved' | 'flowStage' | 'status' | 'createdAt'>;
+
+/**
+ * 「從沒上傳過雲端」的舊帳。
+ *
+ * 內部帳號(秀姨/小馬)那批就是這種：剪輯師當年在系統外（LINE／勞報單）領錢，
+ * 所以從來沒走過「上傳雲端」那一步。結果那些片會永遠掛在他的待辦裡不會動——
+ * 系統沒有任何路徑可以把它們結案，除了語意不對的「封存」。
+ *
+ * ⚠️ 只收「還卡在剪輯師待辦」的（client_review / to_upload）。不能放寬成「所有成片」：
+ *    實測那樣會撈進 288 支，其中絕大多數是 ready 的舊資料，本來就不出現在剪輯師畫面上
+ *    （見 EditorAssetQueue.bucketOf 對 ready-without-upload 回傳 null），列出來只是雜訊。
+ *    收斂到這條之後是 40 支，每一支都是真的需要你做決定的。
+ * ⚠️ 封存的也不收：那種已經從剪輯師畫面消失了，沒有要解決的問題。
+ * ⚠️ 用 createdAt 判切帳日（它沒有 cloudUploadedAt 可以判），否則今天剛上架的新片
+ *    明天就會被當成舊帳跳出來。
+ */
+export function isLegacyNeverUploaded(asset: LegacyReviewAsset): boolean {
+  if (asset.cloudUploadedAt) return false;
+  if (asset.status === 'archived') return false;
+  const stage = deriveFlowStage(asset);
+  if (stage !== 'client_review' && stage !== 'to_upload') return false;
+  const created = Date.parse(asset.createdAt || '');
+  const cutover = Date.parse(EDITOR_BILLING_CUTOVER_AT);
+  return Number.isFinite(created) && created < cutover;
+}
+
+/**
+ * 需要人工盤點的舊帳，兩種：
+ * ① 切帳日前就上傳過雲端、還沒進請款單的片。
+ * ② 已經交片、但從沒上傳過雲端的片（見 isLegacyNeverUploaded）。
+ * 兩種都標過 paid/unpaid 之後就不再出現。
+ */
+export function needsLegacyReview(asset: LegacyReviewAsset): boolean {
+  if (asset.editorInvoiceId || asset.voidedAt) return false;
+  if (asset.legacySettlementStatus && asset.legacySettlementStatus !== 'needs_review') return false;
+  if (asset.cloudUploadedAt) return isBeforeBillingCutover(asset);
+  return isLegacyNeverUploaded(asset);
 }
 
 export function isBillable(asset: Pick<Asset,

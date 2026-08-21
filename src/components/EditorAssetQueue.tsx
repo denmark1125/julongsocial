@@ -390,7 +390,10 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
     // 還沒做完就被封存的則不該再出現在他的待辦裡。
     (a.status !== 'archived' || !!a.cloudUploadedAt) &&
     // 已排程/已發布的貼文代表這支真的用掉了，不該再出現在工作清單
-    !(a.usedInPostId && settledPostIds.has(a.usedInPostId))
+    !(a.usedInPostId && settledPostIds.has(a.usedInPostId)) &&
+    // 從沒上傳過、但已被後台盤點成「舊制已結清」＝當年在系統外就領過錢了，這支已經結案。
+    // 沒有這條的話那批片會永遠掛在待辦裡（沒人會去按上傳雲端，按了反而變成重複請款）。
+    !(a.legacySettlementStatus === 'paid' && !a.cloudUploadedAt)
   );
 
   const vendorName = (vendorId: string) => vendors.find(v => v.id === vendorId)?.name || '未知廠商';

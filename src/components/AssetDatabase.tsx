@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { format } from 'date-fns';
 import {
   collection,
   addDoc,
@@ -340,13 +341,26 @@ export default function AssetDatabase() {
         await updateDoc(doc(db, 'assets', asset.id!), { status: 'available', usedInPostId: null, recognizedMonth: '' });
         toast.success('已解鎖，重新可使用');
       } else {
-        // 標記完成前先問認列到哪個月：不問的話這支片會從庫存扣掉卻不算已交，欠片反而 +1
-        setCompletingAsset(asset);
-        setCompleteMonth(new Date().toISOString().slice(0, 7));
+        // 直接認列當月，不跳視窗。老闆回報「每支都要選月份很擾人」，而預設當月幾乎永遠是對的
+        // （多半是拍完當下就標）。要補登以前的月份，改點卡片上那顆「已交・N月」徽章。
+        // ⚠️ recognizedMonth 一定要跟著寫：不寫的話這支片會從庫存扣掉卻不算已交，欠片反而 +1。
+        // ⚠️ 月份一定要用 date-fns 的 format 取本地時區，不可以用 toISOString().slice(0,7)——
+        //    那是 UTC，台北時間 9/1 早上 8 點前按完成會被認列成 8 月。
+        const month = format(new Date(), 'yyyy-MM');
+        await updateDoc(doc(db, 'assets', asset.id!), {
+          status: 'used', usedInPostId: null, recognizedMonth: month,
+        });
+        toast.success(`已標記完成，認列 ${month.replace('-', '/')}`);
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `assets/${asset.id}`);
     }
+  };
+
+  /** 點卡片上的「已交・N月」徽章：改這支片認列在哪個月（補登以前拍的片就用這個） */
+  const openMonthEditor = (asset: Asset) => {
+    setCompletingAsset(asset);
+    setCompleteMonth(asset.recognizedMonth || format(new Date(), 'yyyy-MM'));
   };
 
   const confirmComplete = async () => {
@@ -357,7 +371,7 @@ export default function AssetDatabase() {
         usedInPostId: null,
         recognizedMonth: completeMonth,
       });
-      toast.success(`已標記完成，認列 ${completeMonth.replace('-', '/')}`);
+      toast.success(`已改為認列 ${completeMonth.replace('-', '/')}`);
       setCompletingAsset(null);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `assets/${completingAsset.id}`);
@@ -482,9 +496,12 @@ export default function AssetDatabase() {
       ? voided
       : voided
         ? false
-        : filterStatus === 'all'
-          ? effStatus(a) !== 'archived'
-          : effStatus(a) === filterStatus;
+        // 手動認列＝按「完成」標掉的片（used 但沒掛貼文）。掛貼文的那種走排程發布，不算在這裡。
+        : filterStatus === 'manual'
+          ? (effStatus(a) === 'used' && !a.usedInPostId)
+          : filterStatus === 'all'
+            ? effStatus(a) !== 'archived'
+            : effStatus(a) === filterStatus;
     const matchesStage = a.stage === filterStage || (!a.stage && filterStage === 'finished');
     return matchesTab && matchesSearch && matchesVendor && matchesStatus && matchesStage;
   });
@@ -835,6 +852,16 @@ export default function AssetDatabase() {
                     >
                       已使用
                     </button>
+                    {/* 手動認列＝按過「完成」但沒掛貼文的片。對帳時要回答「這個月認列了哪幾支」只能靠這個。 */}
+                    <button
+                      onClick={() => setFilterStatus('manual')}
+                      className={cn(
+                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                        filterStatus === 'manual' ? "bg-emerald-600 text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"
+                      )}
+                    >
+                      手動認列
+                    </button>
                   </>
                 )}
                 <button
@@ -1051,6 +1078,25 @@ export default function AssetDatabase() {
                       <span>{effStatus(asset) === 'used' ? '取消完成' : '完成'}</span>
                     </button>
                   )}
+                  {/* 認列月份徽章。recognizedMonth 以前只被寫入與計算、畫面上從不顯示，
+                      結果是按完成之後看不出這支認列過沒有、認列在哪個月——月底對帳只能靠記憶。
+                      沒有月份的（這套流程上線前就按過完成的舊資料）用琥珀色標出來，點一下可以補。 */}
+                  {asset.stage === 'finished' && effStatus(asset) === 'used' && !asset.usedInPostId && (
+                    <button
+                      onClick={() => openMonthEditor(asset)}
+                      title={asset.recognizedMonth
+                        ? `計入 ${asset.recognizedMonth.replace('-', '/')} 的已交。點一下可以改月份。`
+                        : '這支片沒有認列月份，等於不算進任何一個月的已交。點一下補上。'}
+                      className={cn(
+                        "shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[10px] font-bold transition-colors",
+                        asset.recognizedMonth
+                          ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                          : "bg-amber-100 text-amber-700 hover:bg-amber-200"
+                      )}
+                    >
+                      {asset.recognizedMonth ? `已交・${Number(asset.recognizedMonth.slice(5))}月` : '未認列月份'}
+                    </button>
+                  )}
                   <span className="shrink-0 whitespace-nowrap text-[10px] text-gray-400">{new Date(asset.createdAt).toLocaleDateString()}</span>
                   {asset.voidedAt && (
                     <span className="text-[10px] font-bold text-red-500">已作廢{asset.voidReason ? `・${asset.voidReason}` : ''}</span>
@@ -1221,9 +1267,14 @@ export default function AssetDatabase() {
       {completingAsset && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setCompletingAsset(null)}>
           <div className="bg-white rounded-3xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-bold serif text-[#5A5A40]">標記完成</h3>
+            <h3 className="text-lg font-bold serif text-[#5A5A40]">
+              {completingAsset.recognizedMonth ? '改認列月份' : '補上認列月份'}
+            </h3>
             <p className="text-sm text-gray-500 mt-2">
-              「{completingAsset.title}」不排發布日期，直接視為已交付。請選擇要認列在哪個月。
+              「{completingAsset.title}」要計入哪個月的「已交」。
+              {completingAsset.recognizedMonth
+                ? '補登以前拍的片就改這裡。'
+                : '這支目前沒有認列月份，等於不算進任何一個月。'}
             </p>
             <div className="mt-4 space-y-2">
               <label className="text-sm font-bold text-gray-600 ml-1">認列月份</label>
@@ -1244,7 +1295,7 @@ export default function AssetDatabase() {
                 disabled={!completeMonth}
                 className="px-5 py-2 rounded-xl text-sm font-bold bg-[#5A5A40] text-white hover:bg-[#4a4a35] disabled:opacity-40"
               >
-                確定完成
+                確定
               </button>
             </div>
           </div>
