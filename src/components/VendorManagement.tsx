@@ -343,7 +343,13 @@ export default function VendorManagement() {
     try {
       const history = pauseModalVendor.pauseHistory || [];
       const wasAlreadyPaused = pauseModalVendor.status === 'paused';
-      const newRecord: PauseRecord = { from: pauseFromInput, until: pauseUntilInput || undefined };
+      // ⚠️ 沒填解除日期時「整個 until 這個 key 都不能放」，不能寫 until: undefined。
+      // Firestore SDK 對 undefined 是丟例外不是忽略，整筆 updateDoc 會被拒收 ——
+      // 症狀就是「設了冷凍起始日、沒選解除日期，按下去說操作失敗」。
+      // 同一個雷在下面的廠商編輯表單（新增冷凍期那顆按鈕）早就處理過，這條路徑漏掉了。
+      const newRecord: PauseRecord = pauseUntilInput
+        ? { from: pauseFromInput, until: pauseUntilInput }
+        : { from: pauseFromInput };
       // 如果本來就是冷凍中，這次視為修正同一段紀錄的日期；否則是開一段新的冷凍期（支援多次冷凍）
       const newHistory = wasAlreadyPaused && history.length > 0
         ? history.map((rec, i) => i === history.length - 1 ? newRecord : rec)
@@ -359,7 +365,9 @@ export default function VendorManagement() {
       setPauseFromInput('');
       setPauseUntilInput('');
     } catch (error) {
-      toast.error('操作失敗');
+      // 把真正的原因印出來。原本只有「操作失敗」三個字，出事時完全查不到方向
+      console.error('設定冷凍失敗:', error);
+      toast.error(`設定冷凍失敗：${error instanceof Error ? error.message : '未知錯誤'}`);
     }
   };
 
