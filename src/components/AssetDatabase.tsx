@@ -1035,7 +1035,10 @@ export default function AssetDatabase() {
                       )}
                     </>
                   )}
-                  {asset.stage === 'finished' && !isClientApproved(asset) && (effStatus(asset) === 'available' || (effStatus(asset) === 'used' && !asset.usedInPostId)) && (
+                  {/* 「完成」不能因為業主審核通過就消失——最常用到它的情境剛好就是「審過了但客戶不排程發布」。
+                      toggleManualComplete 只動 status/usedInPostId/recognizedMonth，不碰審核狀態，所以按了不會弄丟審核紀錄。
+                      已經掛在貼文上的片仍然排除：那種走排程發布那條路，不該用手動完成。 */}
+                  {asset.stage === 'finished' && (effStatus(asset) === 'available' || (effStatus(asset) === 'used' && !asset.usedInPostId)) && (
                     <button
                       onClick={() => toggleManualComplete(asset)}
                       title={effStatus(asset) === 'used' ? '取消完成，解鎖回可使用' : '標記完成（不排日期直接視為已使用）'}
