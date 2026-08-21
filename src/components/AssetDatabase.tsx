@@ -75,6 +75,10 @@ export default function AssetDatabase() {
   const [savingNote, setSavingNote] = useState(false);
   // 強制刪除只開給工程師，所以這頁要知道自己是誰（比照 ShootBookings 的做法）
   const [me, setMe] = useState<UserProfile | null>(null);
+  // 按「標記完成」時要選認列月份（預設當月）。所有 IP 一律走同一套，不做特例：
+  // 不列入統計的廠商（例如秀姨）選了也不影響數字，因為她本來就不進欠片計算。
+  const [completingAsset, setCompletingAsset] = useState<Asset | null>(null);
+  const [completeMonth, setCompleteMonth] = useState('');
   // 顯示/篩選/計數一律走「實際狀態」而不是 asset.status：貼文被刪掉的素材資料上還留著 used，
   // 直接讀 status 會讓它永遠掛著已使用的灰底、篩選也撈不到，使用者眼中那支片就等於報廢了。
   const postIndex = React.useMemo(() => buildPostIndex(posts), [posts]);
@@ -332,14 +336,31 @@ export default function AssetDatabase() {
       // usedInPostId 一起清掉：不清的話會留下指向已刪貼文的懸空 id，
       // 之後又被 isAssetOrphaned 判成孤兒，狀態在兩邊來回跳
       if (asset.status === 'used') {
-        await updateDoc(doc(db, 'assets', asset.id!), { status: 'available', usedInPostId: null });
+        // 取消完成要一起清掉認列月份，否則那個月會一直算它一支已交
+        await updateDoc(doc(db, 'assets', asset.id!), { status: 'available', usedInPostId: null, recognizedMonth: '' });
         toast.success('已解鎖，重新可使用');
       } else {
-        await updateDoc(doc(db, 'assets', asset.id!), { status: 'used', usedInPostId: null });
-        toast.success('已標記完成');
+        // 標記完成前先問認列到哪個月：不問的話這支片會從庫存扣掉卻不算已交，欠片反而 +1
+        setCompletingAsset(asset);
+        setCompleteMonth(new Date().toISOString().slice(0, 7));
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `assets/${asset.id}`);
+    }
+  };
+
+  const confirmComplete = async () => {
+    if (!completingAsset || !completeMonth) return;
+    try {
+      await updateDoc(doc(db, 'assets', completingAsset.id!), {
+        status: 'used',
+        usedInPostId: null,
+        recognizedMonth: completeMonth,
+      });
+      toast.success(`已標記完成，認列 ${completeMonth.replace('-', '/')}`);
+      setCompletingAsset(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `assets/${completingAsset.id}`);
     }
   };
 
@@ -952,23 +973,30 @@ export default function AssetDatabase() {
                   </button>
                 )}
               </div>
-              <div className="flex items-center justify-between pt-4 border-t border-black/5">
-                <div className="flex items-center space-x-2">
+              {/* 按鈕一多就會被壓縮到「急件」變上下兩個字、「待審核」變三行。
+                  改成允許整顆按鈕換行，每顆 shrink-0 + whitespace-nowrap，
+                  寧可掉到第二行也不要把字折斷。 */}
+              <div className="flex items-center justify-between gap-2 flex-wrap pt-4 border-t border-black/5">
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  {/* 急件＝催剪輯師先剪這支，所以只有「待剪素材」需要。
+                      成片已經剪完了，沒有催的對象。 */}
+                  {asset.stage === 'raw' && (
                   <button
                     type="button"
                     onClick={() => toggleUrgent(asset)}
                     title={asset.isUrgent ? '取消急件' : '標記急件'}
                     className={cn(
-                      "px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1",
+                      "shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1",
                       asset.isUrgent ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-400 hover:text-red-500"
                     )}
                   >
                     <Flame size={12} /><span>急件</span>
                   </button>
+                  )}
                   {asset.stage === 'raw' ? (
                     <button
                       onClick={() => setConvertingAsset(asset)}
-                      className="bg-[#5A5A40] text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-[#4a4a35] transition-colors"
+                      className="shrink-0 whitespace-nowrap bg-[#5A5A40] text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-[#4a4a35] transition-colors"
                     >
                       轉為成片
                     </button>
@@ -977,7 +1005,7 @@ export default function AssetDatabase() {
                       <button
                         onClick={() => toggleApproval(asset)}
                         className={cn(
-                          "px-3 py-1 rounded-lg text-[10px] font-bold transition-colors",
+                          "shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[10px] font-bold transition-colors",
                           isClientApproved(asset) ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-400"
                         )}
                       >
@@ -989,7 +1017,7 @@ export default function AssetDatabase() {
                           onClick={() => openReviewNote(asset)}
                           title="記錄尚未審片的原因"
                           className={cn(
-                            "px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1",
+                            "shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1",
                             reviewNotes[asset.id!] ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-400 hover:text-gray-600"
                           )}
                         >
@@ -1000,7 +1028,7 @@ export default function AssetDatabase() {
                         <button
                           onClick={() => undoConvert(asset)}
                           title="退回待剪"
-                          className="px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1 bg-gray-100 text-gray-400 hover:bg-gray-200 hover:text-gray-600"
+                          className="shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1 bg-gray-100 text-gray-400 hover:bg-gray-200 hover:text-gray-600"
                         >
                           <RotateCcw size={12} /> <span>退回</span>
                         </button>
@@ -1012,7 +1040,7 @@ export default function AssetDatabase() {
                       onClick={() => toggleManualComplete(asset)}
                       title={effStatus(asset) === 'used' ? '取消完成，解鎖回可使用' : '標記完成（不排日期直接視為已使用）'}
                       className={cn(
-                        "px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1",
+                        "shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1",
                         effStatus(asset) === 'used' ? "bg-gray-200 text-gray-500" : "bg-[#5A5A40]/10 text-[#5A5A40]"
                       )}
                     >
@@ -1020,7 +1048,7 @@ export default function AssetDatabase() {
                       <span>{effStatus(asset) === 'used' ? '取消完成' : '完成'}</span>
                     </button>
                   )}
-                  <span className="text-[10px] text-gray-400">{new Date(asset.createdAt).toLocaleDateString()}</span>
+                  <span className="shrink-0 whitespace-nowrap text-[10px] text-gray-400">{new Date(asset.createdAt).toLocaleDateString()}</span>
                   {asset.voidedAt && (
                     <span className="text-[10px] font-bold text-red-500">已作廢{asset.voidReason ? `・${asset.voidReason}` : ''}</span>
                   )}
@@ -1186,6 +1214,40 @@ export default function AssetDatabase() {
       )}
 
       {/* Convert to Finished Modal */}
+      {/* 標記完成時選認列月份。沿用「轉為成片」那個視窗的樣式，不另做風格。 */}
+      {completingAsset && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setCompletingAsset(null)}>
+          <div className="bg-white rounded-3xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold serif text-[#5A5A40]">標記完成</h3>
+            <p className="text-sm text-gray-500 mt-2">
+              「{completingAsset.title}」不排發布日期，直接視為已交付。請選擇要認列在哪個月。
+            </p>
+            <div className="mt-4 space-y-2">
+              <label className="text-sm font-bold text-gray-600 ml-1">認列月份</label>
+              <input
+                type="month"
+                value={completeMonth}
+                onChange={e => setCompleteMonth(e.target.value)}
+                className="w-full px-5 py-3 bg-[#F5F5F0] rounded-2xl border-none focus:ring-2 focus:ring-[#5A5A40]"
+              />
+              <p className="text-[11px] text-gray-400 ml-1">
+                預設當月。這支片會計入該月的「已交」，同時從庫存扣除，兩者互相抵銷，欠片不會因為按完成而變多。
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <button onClick={() => setCompletingAsset(null)} className="px-4 py-2 rounded-xl text-sm font-bold text-gray-500 hover:bg-gray-100">取消</button>
+              <button
+                onClick={confirmComplete}
+                disabled={!completeMonth}
+                className="px-5 py-2 rounded-xl text-sm font-bold bg-[#5A5A40] text-white hover:bg-[#4a4a35] disabled:opacity-40"
+              >
+                確定完成
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {convertingAsset && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-[40px] w-full max-w-lg p-8 space-y-6 shadow-2xl">
