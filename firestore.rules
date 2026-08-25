@@ -267,6 +267,17 @@ service cloud.firestore {
              data.date is string;
     }
 
+    function isValidPlannedSlotMove(data) {
+      return data.keys().hasAll(['vendorId', 'habitTime', 'fromDate', 'toDate']) &&
+             data.vendorId is string &&
+             data.habitTime is string &&
+             data.fromDate is string &&
+             data.toDate is string &&
+             (!('movedBy' in data) || data.movedBy is string) &&
+             (!('createdAt' in data) || data.createdAt is string) &&
+             (!('updatedAt' in data) || data.updatedAt is string);
+    }
+
     function isValidBillingContract(data) {
       return data.keys().hasAll(['vendorId', 'services', 'billingDay', 'totalAmount', 'status']) &&
              data.vendorId is string &&
@@ -470,6 +481,18 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidDismissedHabit(request.resource.data);
       allow delete: if isManager();
+    }
+
+    // 預排時段的單次調整（社群日曆把橘色預排拖到別天）。
+    // 這是排程規劃資料，外包剪輯師沒有社群日曆這個分頁，也不該讀得到全部客戶的排程節奏。
+    //
+    // ⚠️ delete 刻意**不是** isManager()：把預排拖回原本那天就是刪掉這筆紀錄，
+    //    那是小編每天都會做的動作，收成 manager-only 等於拖出去就回不來了。
+    //    這跟 dismissedHabits 的 delete 不同——那個是「反悔已刪除的排程」，比較接近管理動作。
+    match /plannedSlotMoves/{id} {
+      allow read: if isAuthenticated() && !isEditorRole();
+      allow create, update: if isAuthenticated() && !isEditorRole() && isValidPlannedSlotMove(request.resource.data);
+      allow delete: if isAuthenticated() && !isEditorRole();
     }
 
     // 2026-08-19 收斂：原本 read 是 isAuthenticated()，代表**外包剪輯師登入後就讀得到

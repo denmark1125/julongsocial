@@ -1,16 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  collection, 
-  query, 
-  onSnapshot, 
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  collection,
+  query,
+  onSnapshot,
   where,
-  updateDoc, 
-  doc, 
-  addDoc
+  updateDoc,
+  doc,
+  addDoc,
+  deleteDoc
 } from 'firebase/firestore';
-import { db } from '../firebase';
-import { Post, Vendor, Asset, DismissedHabit } from '../types';
+import { db, auth } from '../firebase';
+import { Post, Vendor, Asset, DismissedHabit, PlannedSlotMove } from '../types';
 import { visibleVendors, trackedVendors } from '../lib/vendorStatus';
+import { listPlannedSlots, groupSlotsByDay, PlannedSlot } from '../lib/plannedSlots';
 import PostDetailModal from './PostDetailModal';
 import { 
   format, 
@@ -31,12 +33,26 @@ import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import TrackingExportModal from './TrackingExportModal';
 
-export default function CalendarView() {
+/** 從日曆帶去「新增貼文」的預填內容（點橘色預排時用） */
+export interface PostPrefill {
+  vendorId: string;
+  scheduledAt: string; // yyyy-MM-dd'T'HH:mm
+  contentType?: 'post' | 'video';
+  platforms?: string[];
+}
+
+interface CalendarViewProps {
+  /** 有帶就表示外層接得住「去建立貼文」，橘色預排才會變成可點 */
+  onPlanPost?: (prefill: PostPrefill) => void;
+}
+
+export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [posts, setPosts] = useState<Post[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
+  const [slotMoves, setSlotMoves] = useState<PlannedSlotMove[]>([]);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
@@ -59,13 +75,62 @@ export default function CalendarView() {
       setDismissedHabits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DismissedHabit)));
     });
 
+    const mUnsubscribe = onSnapshot(collection(db, 'plannedSlotMoves'), (snapshot) => {
+      setSlotMoves(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlannedSlotMove)));
+    });
+
     return () => {
       vUnsubscribe();
       pUnsubscribe();
       aUnsubscribe();
       dUnsubscribe();
+      mUnsubscribe();
     };
   }, []);
+
+  /**
+   * 把某一次預排挪到別天。
+   *
+   * ⚠️ 這裡刻意**不動** vendor.postingHabits：那是「每週三 11:30」的規則，改下去等於
+   *    連過去每一個月的日曆一起改掉。只記一筆單次調整，下週照原規則出現。
+   * ⚠️ 也刻意不建立貼文：橘色＝還沒決定要發什麼的預留時段，一旦變成貼文就會進入
+   *    交付/欠片/ERP 的計算，那是「已經有這則」的意思，語意完全不同。
+   */
+  const movePlannedSlot = async (slot: PlannedSlot, targetDate: Date) => {
+    const toDate = format(targetDate, 'yyyy-MM-dd');
+    if (toDate === slot.toDate) return; // 拖回原地，不用寫
+
+    try {
+      if (toDate === slot.fromDate) {
+        // 拖回它原本該在的那天＝取消這次調整，記錄本身就不該留著
+        if (slot.moveId) await deleteDoc(doc(db, 'plannedSlotMoves', slot.moveId));
+        toast.success('已移回原本的預排日');
+        return;
+      }
+
+      if (slot.moveId) {
+        await updateDoc(doc(db, 'plannedSlotMoves', slot.moveId), {
+          toDate,
+          movedBy: auth.currentUser?.uid || '',
+          updatedAt: new Date().toISOString(),
+        });
+      } else {
+        await addDoc(collection(db, 'plannedSlotMoves'), {
+          vendorId: slot.vendorId,
+          habitTime: slot.time,
+          fromDate: slot.fromDate,
+          toDate,
+          movedBy: auth.currentUser?.uid || '',
+          createdAt: new Date().toISOString(),
+        });
+      }
+      toast.success(`預排已移到 ${format(targetDate, 'MM/dd')}`);
+    } catch (error) {
+      console.error('Move planned slot failed:', error);
+      const code = (error as { code?: string })?.code;
+      toast.error(code === 'permission-denied' ? '移動失敗：權限不足' : '移動預排失敗');
+    }
+  };
 
   const handleDragStart = (e: React.DragEvent, type: 'post' | 'habit', id: string, data?: any) => {
     e.stopPropagation();
@@ -117,42 +182,34 @@ export default function CalendarView() {
         toast.error('移動失敗');
       }
     } else if (type === 'habit') {
-      const habit = JSON.parse(dataStr);
-      try {
-        // Create a draft post based on habit
-        const newDate = new Date(date);
-        const [hours, minutes] = habit.time.split(':').map(Number);
-        newDate.setHours(hours, minutes);
-
-        await addDoc(collection(db, 'posts'), {
-          vendorId: habit.vendorId,
-          title: `[預約] ${habit.vendorName} - ${habit.contentTypes.join('/')}`,
-          content: '',
-          status: 'draft',
-          scheduledAt: format(newDate, "yyyy-MM-dd'T'HH:mm"),
-          type: 'social',
-          contentType: habit.contentTypes[0] === 'video' ? 'video' : 'post',
-          clientConfirmed: false,
-          internalConfirmed: false,
-          platforms: habit.platforms || ['Instagram', 'Facebook'],
-          createdBy: 'system',
-          createdAt: new Date().toISOString()
-        });
-        toast.success('已根據習慣建立草稿');
-      } catch (error) {
-        toast.error('建立失敗');
-      }
+      // 舊行為是在這裡直接建一則草稿貼文（橘色變灰色）。使用者的實際意圖是
+      // 「這次的預排改到那天」，還沒要決定發什麼，所以改成只搬預排、維持橘色。
+      const slot = JSON.parse(dataStr) as PlannedSlot;
+      await movePlannedSlot(slot, date);
     }
   };
 
-  const dismissHabit = async (vendorId: string, habitTime: string, date: Date) => {
+  /**
+   * 「這次不用發」。
+   * ⚠️ 記的日期一律是 fromDate（原本該出現的那天）而不是它現在被挪到哪一天：
+   *    fromDate 才是這個時段的身分，這樣舊資料也完全對得上，不需要 migration。
+   */
+  const dismissSlot = async (slot: PlannedSlot) => {
     try {
       await addDoc(collection(db, 'dismissedHabits'), {
-        vendorId,
-        habitTime,
-        date: format(date, 'yyyy-MM-dd'),
+        vendorId: slot.vendorId,
+        habitTime: slot.time,
+        date: slot.fromDate,
         createdAt: new Date().toISOString()
       });
+      // 已經不顯示了，調整紀錄留著只會變成孤兒資料
+      if (slot.moveId) {
+        try {
+          await deleteDoc(doc(db, 'plannedSlotMoves', slot.moveId));
+        } catch (cleanupError) {
+          console.warn('Dismissed slot but failed to clean up its move record:', cleanupError);
+        }
+      }
       toast.success('已刪除預定排程');
     } catch (error) {
       toast.error('刪除失敗');
@@ -194,6 +251,17 @@ export default function CalendarView() {
   const calendarDays = [...paddingDays, ...days];
 
   const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
+
+  // 整個月的預排一次算完再依日期分組；每格各跑一次等於同樣的掃描做 30 遍。
+  const slotsByDay = useMemo(() => groupSlotsByDay(listPlannedSlots({
+    vendors: trackedVendors(vendors).filter(v => selectedVendorId === 'all' || v.id === selectedVendorId),
+    moves: slotMoves,
+    dismissed: dismissedHabits,
+    posts,
+    rangeStart: monthStart,
+    rangeEnd: monthEnd,
+    fulfilledWindowDays: 1, // 沿用原本「前後一天內有發就不用再提醒」
+  })), [vendors, selectedVendorId, slotMoves, dismissedHabits, posts, monthStart, monthEnd]);
 
   const filteredPosts = posts.filter(p => {
     const postMonth = p.targetMonth || (p.scheduledAt && p.scheduledAt.length > 0 ? format(parseISO(p.scheduledAt), 'yyyy-MM') : null);
@@ -328,17 +396,9 @@ export default function CalendarView() {
                   isSameDay(parseISO(p.scheduledAt), day) &&
                   (selectedVendorId === 'all' || p.vendorId === selectedVendorId)
                 );
-                const dayOfWeek = getDay(day);
+                // 預排（含被挪過來的）；冷凍中/已終止的廠商在共用層就排除掉了
+                const daySlots = slotsByDay.get(format(day, 'yyyy-MM-dd')) || [];
 
-                // Find habits for this day（排除冷凍中/已終止的廠商，避免提醒誤發）
-                const dayHabits = trackedVendors(vendors)
-                  .filter(v => selectedVendorId === 'all' || v.id === selectedVendorId)
-                  .flatMap(v =>
-                    (v.postingHabits || [])
-                      .filter(h => h.daysOfWeek.includes(dayOfWeek))
-                      .map(h => ({ ...h, vendorName: v.name, vendorId: v.id }))
-                  );
-                
                 return (
                   <div 
                     key={day.toString()} 
@@ -353,49 +413,42 @@ export default function CalendarView() {
                       {format(day, 'd')}
                     </div>
                     <div className="space-y-1">
-                      {/* Posting Habits Reminders */}
-                      {dayHabits.map((habit, hIdx) => {
-                        const isDismissed = dismissedHabits.some(d => 
-                          d.vendorId === habit.vendorId && 
-                          d.habitTime === habit.time && 
-                          d.date === format(day, 'yyyy-MM-dd')
-                        );
-
-                        if (isDismissed) return null;
-
-                        const isFulfilled = posts.some(p => 
-                          p.vendorId === habit.vendorId && 
-                          (
-                            isSameDay(parseISO(p.scheduledAt), day) || 
-                            isSameDay(parseISO(p.scheduledAt), subDays(day, 1)) ||
-                            isSameDay(parseISO(p.scheduledAt), addDays(day, 1))
-                          )
-                        );
-                        
-                        if (isFulfilled) return null;
-
-                        return (
-                          <div 
-                            key={`habit-${hIdx}`} 
-                            draggable
-                            onDragStart={(e) => handleDragStart(e, 'habit', `habit-${hIdx}`, habit)}
-                            onDragEnd={handleDragEnd}
-                            className="group/habit relative text-[9px] p-1 rounded bg-orange-50 text-orange-700 border border-orange-100 flex items-center opacity-70 cursor-grab active:cursor-grabbing hover:opacity-100 transition-opacity"
+                      {/* Posting Habits Reminders（預排時段，拖到別天仍然是預排） */}
+                      {daySlots.map((slot, hIdx) => (
+                        <div
+                          key={`slot-${slot.vendorId}-${slot.time}-${slot.fromDate}-${hIdx}`}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, 'habit', `slot-${hIdx}`, slot)}
+                          onDragEnd={handleDragEnd}
+                          onClick={onPlanPost ? () => onPlanPost({
+                            vendorId: slot.vendorId,
+                            scheduledAt: format(slot.date, "yyyy-MM-dd'T'HH:mm"),
+                            contentType: slot.habit.contentTypes?.[0] === 'video' ? 'video' : 'post',
+                            platforms: slot.habit.platforms,
+                          }) : undefined}
+                          title={onPlanPost
+                            ? `點一下用這個時段建立貼文${slot.isMoved ? `（原訂 ${slot.fromDate}）` : ''}`
+                            : undefined}
+                          className={clsx(
+                            "group/habit relative text-[9px] p-1 rounded bg-orange-50 text-orange-700 border flex items-center opacity-70 cursor-grab active:cursor-grabbing hover:opacity-100 transition-opacity",
+                            slot.isMoved ? "border-orange-300 border-dashed" : "border-orange-100"
+                          )}
+                        >
+                          <span className="font-bold mr-1">{slot.time}</span>
+                          <span className="truncate flex-1">
+                            {slot.isMoved ? '↪' : '🔔'} {slot.vendorName}: {slot.habit.contentTypes.map(t => t === 'post' ? '貼' : '影').join('/')}
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              dismissSlot(slot);
+                            }}
+                            className="hidden group-hover/habit:flex ml-1 p-0.5 hover:bg-orange-200 rounded-full transition-colors"
                           >
-                            <span className="font-bold mr-1">{habit.time}</span>
-                            <span className="truncate flex-1">🔔 {habit.vendorName}: {habit.contentTypes.map(t => t === 'post' ? '貼' : '影').join('/')}</span>
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                dismissHabit(habit.vendorId, habit.time, day);
-                              }}
-                              className="hidden group-hover/habit:flex ml-1 p-0.5 hover:bg-orange-200 rounded-full transition-colors"
-                            >
-                              <X size={8} />
-                            </button>
-                          </div>
-                        );
-                      })}
+                            <X size={8} />
+                          </button>
+                        </div>
+                      ))}
 
                       {/* Actual Posts */}
                       {dayPosts.map(post => {

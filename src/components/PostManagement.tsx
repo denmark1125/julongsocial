@@ -12,7 +12,9 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { isClientApproved } from '../lib/assetFlow';
-import { Post, Vendor, PostStatus, Asset } from '../types';
+import { listPlannedSlots } from '../lib/plannedSlots';
+import { Post, Vendor, PostStatus, Asset, PlannedSlotMove } from '../types';
+import type { PostPrefill } from './CalendarView';
 import { 
   Plus, 
   Search, 
@@ -52,13 +54,20 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export default function PostManagement() {
+interface PostManagementProps {
+  /** 從社群日曆點橘色預排帶過來的預填；吃掉後要呼叫 onPrefillConsumed 清掉，否則關掉視窗會一直彈回來 */
+  prefill?: PostPrefill | null;
+  onPrefillConsumed?: () => void;
+}
+
+export default function PostManagement({ prefill, onPrefillConsumed }: PostManagementProps = {}) {
   const [posts, setPosts] = useState<Post[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   // 判斷素材還能不能用要看貼文現況（掛在草稿的仍算可用、掛的貼文被刪掉的自動放回），先建索引避免每個 option 都掃一次
   const postIndex = React.useMemo(() => buildPostIndex(posts), [posts]);
   const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
+  const [slotMoves, setSlotMoves] = useState<PlannedSlotMove[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
@@ -106,41 +115,50 @@ export default function PostManagement() {
       return;
     }
 
-    const suggestions: {date: Date, habit: any}[] = [];
+    // 改走跟社群日曆同一套 listPlannedSlots：以前這裡自己讀 postingHabits 重算一次，
+    // 所以在日曆上把預排挪到別天之後，這裡仍然會建議原本那天——同一件事兩種答案。
+    //
+    // ⚠️ 連帶修掉一個既有行為差異：舊版這裡**完全沒看 dismissedHabits**，所以在日曆上
+    //    按 X 刪掉的預排，回到這裡照樣被推薦一次。實際資料驗證過，改用共用層之後
+    //    新舊唯一的差別就是這個（廣信 8/25、9/1，士彰 8/30 三個已刪時段不再出現）。
     const today = startOfDay(new Date());
+    const slots = listPlannedSlots({
+      vendors: [vendor],
+      moves: slotMoves,
+      dismissed: dismissedHabits,
+      // 正在編輯的那一則不算佔位，否則編輯時它自己的時段會從建議裡消失
+      posts: posts.filter(p => p.id !== editingPost?.id),
+      rangeStart: today,
+      rangeEnd: addDays(today, 13), // 沿用原本「往後看 14 天」
+      contentType: formData.contentType,
+      fulfilledWindowDays: 0, // 沿用原本「只有同一天有貼文才算被佔走」，不要改成日曆的前後一天
+    });
 
-    // Look ahead 14 days
-    for (let i = 0; i < 14; i++) {
-      const checkDate = addDays(today, i);
-      const dayOfWeek = getDay(checkDate);
+    setSuggestedDates(slots.slice(0, 6).map(s => ({ date: s.date, habit: s.habit })));
+  }, [formData.vendorId, formData.contentType, vendors, posts, editingPost, slotMoves, dismissedHabits]);
 
-      vendor.postingHabits.forEach(habit => {
-        if (habit.daysOfWeek.includes(dayOfWeek)) {
-          // If contentType is specified, filter by it
-          if (formData.contentType && habit.contentTypes && !habit.contentTypes.includes(formData.contentType)) {
-            return;
-          }
-
-          const [hours, minutes] = habit.time.split(':').map(Number);
-          let suggestedDate = setHours(checkDate, hours);
-          suggestedDate = setMinutes(suggestedDate, minutes);
-
-          // Check if this slot is already taken by another post (optional but helpful)
-          const isTaken = posts.some(p => 
-            p.vendorId === vendor.id && 
-            isSameDay(parseISO(p.scheduledAt), suggestedDate) &&
-            p.id !== editingPost?.id
-          );
-
-          if (!isTaken) {
-            suggestions.push({ date: suggestedDate, habit });
-          }
-        }
-      });
-    }
-
-    setSuggestedDates(suggestions.sort((a, b) => a.date.getTime() - b.date.getTime()).slice(0, 6));
-  }, [formData.vendorId, formData.contentType, vendors, posts, editingPost]);
+  // 從社群日曆點橘色預排進來：直接開新增貼文，廠商/時間/內容形式都填好。
+  // 只吃一次就清掉，否則使用者關掉視窗後它會一直彈回來。
+  useEffect(() => {
+    if (!prefill) return;
+    setEditingPost(null);
+    setFormData({
+      vendorId: prefill.vendorId,
+      title: '',
+      content: '',
+      status: 'draft',
+      scheduledAt: prefill.scheduledAt,
+      targetMonth: format(parseISO(prefill.scheduledAt), 'yyyy-MM'),
+      type: '專業',
+      contentType: prefill.contentType || 'post',
+      postUrl: '',
+      clientConfirmed: false,
+      internalConfirmed: false,
+      platforms: prefill.platforms && prefill.platforms.length > 0 ? prefill.platforms : ['IG'],
+    });
+    setIsModalOpen(true);
+    onPrefillConsumed?.();
+  }, [prefill, onPrefillConsumed]);
 
   const postTypes = ['專業', '生活', '促銷', '知識', '活動', '教學'];
 
@@ -170,11 +188,17 @@ export default function PostManagement() {
       setDismissedHabits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DismissedHabit)));
     });
 
+    // 建議發布時間要跟社群日曆看到的預排一致，所以連被挪過的時段也要讀
+    const mUnsubscribe = onSnapshot(collection(db, 'plannedSlotMoves'), (snapshot) => {
+      setSlotMoves(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlannedSlotMove)));
+    });
+
     return () => {
       vUnsubscribe();
       pUnsubscribe();
       aUnsubscribe();
       dUnsubscribe();
+      mUnsubscribe();
     };
   }, []);
 

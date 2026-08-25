@@ -453,6 +453,30 @@ export interface DismissedHabit {
   createdAt: string;
 }
 
+/**
+ * 預排時段的「單次調整」。
+ *
+ * postingHabits 是「每週三 11:30」這種規則，不是資料庫裡的一筆行程——日曆上的橘色預排
+ * 是照規則畫出來的，沒有實體可以搬。所以把某一次預排拖到別天時，**不能**去改廠商的
+ * 習慣設定：那會連同過去每一個月的日曆一起改掉，等於竄改歷史。
+ *
+ * 改成記一筆單次調整，只影響 fromDate 那一次，下一週照原規則出現。
+ * 定位與 dismissedHabits 完全一樣（那個是「這次不用發」，這個是「這次改天發」）。
+ *
+ * ⚠️ fromDate 是這個時段**原本**該出現的那天，也是它的身分證：
+ *    dismissedHabits 的比對、再次拖動、拖回原位都靠它，不可以改寫成 toDate。
+ */
+export interface PlannedSlotMove {
+  id?: string;
+  vendorId: string;
+  habitTime: string; // HH:mm，要連同 vendorId 才認得出是哪一個習慣時段
+  fromDate: string;  // YYYY-MM-DD 原本該出現的那天
+  toDate: string;    // YYYY-MM-DD 挪到哪一天
+  movedBy?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export type BookingStatus = 'booked' | 'completed' | 'postponed' | 'cancelled';
 export type BookingReason = 'client' | 'internal' | 'other';
 

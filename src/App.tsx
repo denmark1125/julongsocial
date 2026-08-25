@@ -13,7 +13,7 @@ import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
 import VendorManagement from './components/VendorManagement';
 import PostManagement from './components/PostManagement';
-import CalendarView from './components/CalendarView';
+import CalendarView, { PostPrefill } from './components/CalendarView';
 import AssetDatabase from './components/AssetDatabase';
 import ShootBookings from './components/ShootBookings';
 import UserManagement from './components/UserManagement';
@@ -38,6 +38,9 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   // 讓LINE推播裡的按鈕能直接連結到指定分頁(如`?tab=shootBookings`)，不然打開都只會停在dashboard
   const [activeTab, setActiveTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'dashboard');
+  // 從社群日曆點橘色預排帶過去「新增貼文」的預填。放在這裡是因為它要跨分頁存活：
+  // 切到 posts 的當下 CalendarView 已經被卸載了，狀態留在它身上會跟著消失。
+  const [postPrefill, setPostPrefill] = useState<PostPrefill | null>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
@@ -279,8 +282,8 @@ export default function App() {
     switch (activeTab) {
       case 'dashboard': return <Dashboard setActiveTab={setActiveTab} currentUserRole={userProfile?.role || 'employee'} />;
       case 'vendors': return <VendorManagement />;
-      case 'posts': return <PostManagement />;
-      case 'calendar': return <CalendarView />;
+      case 'posts': return <PostManagement prefill={postPrefill} onPrefillConsumed={() => setPostPrefill(null)} />;
+      case 'calendar': return <CalendarView onPlanPost={(prefill) => { setPostPrefill(prefill); setActiveTab('posts'); }} />;
       case 'videos': return <AssetDatabase />;
       case 'shootBookings': return <ShootBookings />;
       // 舊的 ?tab=editPriority 連結（LINE 推播/書籤）導回合併後的製作進度，不要掉到 dashboard
