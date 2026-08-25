@@ -11,6 +11,7 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
+import { isClientApproved } from '../lib/assetFlow';
 import { Post, Vendor, PostStatus, Asset } from '../types';
 import { 
   Plus, 
@@ -1298,7 +1299,7 @@ export default function PostManagement() {
                         )
                         .map(a => (
                           <option key={a.id} value={a.id}>
-                            [{a.category || '未分類'}] {a.title} {!isAssetSelectable(a, postIndex) ? '(目前這則正在用)' : ''} {!a.approved ? '(待審核)' : ''}
+                            [{a.category || '未分類'}] {a.title} {!isAssetSelectable(a, postIndex) ? '(目前這則正在用)' : ''} {!isClientApproved(a) ? '(待審核)' : ''}
                           </option>
                         ))
                       }

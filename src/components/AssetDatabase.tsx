@@ -641,7 +641,7 @@ export default function AssetDatabase() {
             </div>
             <div>
               <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">待審核</p>
-              <p className="text-lg font-bold leading-none">{assets.filter(a => !a.approved && a.status !== 'archived').length} <span className="text-xs font-normal text-gray-400">件</span></p>
+              <p className="text-lg font-bold leading-none">{assets.filter(a => !isClientApproved(a) && a.status !== 'archived').length} <span className="text-xs font-normal text-gray-400">件</span></p>
             </div>
           </div>
           <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm flex items-center space-x-3">
@@ -772,7 +772,7 @@ export default function AssetDatabase() {
                 .filter(v => v.name.toLowerCase().includes(vendorSearchTerm.toLowerCase()))
                 .map(vendor => {
                 const count = assets.filter(a => a.vendorId === vendor.id && a.type === activeTab && effStatus(a) === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
-                const pendingCount = assets.filter(a => a.vendorId === vendor.id && a.type === activeTab && !a.approved && a.status !== 'archived' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
+                const pendingCount = assets.filter(a => a.vendorId === vendor.id && a.type === activeTab && !isClientApproved(a) && a.status !== 'archived' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
                 
                 return (
                   <button
@@ -812,7 +812,7 @@ export default function AssetDatabase() {
               <Clock size={12} className="mr-1" /> 待處理提醒
             </p>
             <p className="text-xs text-amber-800 leading-relaxed">
-              目前共有 <span className="font-bold">{assets.filter(a => !a.approved && a.status !== 'archived' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length}</span> 件素材尚未通過審核，請儘速確認以利排程。
+              目前共有 <span className="font-bold">{assets.filter(a => !isClientApproved(a) && a.status !== 'archived' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length}</span> 件素材尚未通過審核，請儘速確認以利排程。
             </p>
           </div>
         </div>

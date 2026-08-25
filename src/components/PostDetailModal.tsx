@@ -4,6 +4,7 @@ import { X, Calendar, Clock, Globe, CheckCircle2, FileText, Video, ExternalLink,
 import { format, parseISO } from 'date-fns';
 import { clsx } from 'clsx';
 import { setPostStatus, togglePostConfirmation, togglePostPlatformPublished, POST_STATUS_LABEL } from '../lib/postActions';
+import { isClientApproved } from '../lib/assetFlow';
 
 interface PostDetailModalProps {
   post: Post;
@@ -172,7 +173,7 @@ export default function PostDetailModal({ post, vendor, asset, onClose, assets, 
                     <p className="text-sm font-bold truncate max-w-[200px]">{asset.title}</p>
                     <p className="text-[10px] text-gray-400">
                       ID: {asset.id?.slice(-6)}
-                      {editable && <span className={asset.approved ? 'text-green-600 ml-1.5' : 'text-orange-500 ml-1.5'}>・{asset.approved ? '素材已審核' : '素材未審核'}</span>}
+                      {editable && <span className={isClientApproved(asset) ? 'text-green-600 ml-1.5' : 'text-orange-500 ml-1.5'}>・{isClientApproved(asset) ? '素材已審核' : '素材未審核'}</span>}
                     </p>
                   </div>
                 </div>

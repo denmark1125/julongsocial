@@ -2,6 +2,7 @@ import { doc, updateDoc } from 'firebase/firestore';
 import toast from 'react-hot-toast';
 import { db } from '../firebase';
 import { Post, PostStatus, Asset, Vendor } from '../types';
+import { isClientApproved } from './assetFlow';
 
 // 貼文狀態／審核／平台發布的共用動作。
 // 原本只寫在 PostManagement.tsx 裡，社群日曆的貼文詳情也要能直接改狀態之後抽出來共用——
@@ -69,7 +70,10 @@ export async function setPostStatus(
     }
     if (post.assetId && post.assetId !== 'to_be_added') {
       const asset = assets.find(a => a.id === post.assetId);
-      if (asset && !asset.approved) {
+      // 不能用 asset.approved：業主已通過但剪輯師還沒標記上傳雲端時是 to_upload，
+      // 相容欄位 approved 仍是 false（見 FLOW_STAGE_COMPAT），
+      // 直接看它會把「早就審核過」的素材全部擋在發布之外。一律走 isClientApproved()。
+      if (asset && !isClientApproved(asset)) {
         toast.error('素材尚未通過審核，無法發布');
         return false;
       }
@@ -80,7 +84,7 @@ export async function setPostStatus(
     // 素材沒審核只提醒不擋
     if (post.assetId && post.assetId !== 'to_be_added') {
       const asset = assets.find(a => a.id === post.assetId);
-      if (asset && !asset.approved) {
+      if (asset && !isClientApproved(asset)) {
         toast('提醒：成片素材尚未審核', { icon: '⚠️', duration: 4000 });
       }
     }
