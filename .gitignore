@@ -9,3 +9,6 @@ dist
 _migration_backup_*/
 _rules_backup_*.rules
 _stage_backfill_backup.json
+
+# 一次性診斷／修復腳本留在本機；可重用的請整理進 scripts/
+/_*.mjs
