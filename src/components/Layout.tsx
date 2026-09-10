@@ -20,7 +20,8 @@ import {
   CreditCard,
   Film,
   Scissors,
-  Receipt
+  Receipt,
+  CalendarDays
 } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
@@ -217,6 +218,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     { id: 'users', label: '員工管理', icon: ShieldCheck, roles: ['engineer', 'manager'] },
     { id: 'version', label: '版本日誌', icon: History, roles: ['engineer'] },
     { id: 'editorQueue', label: '我的剪輯任務', icon: Scissors, roles: ['editor'] },
+    { id: 'editorSchedule', label: '上片排程', icon: CalendarDays, roles: ['editor'] },
     { id: 'editorInvoice', label: '我的請款', icon: Receipt, roles: ['editor'] },
   ];
 

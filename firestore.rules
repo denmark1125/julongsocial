@@ -490,7 +490,10 @@ service cloud.firestore {
     //    那是小編每天都會做的動作，收成 manager-only 等於拖出去就回不來了。
     //    這跟 dismissedHabits 的 delete 不同——那個是「反悔已刪除的排程」，比較接近管理動作。
     match /plannedSlotMoves/{id} {
-      allow read: if isAuthenticated() && !isEditorRole();
+      // 剪輯師的「上片排程」頁要看到跟小編日曆一模一樣的預排位置。
+      // 少了這條，被拖到別天的預排在剪輯師那邊會停在舊日子 —— 同一件事兩個答案。
+      // 寫入仍然只有內部人員可以做（下面兩條沒動）。
+      allow read: if isAuthenticated() && editorCanAccessVendor(resource.data.vendorId);
       allow create, update: if isAuthenticated() && !isEditorRole() && isValidPlannedSlotMove(request.resource.data);
       allow delete: if isAuthenticated() && !isEditorRole();
     }

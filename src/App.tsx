@@ -20,6 +20,7 @@ import UserManagement from './components/UserManagement';
 import BillingManagement from './components/BillingManagement';
 import VersionLogView from './components/VersionLog';
 import EditorAssetQueue from './components/EditorAssetQueue';
+import EditorSchedule from './components/EditorSchedule';
 import EditorInvoicePage from './components/EditorInvoicePage';
 import Logo from './components/Logo';
 import { Toaster } from 'react-hot-toast';
@@ -30,7 +31,7 @@ import { PASSWORD_SUFFIX, ADMIN_USERNAME, ADMIN_EMAIL, INITIAL_ADMIN_REAL_EMAIL 
 
 // 剪輯師（外包，權限最收斂）唯一能進的兩頁。新增剪輯師分頁時這裡跟 TAB_ROLES、
 // Layout.tsx 的 menuItems 三個地方都要一起加，少一個就會被強制導回工作台。
-const EDITOR_TABS = ['editorQueue', 'editorInvoice'];
+const EDITOR_TABS = ['editorQueue', 'editorSchedule', 'editorInvoice'];
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -262,6 +263,7 @@ export default function App() {
     users: ['engineer', 'manager'],
     version: ['engineer'],
     editorQueue: ['editor'],
+    editorSchedule: ['editor'],
     editorInvoice: ['editor'],
   };
 
@@ -271,6 +273,7 @@ export default function App() {
     if (userProfile?.role === 'editor') {
       switch (activeTab) {
         case 'editorInvoice': return <EditorInvoicePage userProfile={userProfile} />;
+        case 'editorSchedule': return <EditorSchedule userProfile={userProfile} />;
         case 'editorQueue':
         default: return <EditorAssetQueue userProfile={userProfile} />;
       }
