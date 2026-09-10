@@ -6,7 +6,13 @@ import {
   orderBy 
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Post, Vendor, Asset, Editor, DismissedHabit } from '../types';
+import { Post, Vendor, Asset, Editor, DismissedHabit, PlannedSlotMove, ShootBooking } from '../types';
+import { trackedVendors } from '../lib/vendorStatus';
+import { listPlannedSlots } from '../lib/plannedSlots';
+import {
+  buildSupplyPlan, describeSupply, buildHorizonDemands,
+  postDemandId, slotDemandId, SUPPLY_HORIZON_DAYS,
+} from '../lib/materialSupply';
 import {
   format,
   addDays,
@@ -14,6 +20,7 @@ import {
   parseISO,
   isSameDay,
   getDay,
+  startOfDay,
   subDays,
   isAfter,
   isBefore
@@ -29,7 +36,11 @@ import {
   ChevronLeft,
   ChevronRight,
   CheckSquare,
-  Square
+  Square,
+  Scissors,
+  Camera,
+  AlertTriangle,
+  Minus
 } from 'lucide-react';
 import { toJpeg } from 'html-to-image';
 import download from 'downloadjs';
@@ -43,15 +54,19 @@ interface TrackingExportModalProps {
   vendors: Vendor[];
   assets: Asset[];
   dismissedHabits: DismissedHabit[];
+  slotMoves: PlannedSlotMove[];
+  shootBookings: ShootBooking[];
 }
 
-export default function TrackingExportModal({ 
-  isOpen, 
-  onClose, 
-  posts, 
-  vendors, 
+export default function TrackingExportModal({
+  isOpen,
+  onClose,
+  posts,
+  vendors,
   assets,
-  dismissedHabits
+  dismissedHabits,
+  slotMoves,
+  shootBookings
 }: TrackingExportModalProps) {
   const [editors, setEditors] = useState<Editor[]>([]);
   const [selectedEditorId, setSelectedEditorId] = useState<string>('all');
@@ -107,16 +122,17 @@ export default function TrackingExportModal({
     setUseCustomRange(true);
   };
 
+  const activeVendors = filteredVendors.filter(v => selectedVendorIds.includes(v.id));
+
   const trackingData: any[] = [];
 
   weekDays.forEach(day => {
     const dateStr = format(day, 'yyyy-MM-dd');
-    const dayOfWeek = getDay(day);
 
-    filteredVendors.filter(v => selectedVendorIds.includes(v.id)).forEach(vendor => {
+    activeVendors.forEach(vendor => {
       // 1. Check for posts on this day
-      const dayPosts = posts.filter(p => 
-        p.vendorId === vendor.id && 
+      const dayPosts = posts.filter(p =>
+        p.vendorId === vendor.id &&
         p.scheduledAt && p.scheduledAt.length > 0 && isSameDay(parseISO(p.scheduledAt), day)
       );
 
@@ -131,82 +147,80 @@ export default function TrackingExportModal({
         if (exportMode === 'schedule') {
           // Schedule mode: Include everything EXCEPT pending (orange) items
           if (post.status !== 'pending') {
-            const key = `${vendor.id}_post_${post.id}_${dateStr}`;
+            const key = postDemandId(post.id!);
             trackingData.push({
               id: key,
               date: day,
               scheduledAt: post.scheduledAt,
+              vendorId: vendor.id,
               vendorName: vendor.name,
               type: post.contentType,
               title: post.title,
               status: post.status,
               isMissing: false,
               isHabit: false,
+              attachedAssetId: hasAsset ? post.assetId : undefined,
               post: post
             });
           }
         } else if (exportMode === 'all' || isMissingVideo) {
-          const key = `${vendor.id}_post_${post.id}_${dateStr}`;
+          const key = postDemandId(post.id!);
           trackingData.push({
             id: key,
             date: day,
             scheduledAt: post.scheduledAt,
+            vendorId: vendor.id,
             vendorName: vendor.name,
             type: post.contentType,
             title: post.title,
             status: post.status,
             isMissing: isMissingVideo,
             isHabit: false,
+            attachedAssetId: hasAsset ? post.assetId : undefined,
             post: post
           });
         }
       });
 
-      // 2. Check for unfulfilled habits (Orange items in calendar) - Skip in schedule mode
-      if (exportMode !== 'schedule') {
-        const habits = (vendor.postingHabits || []).filter(h => h.daysOfWeek.includes(dayOfWeek));
-        
-        habits.forEach(habit => {
-          const isDismissed = dismissedHabits.some(d => 
-            d.vendorId === vendor.id && 
-            d.habitTime === habit.time && 
-            d.date === dateStr
-          );
-
-          if (isDismissed) return;
-
-          const isFulfilled = posts.some(p => 
-            p.vendorId === vendor.id && 
-            (
-              (p.scheduledAt && p.scheduledAt.length > 0 && isSameDay(parseISO(p.scheduledAt), day)) || 
-              (p.scheduledAt && p.scheduledAt.length > 0 && isSameDay(parseISO(p.scheduledAt), subDays(day, 1))) ||
-              (p.scheduledAt && p.scheduledAt.length > 0 && isSameDay(parseISO(p.scheduledAt), addDays(day, 1)))
-            )
-          );
-
-          if (!isFulfilled) {
-            // Content type filter for habits
-            const habitType = habit.contentTypes[0] || 'video';
-            if (habitType === 'video' && !showVideos) return;
-            if (habitType === 'post' && !showPosts) return;
-
-            const key = `${vendor.id}_habit_${habit.time}_${dateStr}`;
-            trackingData.push({
-              id: key,
-              date: day,
-              vendorName: vendor.name,
-              type: habit.contentTypes[0] || 'video',
-              title: `[提醒] ${habit.time} 預計發片`,
-              status: 'missing',
-              isMissing: true,
-              isHabit: true,
-              habit: habit
-            });
-          }
-        });
-      }
     });
   });
+
+  // 2. 預排時段（日曆上的橘色卡）。發片清單是給業主的，不列預排。
+  //
+  // ⚠️ 這裡以前是自己照 postingHabits 重算一份，結果在日曆上把預排拖到別天之後，
+  //    導出的圖還是印原本那天 —— 同一件事兩個答案。現在一律走 listPlannedSlots()，
+  //    它才是「這天有哪些預排」的唯一入口（含單次調整 plannedSlotMoves）。
+  // ⚠️ 預排只算 trackedVendors：冷凍中/不列入統計的廠商在日曆上本來就不畫橘卡，
+  //    導出卻照印的話，剪輯師會被叫去追一個根本沒在發片的 IP。
+  //    已經排好的貼文不受影響（上面那圈用的是完整清單）。
+  if (exportMode !== 'schedule') {
+    listPlannedSlots({
+      vendors: trackedVendors(activeVendors),
+      moves: slotMoves,
+      dismissed: dismissedHabits,
+      posts,
+      rangeStart,
+      rangeEnd,
+      fulfilledWindowDays: 1, // 沿用日曆的「前後一天內有發就不用再提醒」
+    }).forEach(slot => {
+      const habitType = slot.habit.contentTypes[0] || 'video';
+      if (habitType === 'video' && !showVideos) return;
+      if (habitType === 'post' && !showPosts) return;
+
+      trackingData.push({
+        id: slotDemandId(slot),
+        date: startOfDay(slot.date),
+        vendorId: slot.vendorId,
+        vendorName: slot.vendorName,
+        type: habitType,
+        title: `[預排] ${slot.time}`, // 用日曆同一套用詞；夠短才不會在窄欄裡被拆成「預 / 計發片」
+        status: 'missing',
+        isMissing: true,
+        isHabit: true,
+        habit: slot.habit
+      });
+    });
+  }
 
   // Sort by date and time
   trackingData.sort((a, b) => {
@@ -214,6 +228,49 @@ export default function TrackingExportModal({
     const dateB = b.scheduledAt ? parseISO(b.scheduledAt).getTime() : b.date.getTime();
     return dateA - dateB;
   });
+
+  // 需求（這幾天幾號要上片）配上供給（成片庫存／待剪素材／預約拍攝），
+  // 讓剪輯師看得出每一格是「他要剪」、「等業主」還是「料根本還沒拍」。
+  // ⚠️ 配對範圍就是這張表的區間：區間外的排程不參與競爭。這張表本來就只回答「這幾天」，
+  //    要看整體庫存夠不夠撐請看拍攝進度頁（那邊才是欠片公式的權威）。
+  // ⚠️ 配對是在「今天起 SUPPLY_HORIZON_DAYS 天」這個固定視窗上做，**不是**在畫面選的區間上做。
+  //    區間長短一變答案就跟著變的話，剪輯師看月曆與這裡導出的一週會對同一天講不同的話。
+  //    這裡只負責顯示，查不到配對（區間落在視窗外或在過去）就顯示「—」。
+  const supplyPlan = buildSupplyPlan({
+    demands: buildHorizonDemands({
+      posts,
+      slots: listPlannedSlots({
+        vendors: trackedVendors(vendors),
+        moves: slotMoves,
+        dismissed: dismissedHabits,
+        posts,
+        rangeStart: new Date(),
+        rangeEnd: addDays(new Date(), SUPPLY_HORIZON_DAYS),
+        fulfilledWindowDays: 1,
+      }),
+    }),
+    assets,
+    posts,
+    bookings: shootBookings,
+  });
+
+  // 發片清單是要給業主看的，不該把內部的待剪/庫存攤在上面
+  const showSupply = exportMode !== 'schedule';
+
+  const stockRows = showSupply
+    ? Array.from(new Set(trackingData.map(item => item.vendorId as string)))
+        .map(vendorId => {
+          const vendor = activeVendors.find(v => v.id === vendorId);
+          const summary = supplyPlan.stock.get(vendorId);
+          const hasGap = trackingData.some(item => {
+            if (item.vendorId !== vendorId) return false;
+            const kind = supplyPlan.assignments.get(item.id)?.kind;
+            return kind === 'none' || kind === 'booked_late';
+          });
+          return { vendorId, name: vendor?.name || '未知', summary, hasGap };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))
+    : [];
 
   const handleRemarkChange = (id: string, value: string) => {
     setCustomRemarks(prev => ({ ...prev, [id]: value }));
@@ -497,9 +554,14 @@ export default function TrackingExportModal({
         <div className="flex-1 overflow-auto p-0 bg-gray-100 custom-scrollbar">
           {/* 這層只負責畫面上的置中留白，不參與截圖，避免導出的 JPG 兩側多出跟卡片本身無關的空白 */}
           <div className="min-w-full p-4 sm:p-8">
+            {/* 多了「素材狀態」一欄，800px 會把內容標題擠到剩兩個字；加寬到 900 讓每欄都讀得完整。
+                發片清單沒有那一欄，維持原本 800px，不然右邊會空出一大塊 */}
             <div
               ref={exportRef}
-              className="bg-[#F5F5F0] shadow-none border-none overflow-hidden w-full max-w-[800px] mx-auto"
+              className={clsx(
+                'bg-[#F5F5F0] shadow-none border-none overflow-hidden w-full mx-auto',
+                showSupply ? 'max-w-[900px]' : 'max-w-[800px]'
+              )}
             >
               {/* JPG Header */}
               <div className="p-12 bg-[#5A5A40] text-white">
@@ -524,15 +586,53 @@ export default function TrackingExportModal({
 
               {/* JPG Content */}
               <div className="p-12">
+                {/* 每個 IP 手上有什麼料。逐格看得到「這格誰負責」，這裡看得到「總共還有多少可以動用」 */}
+                {showSupply && stockRows.length > 0 && (
+                  <div className="mb-8 pb-6 border-b-2 border-[#5A5A40]/20">
+                    <p className="text-xs font-black text-[#5A5A40] uppercase tracking-widest mb-3">每個 IP 手上有什麼</p>
+                    {/* 這裡刻意**不**用下面欄位那種「你要剪」的祈使句：
+                        這幾行是在描述一家 IP 目前的狀態，不是在指派誰做什麼。
+                        但用詞一樣要白話 ——「庫存成片／已交片」是內部流程術語，改成看得懂的講法。 */}
+                    <div className="space-y-1.5">
+                      {stockRows.map(row => (
+                        <div key={row.vendorId} className="flex items-baseline justify-between">
+                          <span className="text-sm font-bold text-[#5A5A40] w-[130px] shrink-0">{row.name}</span>
+                          <span className="flex-1 text-xs font-medium text-gray-600 flex flex-wrap gap-x-4 gap-y-1">
+                            <span>成片 <span className={clsx('font-black', (row.summary?.ready || 0) > 0 ? 'text-emerald-600' : 'text-gray-300')}>{row.summary?.ready || 0}</span> 支</span>
+                            <span>待剪 <span className={clsx('font-black', (row.summary?.toEdit || 0) > 0 ? 'text-amber-600' : 'text-gray-300')}>{row.summary?.toEdit || 0}</span> 支</span>
+                            {(row.summary?.inProgress || 0) > 0 && (
+                              <span>等業主審 <span className="font-black text-sky-600">{row.summary?.inProgress}</span> 支</span>
+                            )}
+                            <span>
+                              {row.summary?.nextBookingDate
+                                ? <>下次拍攝 <span className={clsx('font-black', row.summary.nextBookingOverdue ? 'text-red-600' : 'text-[#5A5A40]')}>
+                                    {format(parseISO(row.summary.nextBookingDate), 'MM/dd')}{row.summary.nextBookingOverdue ? '（已過期）' : ''}
+                                  </span></>
+                                : <span className={clsx('font-black', row.hasGap ? 'text-red-600' : 'text-gray-400')}>還沒安排拍攝</span>}
+                            </span>
+                          </span>
+                          {row.hasGap && (
+                            <span className="flex items-center text-[10px] font-black text-red-600 ml-3 shrink-0 whitespace-nowrap">
+                              <AlertTriangle className="w-3 h-3 mr-1" /> 有幾天沒片
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {trackingData.length > 0 ? (
                   <table className="w-full border-collapse">
                     <thead>
                       <tr className="border-b-2 border-[#5A5A40]/20">
-                        <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[120px]">發布日期</th>
-                        <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[150px]">廠商 (IP)</th>
-                        <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[60px]">類型</th>
+                        <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[105px]">發布日期</th>
+                        <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[110px]">廠商 (IP)</th>
+                        <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[48px]">類型</th>
                         <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest">內容標題 / 狀態</th>
-                        <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[150px]">備註</th>
+                        {showSupply && (
+                          <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[170px]">素材狀態</th>
+                        )}
+                        <th className="py-4 text-left text-xs font-black text-[#5A5A40] uppercase tracking-widest w-[110px]">備註</th>
                       </tr>
                     </thead>
                   <tbody>
@@ -562,16 +662,17 @@ export default function TrackingExportModal({
                             {item.type === 'video' ? '影片' : '貼文'}
                           </span>
                         </td>
-                        <td className="py-5 align-top">
+                        <td className="py-5 align-top pr-3">
+                          {/* ⚠️ 這裡原本只要 isMissing 就把標題換成「待補影片素材」。
+                              加上素材狀態欄之後那句話會直接打架 —— 同一列左邊寫「待補影片素材」、
+                              右邊寫「已交片・審核中」，剪輯師不知道該信哪個。
+                              「缺不缺料」現在由右邊那欄負責回答，這裡一律顯示這格本來的內容。 */}
                           <div className="text-sm font-medium text-gray-700 mb-1">
-                            {item.isMissing ? '待補影片素材' : item.title}
+                            {showSupply ? item.title : (item.isMissing ? '待補影片素材' : item.title)}
                           </div>
                           <div className="flex items-center space-x-2">
-                            {!item.isMissing && (
-                              <span className="flex items-center text-[10px] font-bold text-green-600">
-                                <CheckCircle2 className="w-3 h-3 mr-1" /> 素材已到位
-                              </span>
-                            )}
+                            {/* 這裡原本掛一個綠色「素材已到位」，它其實只代表「這列不是待補」，
+                                對預排時段一律說謊。真正的素材真相改由右邊那欄回答。 */}
                             {item.status === 'draft' && (
                               <span className="flex items-center text-[10px] font-bold text-blue-500">
                                 <Clock className="w-3 h-3 mr-1" /> 尚未排程
@@ -579,6 +680,47 @@ export default function TrackingExportModal({
                             )}
                           </div>
                         </td>
+                        {showSupply && (() => {
+                          const assignment = supplyPlan.assignments.get(item.id);
+                          const supply = describeSupply(assignment);
+                          // 「已有成片」刻意是灰的：整欄掃下來眼睛要先跳到有待剪庫存跟「還沒有片」那幾格，
+                          // 把不用動手的那些染成綠色只會搶走注意力
+                          const tone = {
+                            editor: 'text-amber-600',
+                            waiting: 'text-sky-600',
+                            alert: 'text-red-600',
+                            idle: 'text-gray-400',
+                          }[supply.tone];
+                          // 圖示照「這格在等什麼」選，不能照顏色選：
+                          // 審核中跟等拍攝都是 waiting，但一個是等業主回覆、一個是等相機，不該長同一個樣子
+                          const Icon = {
+                            attached: CheckCircle2,
+                            ready: CheckCircle2,
+                            in_progress: Clock,
+                            to_edit: Scissors,
+                            booked: Camera,
+                            booked_late: AlertTriangle,
+                            none: AlertTriangle,
+                            not_video: Minus,
+                          }[assignment?.kind || 'not_video'];
+                          const emphasise = supply.tone === 'editor' || supply.tone === 'alert';
+                          return (
+                            <td className="py-5 align-top pr-3">
+                              <div className={clsx('flex items-start text-xs', emphasise ? 'font-black' : 'font-bold', tone)}>
+                                {/* 圖文沒有影片庫存可言，一個破折號就夠，不用再配一個圖示 */}
+                                {assignment?.kind !== 'not_video' && <Icon className="w-3.5 h-3.5 mr-1.5 mt-[1px] shrink-0" />}
+                                <span>{supply.label}</span>
+                              </div>
+                              {supply.detail && (
+                                /* 刻意單行截斷：片名在這格換行會把「名額」「公式」這種詞拆成上下兩行，
+                                   老闆對中文孤字斷行特別敏感，寧可用 ... 收掉 */
+                                <div className="text-[10px] text-gray-400 font-medium mt-1 pl-5 truncate">
+                                  {supply.detail}
+                                </div>
+                              )}
+                            </td>
+                          );
+                        })()}
                         <td className="py-5 align-top text-left">
                           <div className="relative">
                             <input 

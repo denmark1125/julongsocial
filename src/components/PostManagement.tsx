@@ -13,7 +13,7 @@ import {
 import { db, auth } from '../firebase';
 import { isClientApproved } from '../lib/assetFlow';
 import { listPlannedSlots } from '../lib/plannedSlots';
-import { Post, Vendor, PostStatus, Asset, PlannedSlotMove } from '../types';
+import { Post, Vendor, PostStatus, Asset, PlannedSlotMove, ShootBooking } from '../types';
 import type { PostPrefill } from './CalendarView';
 import { 
   Plus, 
@@ -68,6 +68,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
   const postIndex = React.useMemo(() => buildPostIndex(posts), [posts]);
   const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
   const [slotMoves, setSlotMoves] = useState<PlannedSlotMove[]>([]);
+  const [shootBookings, setShootBookings] = useState<ShootBooking[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
@@ -193,12 +194,18 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
       setSlotMoves(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlannedSlotMove)));
     });
 
+    // 上片排程表要回答「這格的料哪來」，預約拍攝是三個來源之一
+    const sbUnsubscribe = onSnapshot(collection(db, 'shootBookings'), (snapshot) => {
+      setShootBookings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ShootBooking)));
+    });
+
     return () => {
       vUnsubscribe();
       pUnsubscribe();
       aUnsubscribe();
       dUnsubscribe();
       mUnsubscribe();
+      sbUnsubscribe();
     };
   }, []);
 
@@ -1522,6 +1529,8 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
         vendors={visibleVendors(vendors)}
         assets={assets}
         dismissedHabits={dismissedHabits}
+        slotMoves={slotMoves}
+        shootBookings={shootBookings}
       />
     </div>
   );

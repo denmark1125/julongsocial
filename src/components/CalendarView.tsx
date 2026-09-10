@@ -10,7 +10,7 @@ import {
   deleteDoc
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Post, Vendor, Asset, DismissedHabit, PlannedSlotMove } from '../types';
+import { Post, Vendor, Asset, DismissedHabit, PlannedSlotMove, ShootBooking } from '../types';
 import { visibleVendors, trackedVendors } from '../lib/vendorStatus';
 import { listPlannedSlots, groupSlotsByDay, PlannedSlot } from '../lib/plannedSlots';
 import PostDetailModal from './PostDetailModal';
@@ -53,6 +53,7 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
   const [slotMoves, setSlotMoves] = useState<PlannedSlotMove[]>([]);
+  const [shootBookings, setShootBookings] = useState<ShootBooking[]>([]);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
@@ -79,12 +80,18 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
       setSlotMoves(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlannedSlotMove)));
     });
 
+    // 上片排程表要回答「這格的料哪來」，預約拍攝是三個來源之一（另兩個是成片庫存與待剪素材）
+    const sbUnsubscribe = onSnapshot(collection(db, 'shootBookings'), (snapshot) => {
+      setShootBookings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ShootBooking)));
+    });
+
     return () => {
       vUnsubscribe();
       pUnsubscribe();
       aUnsubscribe();
       dUnsubscribe();
       mUnsubscribe();
+      sbUnsubscribe();
     };
   }, []);
 
@@ -584,6 +591,8 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
         vendors={visibleVendors(vendors)}
         assets={assets}
         dismissedHabits={dismissedHabits}
+        slotMoves={slotMoves}
+        shootBookings={shootBookings}
       />
     </div>
   );
