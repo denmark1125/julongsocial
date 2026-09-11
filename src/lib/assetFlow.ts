@@ -35,6 +35,15 @@ export interface AdvanceFlowOptions {
   now?: Date;
 }
 
+export interface CloudUploadOptions extends AdvanceFlowOptions {
+  /**
+   * 這支片的請款歸屬 ＝ 按下「已上傳雲端」的那位剪輯師（users/{uid}.linkedEditorId）。
+   * 對應 firestore.rules 的 billableEditorIsSelf()：剪輯師只能寫成自己。
+   * 沒帶就不寫，維持 getBillableEditorId() 的 fallback（逐支指派 → 廠商預設剪輯師）。
+   */
+  billableEditorId?: string;
+}
+
 export function getClientApprovalTarget(asset: Pick<Asset, 'cloudUploadedAt'>): 'to_upload' | 'ready' {
   return asset.cloudUploadedAt ? 'ready' : 'to_upload';
 }
@@ -104,14 +113,22 @@ export function buildFlowUpdate(
  * 上傳日期 cloudUploadedAt 是請款月份的唯一認定依據，所以只寫一次、之後不覆蓋。
  */
 export function buildCloudUploadUpdate(
-  asset: Pick<Asset, 'stage' | 'approved' | 'flowStage' | 'revisionCount' | 'flowLog' | 'cloudUploadedAt'>,
-  opts: AdvanceFlowOptions = {}
+  asset: Pick<Asset, 'stage' | 'approved' | 'flowStage' | 'revisionCount' | 'flowLog' | 'cloudUploadedAt' | 'billableEditorId'>,
+  opts: CloudUploadOptions = {}
 ): Record<string, unknown> {
   const current = deriveFlowStage(asset);
 
+  // 計費歸屬在「上傳的這一刻」定案，不能等到請款時才回頭查 vendor.editorId ——
+  // 那是即時值，換過剪輯師之後舊片的錢就會算到新人頭上。
+  // 只在還沒定案時寫：重新上傳不該改寫已經凍結的歸屬。
+  const billing: Record<string, unknown> =
+    !asset.billableEditorId && opts.billableEditorId
+      ? { billableEditorId: opts.billableEditorId }
+      : {};
+
   // 業主已通過 → 這一按就補齊最後一個條件，直接可排程
   if (current === 'to_upload') {
-    return buildFlowUpdate(asset, 'ready', opts);
+    return { ...buildFlowUpdate(asset, 'ready', opts), ...billing };
   }
 
   const now = opts.now ?? new Date();
@@ -126,8 +143,14 @@ export function buildCloudUploadUpdate(
   if (opts.byName) entry.byName = opts.byName;
 
   return {
-    cloudUploadedAt: asset.cloudUploadedAt ?? nowIso,
+    // ⚠️ 這裡必須用 `||` 不能用 `??`：取消上傳寫回去的是**空字串**（見 buildCloudUploadUndoUpdate），
+    // 而 `??` 只擋 null/undefined。用 `??` 的話「上傳 → 取消 → 再上傳」會讓 cloudUploadedAt
+    // 永遠停在 ''，那支片就再也算不出請款月份、永遠請不到款。
+    // 走 ready 的那條路（buildFlowUpdate 第 81 行）用的是 `!asset.cloudUploadedAt`，本來就沒這個洞；
+    // 兩條路的判斷方式必須一致。
+    cloudUploadedAt: asset.cloudUploadedAt || nowIso,
     flowLog: [...(asset.flowLog ?? []), entry].slice(-FLOW_LOG_LIMIT),
+    ...billing,
   };
 }
 

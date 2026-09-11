@@ -3,8 +3,10 @@ import {
   Asset,
   deriveFlowStage,
   DEFAULT_EDITOR_FEE,
+  DurationTier,
   EDITOR_BILLING_CUTOVER_AT,
   EDITOR_BILLING_START_MONTH,
+  EDITOR_FEE_BY_TIER,
   EditorInvoiceItem,
   Vendor,
 } from '../types';
@@ -12,10 +14,27 @@ import {
 // 剪輯師請款的純計算層，前台(剪輯師請款頁)與後台(應付對帳)共用，不碰 Firestore。
 // 定位跟 vendorStatus.ts 一樣：所有「誰該領多少錢」的判定只能有這一份實作。
 
-/** 這支多少錢。沒填過就是預設價，不要在各處各自寫 ?? 900。 */
-export function getAssetFee(asset: Pick<Asset, 'editorFee'>): number {
+/** 這個長度分級對應多少錢。分級價只有這一份定義。 */
+export function feeForTier(tier: DurationTier): number {
+  return EDITOR_FEE_BY_TIER[tier];
+}
+
+/**
+ * 這支多少錢。優先序刻意是這個順序，不要在各處各自寫 ?? 900：
+ *   1. editorFee —— 人工指定過（管帳調價、或已入單凍結的金額），最優先
+ *   2. durationTier —— 60 秒以下 750 / 以上 950
+ *   3. DEFAULT_EDITOR_FEE —— 兩者都沒有的舊素材
+ *
+ * ⚠️ editorFee 要排在 durationTier 前面：請款送出時會把當下算出的金額寫回 editorFee 凍結，
+ * 若讓分級優先，日後調整分級價會連已送出的單子一起變動。
+ */
+export function getAssetFee(asset: Pick<Asset, 'editorFee' | 'durationTier'>): number {
   const fee = asset.editorFee;
-  return typeof fee === 'number' && Number.isFinite(fee) && fee >= 0 ? fee : DEFAULT_EDITOR_FEE;
+  if (typeof fee === 'number' && Number.isFinite(fee) && fee >= 0) return fee;
+  if (asset.durationTier && asset.durationTier in EDITOR_FEE_BY_TIER) {
+    return EDITOR_FEE_BY_TIER[asset.durationTier];
+  }
+  return DEFAULT_EDITOR_FEE;
 }
 
 /**

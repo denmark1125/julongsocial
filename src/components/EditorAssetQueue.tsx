@@ -1,7 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { collection, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Asset, AssetFlowStage, Post, UserProfile, Vendor, deriveFlowStage } from '../types';
+import {
+  Asset, AssetFlowStage, DURATION_TIER_LABEL, DurationTier, EDITOR_FEE_BY_TIER,
+  Post, UserProfile, Vendor, deriveFlowStage,
+} from '../types';
 import {
   buildCloudUploadUpdate,
   buildCloudUploadUndoUpdate,
@@ -330,6 +333,9 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
   const [page, setPage] = useState(1);
   // null＝使用者還沒自己選過，這時自動落在「有事要做」的那一頁，不要開在空白頁
   const [tab, setTab] = useState<Bucket | null>(null);
+  // 交片送審的確認視窗：同時要選這支是 60 秒以上還是以下（決定單價）
+  const [submitAsset, setSubmitAsset] = useState<Asset | null>(null);
+  const [submitTier, setSubmitTier] = useState<DurationTier>('under60');
 
   // 每個指派廠商各自訂閱單一文件，不用集合查詢——避開 Firestore `in` 條件上限，也符合權限規則(逐廠商路徑核可)
   useEffect(() => {
@@ -450,19 +456,31 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
     a.cloudUploadedAt && format(parseISO(a.cloudUploadedAt), 'yyyy-MM') === thisMonth
   ).length;
 
-  const advance = async (asset: Asset) => {
-    if (!auth.currentUser) return;
-    if (!window.confirm(`確定「${asset.title}」已經剪完，要交片送審嗎？\n\n送出後會移到「待上傳雲端」，若誤按可在尚未上傳前撤回。`)) return;
+  // 送審前先問長度分級：這一步同時決定這支多少錢，所以不能只用 window.confirm 帶過。
+  const advance = (asset: Asset) => {
+    setSubmitTier(asset.durationTier ?? 'under60');
+    setSubmitAsset(asset);
+  };
+
+  const confirmSubmit = async () => {
+    const asset = submitAsset;
+    if (!asset || !auth.currentUser) return;
     const msg = '已送審，等待業主回覆';
     setBusyId(asset.id!);
     try {
       await updateDoc(
         doc(db, 'assets', asset.id!),
-        buildFlowUpdate(asset, 'client_review', {
-          byUid: auth.currentUser.uid,
-          byName: userProfile?.displayName || userProfile?.username,
-        })
+        {
+          ...buildFlowUpdate(asset, 'client_review', {
+            byUid: auth.currentUser.uid,
+            byName: userProfile?.displayName || userProfile?.username,
+          }),
+          // 只寫分級、不寫 editorFee：金額要到請款送出那一刻才凍結，
+          // 中間管帳若調整分級價或逐支改價都還來得及。
+          durationTier: submitTier,
+        }
       );
+      setSubmitAsset(null);
       toast.success(msg);
       // 這裡故意不推即時通知：老闆 2026-08-12 回報「LINE 好吵」，
       // 剪輯師每交一支片就跳一則。改由每日 09:30 的 flow-digest-push 彙總成一則。
@@ -532,6 +550,8 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
         buildCloudUploadUpdate(asset, {
           byUid: auth.currentUser.uid,
           byName: userProfile?.displayName || userProfile?.username,
+          // 按下這顆鈕的人就是要請這支款的人。在這裡凍結，之後換剪輯師也不會把舊片的錢算到新人頭上。
+          billableEditorId: myEditorId,
         })
       );
       toast.success(
@@ -717,6 +737,54 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
           <span className="text-xs font-bold text-gray-500">第 {activePage} / {pageCount} 頁・每頁 5 支</span>
           <button type="button" disabled={activePage >= pageCount} onClick={() => setPage(p => Math.min(pageCount, p + 1))}
             className="p-2 rounded-xl bg-white border border-black/5 text-[#5A5A40] disabled:opacity-30" aria-label="下一頁"><ChevronRight size={16} /></button>
+        </div>
+      )}
+
+      {/* 交片送審：確認片名 + 選長度分級。分級直接決定單價，所以放在這一步問，
+          不要等到請款頁才補 —— 那時候片已經上傳、記憶也模糊了。 */}
+      {submitAsset && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onMouseDown={() => !busyId && setSubmitAsset(null)}>
+          <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-xl" onMouseDown={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold serif text-[#5A5A40]">確定要交片送審嗎？</h3>
+            <p className="mt-2 text-sm text-gray-600 break-words">{submitAsset.title}</p>
+
+            <p className="mt-5 text-sm font-bold text-gray-700">這支影片多長？</p>
+            <p className="mt-1 text-xs text-gray-500">長度決定這支的剪輯費。選錯了可以請管理員修改。</p>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              {(['under60', 'over60'] as DurationTier[]).map(t => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setSubmitTier(t)}
+                  className={`p-4 rounded-2xl border-2 text-left transition-all ${
+                    submitTier === t
+                      ? 'border-[#5A5A40] bg-[#5A5A40]/5'
+                      : 'border-black/10 hover:border-black/20'
+                  }`}
+                >
+                  <span className="block text-base font-bold text-[#1a1a1a]">{DURATION_TIER_LABEL[t]}</span>
+                  <span className="block mt-1 text-sm text-[#8B7355] font-bold">
+                    NT$ {EDITOR_FEE_BY_TIER[t].toLocaleString()}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <p className="mt-5 text-xs text-gray-500">
+              送出後會移到「待上傳雲端」。若誤按，在尚未上傳前都可以自己撤回。
+            </p>
+            <div className="mt-5 flex gap-3">
+              <button type="button" onClick={() => setSubmitAsset(null)} disabled={!!busyId}
+                className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-bold disabled:opacity-40">
+                取消
+              </button>
+              <button type="button" onClick={confirmSubmit} disabled={!!busyId}
+                className="flex-1 py-3 rounded-xl bg-[#5A5A40] text-white font-bold disabled:opacity-40">
+                {busyId ? '送出中…' : '確定送審'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

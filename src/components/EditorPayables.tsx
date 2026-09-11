@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, onSnapshot, updateDoc, writeBatch } from 'firebase/firestore';
+import { collection, deleteField, doc, onSnapshot, updateDoc, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Asset, Editor, EditorInvoice, Vendor } from '../types';
+import {
+  Asset, DURATION_TIER_LABEL, DurationTier, EDITOR_FEE_BY_TIER,
+  Editor, EditorInvoice, Vendor,
+} from '../types';
 import {
   billingMonthOptions, getAssetFee, getBillableEditorId, getBillingMonth,
   groupByVendor, isBillable, isLegacyNeverUploaded, monthLabel, needsLegacyReview,
@@ -25,6 +28,9 @@ export default function EditorPayables() {
   const [month, setMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+  // 管帳調價：只有還沒納入請款單的片可以改（入單後規則層也會擋）
+  const [feeAsset, setFeeAsset] = useState<Asset | null>(null);
+  const [feeCustom, setFeeCustom] = useState('');
 
   useEffect(() => {
     const unsubs = [
@@ -289,6 +295,42 @@ export default function EditorPayables() {
     toast.success('對帳清單已下載');
   };
 
+  /**
+   * 調整一支片的剪輯費。二選一：
+   *   tier  → 跟著公司定價走，清掉 editorFee，日後調分級價這支會一起變
+   *   custom→ 這一支特例，直接寫死 editorFee
+   * 已入單的片規則層會擋（editorInvoiceId 有值時計費欄位全部凍結），這裡先擋一次給明確訊息。
+   */
+  const saveFee = async (tier: DurationTier | null, custom: number | null) => {
+    const asset = feeAsset;
+    if (!asset || !auth.currentUser) return;
+    if (asset.editorInvoiceId) {
+      toast.error('這支已經納入請款單，金額不能再改');
+      return;
+    }
+    let patch: Record<string, unknown>;
+    if (tier) {
+      patch = { durationTier: tier, editorFee: deleteField() };
+    } else {
+      if (custom === null || !Number.isFinite(custom) || custom < 0 || custom > 100000) {
+        toast.error('金額要是 0 到 100000 之間的數字');
+        return;
+      }
+      patch = { editorFee: Math.round(custom) };
+    }
+    setBusyId(asset.id!);
+    try {
+      await updateDoc(doc(db, 'assets', asset.id!), patch);
+      setFeeAsset(null);
+      toast.success('已更新剪輯費');
+    } catch (error) {
+      console.error('saveFee failed:', error);
+      toast.error('更新失敗（可能是權限規則尚未部署）');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const stats = [
     { label: '未請款（等剪輯師送單）', value: totals.unsubmitted, icon: AlertCircle, color: 'text-[#A67C52]', bg: 'bg-[#A67C52]/10' },
     { label: '待公司核准', value: totals.submitted, icon: Clock, color: 'text-[#8B7355]', bg: 'bg-[#8B7355]/10' },
@@ -534,8 +576,17 @@ export default function EditorPayables() {
                             {pending.map(a => (
                               <div key={a.id} className="text-[10px] text-gray-500 flex items-center gap-1.5">
                                 <span className="truncate">
-                                  {vendors.find(v => v.id === a.vendorId)?.name || '未知 IP'}｜{a.title}（{money(getAssetFee(a))}）
+                                  {vendors.find(v => v.id === a.vendorId)?.name || '未知 IP'}｜{a.title}
                                 </span>
+                                <button
+                                  type="button"
+                                  onClick={() => { setFeeCustom(''); setFeeAsset(a); }}
+                                  className="shrink-0 px-1.5 py-0.5 rounded border border-[#5A5A40]/30 text-[#5A5A40] text-[10px] font-bold hover:bg-[#5A5A40]/5"
+                                  title="調整這支的剪輯費"
+                                >
+                                  {money(getAssetFee(a))}
+                                  {a.durationTier && <span className="ml-1 opacity-60">{DURATION_TIER_LABEL[a.durationTier]}</span>}
+                                </button>
                                 {a.status === 'archived' && (
                                   <span className="shrink-0 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-bold">
                                     未使用
@@ -554,6 +605,59 @@ export default function EditorPayables() {
           </div>
         )}
       </div>
+
+      {/* 管帳調價。分級與自訂金額是兩條路：選分級＝跟著公司定價走（日後調價會一起變），
+          填自訂金額＝這一支特例（寫死在素材上）。已納入請款單的片不會出現在這裡。 */}
+      {feeAsset && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onMouseDown={() => !busyId && setFeeAsset(null)}>
+          <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-xl" onMouseDown={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold serif text-[#5A5A40]">調整剪輯費</h3>
+            <p className="mt-2 text-sm text-gray-600 break-words">
+              {vendors.find(v => v.id === feeAsset.vendorId)?.name || '未知 IP'}｜{feeAsset.title}
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              目前 {money(getAssetFee(feeAsset))}
+              {feeAsset.durationTier ? `（${DURATION_TIER_LABEL[feeAsset.durationTier]}）`
+                : typeof feeAsset.editorFee === 'number' ? '（自訂金額）' : '（舊素材，沒有分級）'}
+            </p>
+
+            <p className="mt-5 text-sm font-bold text-gray-700">照長度分級</p>
+            <div className="mt-2 grid grid-cols-2 gap-3">
+              {(['under60', 'over60'] as DurationTier[]).map(t => (
+                <button key={t} type="button" disabled={!!busyId}
+                  onClick={() => saveFee(t, null)}
+                  className="p-4 rounded-2xl border-2 border-black/10 hover:border-[#5A5A40] text-left transition-all disabled:opacity-40">
+                  <span className="block text-base font-bold text-[#1a1a1a]">{DURATION_TIER_LABEL[t]}</span>
+                  <span className="block mt-1 text-sm text-[#8B7355] font-bold">
+                    NT$ {EDITOR_FEE_BY_TIER[t].toLocaleString()}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <p className="mt-5 text-sm font-bold text-gray-700">或指定金額（這一支特例）</p>
+            <div className="mt-2 flex gap-2">
+              <input
+                type="number" min={0} max={100000} value={feeCustom}
+                onChange={e => setFeeCustom(e.target.value)}
+                placeholder="例如 800"
+                className="flex-1 px-4 py-3 bg-[#F5F5F0] border-none rounded-xl focus:ring-2 focus:ring-[#5A5A40]"
+              />
+              <button type="button" disabled={!!busyId || feeCustom.trim() === ''}
+                onClick={() => saveFee(null, Number(feeCustom))}
+                className="px-5 rounded-xl bg-[#5A5A40] text-white font-bold disabled:opacity-40">
+                套用
+              </button>
+            </div>
+
+            <button type="button" onClick={() => setFeeAsset(null)} disabled={!!busyId}
+              className="mt-5 w-full py-3 rounded-xl bg-gray-100 text-gray-700 font-bold disabled:opacity-40">
+              關閉
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

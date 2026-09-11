@@ -36,7 +36,29 @@ export interface BillingRecord {
 // 計費錨點是 Asset.cloudUploadedAt（剪輯師自己按「上傳雲端」的那一刻），
 // 不是建檔日也不是發布日 —— 老闆定的規則就是「成片上傳雲端＝這支可以請款」。
 
-/** 預設單價。實務：影片 <60 秒 750、>60 秒 900，所以剪輯師可以逐支改。 */
+/**
+ * 剪輯費分級。60 秒是分界，由剪輯師在「交片送審」時標記，管帳（manager 以上）可再修改。
+ *
+ * 為什麼要有分級而不是只留一個預設價：2026-09-11 之前只有 DEFAULT_EDITOR_FEE 一個值，
+ * 「<60 秒 750、>60 秒 900」只寫在這行註解裡，實際上每支都算 900，要靠剪輯師在請款頁
+ * 一支一支手改成 750 —— 等於規則存在於人的記憶裡，系統完全不知道。
+ */
+export type DurationTier = 'under60' | 'over60';
+
+export const EDITOR_FEE_BY_TIER: Record<DurationTier, number> = {
+  under60: 750,   // 60 秒以下
+  over60: 950,    // 60 秒（含）以上
+};
+
+export const DURATION_TIER_LABEL: Record<DurationTier, string> = {
+  under60: '60 秒以下',
+  over60: '60 秒以上',
+};
+
+/**
+ * 沒有分級也沒有自訂金額時的退路，只會發生在 2026-09-11 之前建的舊素材。
+ * ⚠️ 不要拿這個值當新片的預設：新片一定有 durationTier，走 EDITOR_FEE_BY_TIER。
+ */
 export const DEFAULT_EDITOR_FEE = 900;
 
 /**
@@ -389,7 +411,16 @@ export interface Asset {
   revisionCount?: number; // 被業主退回過幾次
   revisionNote?: string; // 最近一次退回原因
   cloudUploadedAt?: string; // 剪輯師標記「已上傳雲端」的時間。這是請款月份的唯一認定依據，只寫一次不覆蓋
-  editorFee?: number;       // 這支的剪輯費（未填＝DEFAULT_EDITOR_FEE）。納入請款單後凍結
+  /**
+   * 影片長度分級，決定單價。剪輯師按「交片送審」時選，管帳可改。
+   * 沒有值的是 2026-09-11 分級上線前的舊素材，仍走 editorFee / DEFAULT_EDITOR_FEE。
+   */
+  durationTier?: DurationTier;
+  /**
+   * 這支的剪輯費。優先序：editorFee（人工指定）→ durationTier 對照價 → DEFAULT_EDITOR_FEE。
+   * 一律走 getAssetFee() 取值，不要自己 ?? 900。納入請款單後凍結。
+   */
+  editorFee?: number;
   billableEditorId?: string; // 計費歸屬，在上傳當下定案（不能事後查 vendor.editorId，那是即時值，換剪輯師會讓舊片的請款跑掉）
   editorInvoiceId?: string;  // 已納入哪張請款單。有值＝已請款過，規則保證只能 unset→set
   // 新舊帳盤點。切帳日前的片必須逐支確認；未填視同 needs_review，不會出現在剪輯師請款頁。

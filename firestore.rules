@@ -106,7 +106,7 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys()
         .hasOnly(['stage', 'url', 'approved', 'submittedBy', 'submittedAt',
                   'flowStage', 'flowSince', 'flowLog', 'cloudUploadedAt',
-                  'editorFee', 'billableEditorId', 'editorInvoiceId']);
+                  'durationTier', 'editorFee', 'billableEditorId', 'editorInvoiceId']);
     }
 
     // 這位使用者代表哪一位剪輯師標籤。請款單的擁有權判斷全部靠這個。
@@ -121,7 +121,7 @@ service cloud.firestore {
 
     function touchesBillingFields() {
       return request.resource.data.diff(resource.data).affectedKeys()
-        .hasAny(['editorFee', 'billableEditorId', 'editorInvoiceId',
+        .hasAny(['durationTier', 'editorFee', 'billableEditorId', 'editorInvoiceId',
                  'legacySettlementStatus', 'legacySettledAt', 'legacySettledAmount',
                  'legacySettlementNote', 'legacySettlementSource',
                  'legacyReviewedAt', 'legacyReviewedByUid']);
@@ -247,6 +247,7 @@ service cloud.firestore {
              (!('cloudUploadedAt' in data) || data.cloudUploadedAt is string) &&
              // 剪輯師請款：金額上限放在 schema 而不是角色判斷裡，因為它對所有角色都要生效
              //（老闆自己手滑打 900000 也該被擋）
+             (!('durationTier' in data) || data.durationTier in ['under60', 'over60']) &&
              (!('editorFee' in data) || (data.editorFee is int && data.editorFee >= 0 && data.editorFee <= 100000)) &&
              (!('billableEditorId' in data) || data.billableEditorId is string) &&
              (!('editorInvoiceId' in data) || data.editorInvoiceId is string) &&
