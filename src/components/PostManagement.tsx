@@ -860,7 +860,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                           href={post.postUrl} 
                           target="_blank" 
                           rel="noopener noreferrer"
-                          className="flex items-center text-blue-500 hover:text-blue-700 font-bold text-sm"
+                          className="flex items-center text-blue-500 hover:text-blue-700 font-bold text-sm whitespace-nowrap"
                         >
                           <ExternalLink size={14} className="mr-1" /> 前往位置
                         </a>
