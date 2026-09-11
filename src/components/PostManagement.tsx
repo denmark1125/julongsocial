@@ -418,7 +418,8 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
   });
 
   const getStatusBadge = (status: PostStatus, onClick?: () => void) => {
-    const baseClasses = "px-3 py-1 rounded-full text-sm font-bold flex items-center w-fit cursor-pointer transition-all hover:shadow-sm active:scale-95 border";
+    // ⚠️ whitespace-nowrap 不能拿掉：這是 rounded-full 的標籤，字一換行就變成一顆圓球裝著直排的字
+    const baseClasses = "px-3 py-1 rounded-full text-sm font-bold flex items-center w-fit whitespace-nowrap cursor-pointer transition-all hover:shadow-sm active:scale-95 border";
     switch (status) {
       case 'published': return <button type="button" onClick={onClick} className={cn(baseClasses, "bg-green-100 text-green-700 border-green-200")}><CheckCircle2 size={12} className="mr-1" /> 已發布 <ChevronDown size={10} className="ml-1 opacity-50" /></button>;
       case 'scheduled': return <button type="button" onClick={onClick} className={cn(baseClasses, "bg-blue-100 text-blue-700 border-blue-200")}><Clock size={12} className="mr-1" /> 已排程 <ChevronDown size={10} className="ml-1 opacity-50" /></button>;
@@ -476,11 +477,12 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
   return (
     <div className="readability-surface space-y-6 min-w-0">
       {/* Statistics Section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
         {vendorStats.map(stat => (
           <div key={stat.id} className="bg-white p-4 rounded-3xl border border-black/5 shadow-sm">
             <div className="flex justify-between items-start mb-2">
-              <div className="font-bold text-base line-clamp-2 break-words pr-2">{stat.name}</div>
+              {/* 單行截斷而非換行：中文換行會從詞中間切、還會留孤字（例如「…門市日／常」）。全名在 title 提示 */}
+              <div className="font-bold text-base truncate pr-2" title={stat.name}>{stat.name}</div>
               <div className="flex items-center gap-1.5 shrink-0">
                 {stat.monthAdjustments.length > 0 && (
                   <span className="text-[13px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-100">
@@ -708,53 +710,54 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
       <div className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
         {/* Desktop Table View */}
         <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          {/* 欄位標題不換行：放大到 14px 之後在窄容器會被擠成一個字一行。外層有 overflow-x-auto，橫向捲比直排好讀 */}
+          <table className="w-full min-w-[1120px] text-left border-collapse">
             <thead>
               <tr className="bg-[#F5F5F0] border-b border-black/5">
                 <th 
-                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors"
                   onClick={() => handleSort('platforms')}
                 >
                   <div className="flex items-center">發布社群 <SortIcon field="platforms" /></div>
                 </th>
                 <th 
-                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors"
                   onClick={() => handleSort('contentType')}
                 >
                   <div className="flex items-center">內容類型 <SortIcon field="contentType" /></div>
                 </th>
                 <th 
-                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors"
                   onClick={() => handleSort('status')}
                 >
                   <div className="flex items-center">發布狀態 <SortIcon field="status" /></div>
                 </th>
                 <th 
-                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors"
                   onClick={() => handleSort('scheduledAt')}
                 >
                   <div className="flex items-center">發布時間 <SortIcon field="scheduledAt" /></div>
                 </th>
-                <th className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider">貼文位置</th>
+                <th className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">貼文位置</th>
                 <th 
-                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors"
                   onClick={() => handleSort('title')}
                 >
                   <div className="flex items-center">文案標題 / 內容 <SortIcon field="title" /></div>
                 </th>
                 <th 
-                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider text-center cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider text-center whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors"
                   onClick={() => handleSort('clientConfirmed')}
                 >
                   <div className="flex items-center justify-center">客戶確認 <SortIcon field="clientConfirmed" /></div>
                 </th>
                 <th 
-                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider text-center cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider text-center whitespace-nowrap cursor-pointer hover:bg-gray-100 transition-colors"
                   onClick={() => handleSort('internalConfirmed')}
                 >
                   <div className="flex items-center justify-center">內部檢核 <SortIcon field="internalConfirmed" /></div>
                 </th>
-                <th className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider">操作</th>
+                <th className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider whitespace-nowrap">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-black/5">
@@ -847,7 +850,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                       </div>
                       <div className="text-sm text-gray-500">
                         {post.scheduledAt && post.scheduledAt.length > 0 ? format(parseISO(post.scheduledAt), 'HH:mm') : (
-                          <span className="text-[13px]">歸檔: {post.targetMonth}</span>
+                          <span className="text-[13px] whitespace-nowrap">歸檔: {post.targetMonth}</span>
                         )}
                       </div>
                     </td>
@@ -866,7 +869,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                       )}
                     </td>
                     <td className="p-4 max-w-xs">
-                      <div className="font-bold text-base line-clamp-2 break-words">{post.title}</div>
+                      <div className="font-bold text-base line-clamp-2">{post.title}</div>
                       <div className="text-sm text-gray-500 line-clamp-2 mt-1">{post.content}</div>
                     </td>
                     <td className="p-4 text-center">
@@ -936,34 +939,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                           ))}
                         </div>
                       </div>
-                      <h4 className="font-bold text-base line-clamp-2 break-words">{post.title}</h4>
-                    </div>
-                    <div className="flex gap-2 self-end">
-                      <button 
-                        onClick={() => handleCopyContent(post.content)}
-                        className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg"
-                        title="複製文案"
-                      >
-                        <Copy size={16} />
-                      </button>
-                      <button 
-                        onClick={() => {
-                          setEditingPost(post);
-                          setFormData(post);
-                          setIsModalOpen(true);
-                        }}
-                        aria-label="編輯貼文"
-                        className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg"
-                      >
-                        <FileEdit size={16} />
-                      </button>
-                      <button 
-                        onClick={() => setDeletingPostId(post.id!)}
-                        aria-label="刪除貼文"
-                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      <h4 className="font-bold text-base line-clamp-2">{post.title}</h4>
                     </div>
                   </div>
 
@@ -1005,19 +981,38 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                         )}
                       </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="flex items-center space-x-1">
-                        <span className="text-[13px] text-gray-500">客:</span>
-                        <button aria-label="切換業主審核" onClick={() => toggleConfirmation(post, 'clientConfirmed')}>
-                          {post.clientConfirmed ? <CheckSquare className="text-green-500" size={14} /> : <Square className="text-gray-300" size={14} />}
-                        </button>
-                      </div>
-                      <div className="flex items-center space-x-1">
-                        <span className="text-[13px] text-gray-500">內:</span>
-                        <button aria-label="切換內部檢核" onClick={() => toggleConfirmation(post, 'internalConfirmed')}>
-                          {post.internalConfirmed ? <CheckSquare className="text-green-500" size={14} /> : <Square className="text-gray-300" size={14} />}
-                        </button>
-                      </div>
+                    {/* 這裡原本還有一組「客:／內:」勾選，跟卡片最下面那排「業主／內部」是同一個
+                        toggleConfirmation，完全重複。以前字只有 9px 看不出來，放大之後兩排並存很怪，
+                        留下面那排（有完整字＋連結），這裡改放操作鈕，順便把原本自己佔一整排、
+                        左邊整片空白的圖示收進來。 */}
+                    {/* ml-auto：這排是 flex-wrap，窄螢幕放不下時圖示會被擠到第二行，
+                        沒有它就會變成靠左的一排孤兒圖示 */}
+                    <div className="flex items-center gap-1 ml-auto">
+                      <button
+                        onClick={() => handleCopyContent(post.content)}
+                        className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg"
+                        title="複製文案"
+                      >
+                        <Copy size={16} />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingPost(post);
+                          setFormData(post);
+                          setIsModalOpen(true);
+                        }}
+                        aria-label="編輯貼文"
+                        className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg"
+                      >
+                        <FileEdit size={16} />
+                      </button>
+                      <button
+                        onClick={() => setDeletingPostId(post.id!)}
+                        aria-label="刪除貼文"
+                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     </div>
                   </div>
 

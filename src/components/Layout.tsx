@@ -493,7 +493,8 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
               )}>
                 <item.icon size={20} />
               </div>
-              <span className="text-[13px] leading-normal font-bold mt-1 text-center">{item.label}</span>
+              {/* 小螢幕(≤359px)降一級並強制不換行：13px 時「素材資料庫」會斷成兩行去撞隔壁那格 */}
+              <span className="text-[11px] min-[360px]:text-[13px] leading-normal font-bold mt-1 text-center whitespace-nowrap">{item.label}</span>
             </button>
           ))}
         </nav>

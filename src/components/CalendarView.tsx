@@ -402,7 +402,7 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
 
       <div className="flex-1 min-h-0 overflow-auto">
         {viewMode === 'calendar' ? (
-          <div className="min-w-[980px]">
+          <div className="min-w-[980px] xl:min-w-0">
             <div className="grid grid-cols-7 border-b border-black/5 bg-gray-50/50">
               {weekDays.map(day => (
                 <div key={day} className="p-4 text-center text-[13px] font-bold text-gray-500 uppercase tracking-widest">
@@ -455,23 +455,37 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                             ? `點一下用這個時段建立貼文${slot.isMoved ? `（原訂 ${slot.fromDate}）` : ''}`
                             : undefined}
                           className={clsx(
-                            "group/habit relative text-sm p-2 rounded bg-orange-50 text-orange-700 border flex flex-wrap items-center gap-y-1 cursor-grab active:cursor-grabbing transition-colors",
+                            "group/habit relative text-sm p-2 pr-7 rounded bg-orange-50 text-orange-700 border cursor-grab active:cursor-grabbing transition-colors",
                             slot.isMoved ? "border-orange-300 border-dashed" : "border-orange-100"
                           )}
                         >
-                          <span className="font-bold mr-1">{slot.time}</span>
-                          <span className="min-w-0 basis-full line-clamp-2 break-words">
-                            {slot.isMoved ? '↪' : '🔔'} {slot.vendorName}: {slot.habit.contentTypes.map(t => t === 'post' ? '貼' : '影').join('/')}
-                          </span>
+                          {/* ⚠️ 格子只有約 140px 寬，字放大之後**一律單行截斷**，不要 line-clamp+break-words：
+                              中文會從詞中間被切開（「品牌影／音與門市」），還會在第二行留下一個孤字，
+                              而且每張卡高度都不一樣，整面日曆就散掉了。看不完的全名在 title 提示裡。 */}
+                          <div className="flex items-baseline gap-1 min-w-0">
+                            {/* ⚠️ 第一行只放「真的有資訊量」的東西：時間 + 影片/圖文。
+                                原本還寫了「預排」兩個字，但橘底本身就代表預排，欄位一窄就被截成
+                                「預排…」，反而把真正要看的影片/圖文擠掉了（1280 實測）。
+                                挪動過的用箭頭表示，原訂日期放在 title 裡。 */}
+                            {/* 箭頭併進時間那一段，不另外佔一個 flex gap：分開放的話，挪動過的那格
+                                會剛好把「影片」擠成「影…」（1280 實測差幾 px） */}
+                            <span className="font-bold shrink-0" title={slot.isMoved ? `已挪動（原訂 ${slot.fromDate}）` : undefined}>
+                              {slot.isMoved ? '↪ ' : ''}{slot.time}
+                            </span>
+                            <span className="text-[13px] opacity-70 truncate shrink">
+                              {slot.habit.contentTypes.map(t => t === 'post' ? '圖文' : '影片').join('/')}
+                            </span>
+                          </div>
+                          <div className="truncate" title={slot.vendorName}>{slot.vendorName}</div>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               dismissSlot(slot);
                             }}
                             aria-label={`刪除 ${slot.vendorName} ${slot.time} 預排`}
-                            className="absolute right-0 top-0 flex sm:invisible sm:group-hover/habit:visible sm:group-focus-within/habit:visible items-center justify-center hover:bg-orange-200 rounded-lg transition-colors"
+                            className="absolute right-1 top-1 p-0.5 flex sm:invisible sm:group-hover/habit:visible sm:group-focus-within/habit:visible items-center justify-center hover:bg-orange-200 rounded-lg transition-colors"
                           >
-                            <X size={16} />
+                            <X size={14} />
                           </button>
                         </div>
                       ))}
@@ -494,15 +508,16 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                               "bg-gray-50 text-gray-600 border-gray-200"
                             )}
                           >
-                            <div className="flex flex-wrap items-center gap-1">
+                            {/* 同上：三行固定（時間／廠商／標題），每行單行截斷，卡片高度才會一致 */}
+                            <div className="flex items-center gap-1">
                               <span className="font-bold flex-shrink-0">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'HH:mm') : '-'}</span>
-                              <span className="flex items-center gap-0.5 opacity-70 flex-shrink-0">
-                                {post.contentType === 'post' ? <ImageIcon size={14} /> : <Video size={14} />}
-                                [{post.contentType === 'post' ? '圖文' : '影'}]
+                              <span className="flex items-center gap-0.5 opacity-70 flex-shrink-0 text-[13px]">
+                                {post.contentType === 'post' ? <ImageIcon size={13} /> : <Video size={13} />}
+                                {post.contentType === 'post' ? '圖文' : '影片'}
                               </span>
-                              <span className="basis-full line-clamp-2 break-words font-bold">{vendor?.name}</span>
                             </div>
-                            <div className="line-clamp-2 break-words">{post.title}</div>
+                            <div className="truncate font-bold" title={vendor?.name}>{vendor?.name}</div>
+                            <div className="truncate opacity-90 text-[13px]" title={post.title}>{post.title}</div>
                           </div>
                         );
                       })}
