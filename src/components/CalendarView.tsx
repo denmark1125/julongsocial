@@ -55,7 +55,9 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
   const [slotMoves, setSlotMoves] = useState<PlannedSlotMove[]>([]);
   const [shootBookings, setShootBookings] = useState<ShootBooking[]>([]);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
-  const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
+  const [viewMode, setViewMode] = useState<'calendar' | 'list'>(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches ? 'list' : 'calendar'
+  );
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
   const [selectedVendorId, setSelectedVendorId] = useState<string>('all');
 
@@ -280,42 +282,54 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
     return parseISO(a.scheduledAt).getTime() - parseISO(b.scheduledAt).getTime();
   });
 
+  // Presentation only: preserve the existing post month filter and shared planned-slot calculation.
+  const listDateKeys = new Set<string>(slotsByDay.keys());
+  filteredPosts.forEach(post => listDateKeys.add(post.scheduledAt ? format(parseISO(post.scheduledAt), 'yyyy-MM-dd') : 'unscheduled'));
+  const listDays = [...listDateKeys].sort().map(dateKey => ({
+    dateKey,
+    dayPosts: filteredPosts.filter(post => (post.scheduledAt ? format(parseISO(post.scheduledAt), 'yyyy-MM-dd') : 'unscheduled') === dateKey),
+    daySlots: slotsByDay.get(dateKey) || [],
+  }));
+
   return (
-    <div className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden flex flex-col h-full">
-      <div className="p-4 sm:p-6 flex flex-col sm:flex-row items-center justify-between border-b border-black/5 gap-4 bg-white sticky top-0 z-20">
-        <div className="flex items-center justify-between w-full sm:w-auto">
-          <div className="flex items-center space-x-4">
+    <div className="readability-surface bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden flex flex-col h-full min-h-0">
+      <div className="p-4 sm:p-6 flex flex-col xl:flex-row items-center justify-between border-b border-black/5 gap-4 bg-white sticky top-0 z-20">
+        <div className="flex flex-wrap gap-3 items-center justify-between w-full xl:w-auto">
+          <div className="flex flex-wrap items-center gap-3">
             <h3 className="text-xl font-bold serif">{format(currentDate, 'yyyy年 MM月')}</h3>
             <button 
               onClick={() => setIsTrackingModalOpen(true)}
-              className="hidden sm:flex bg-orange-50 text-orange-600 px-4 py-1.5 rounded-xl items-center shadow-sm border border-orange-100 hover:bg-orange-100 transition-all text-xs font-bold"
+              className="hidden sm:flex bg-orange-50 text-orange-600 px-4 py-1.5 rounded-xl items-center shadow-sm border border-orange-100 hover:bg-orange-100 transition-all text-sm font-bold"
             >
               <BellRing size={16} className="mr-2" /> 上片排程表
             </button>
             <button 
-              onClick={exportToExcel}
-              className="hidden sm:flex bg-white text-gray-600 px-4 py-1.5 rounded-xl items-center shadow-sm border border-black/5 hover:bg-gray-50 transition-all text-xs font-bold"
+              aria-label="匯出 Excel"
+            onClick={exportToExcel}
+              className="hidden sm:flex bg-white text-gray-600 px-4 py-1.5 rounded-xl items-center shadow-sm border border-black/5 hover:bg-gray-50 transition-all text-sm font-bold"
             >
               <Download size={16} className="mr-2" /> 匯出 Excel
             </button>
           </div>
           
-          {/* View Mode Toggle - Mobile Only */}
-          <div className="flex bg-gray-100 p-1 rounded-xl md:hidden">
+          {/* Keep the toggle available after resizing or rotating the screen. */}
+          <div className="flex shrink-0 bg-gray-100 p-1 rounded-xl">
             <button 
               onClick={() => setViewMode('calendar')}
+              aria-pressed={viewMode === 'calendar'}
               className={clsx(
-                "px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all",
-                viewMode === 'calendar' ? "bg-white text-[#5A5A40] shadow-sm" : "text-gray-400"
+                "px-3 py-1.5 rounded-lg text-sm font-bold transition-all",
+                viewMode === 'calendar' ? "bg-white text-[#5A5A40] shadow-sm" : "text-gray-500"
               )}
             >
               日曆
             </button>
             <button 
               onClick={() => setViewMode('list')}
+              aria-pressed={viewMode === 'list'}
               className={clsx(
-                "px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all",
-                viewMode === 'list' ? "bg-white text-[#5A5A40] shadow-sm" : "text-gray-400"
+                "px-3 py-1.5 rounded-lg text-sm font-bold transition-all",
+                viewMode === 'list' ? "bg-white text-[#5A5A40] shadow-sm" : "text-gray-500"
               )}
             >
               清單
@@ -323,9 +337,10 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
           </div>
         </div>
 
-        <div className="flex items-center justify-between w-full sm:w-auto space-x-2">
+        <div className="flex flex-wrap gap-3 items-center justify-between w-full xl:w-auto space-x-2">
           <div className="flex space-x-1">
             <button 
+              aria-label="上個月"
               onClick={() => setCurrentDate(subMonths(currentDate, 1))}
               className="p-2 hover:bg-[#F5F5F0] rounded-xl transition-colors"
             >
@@ -333,11 +348,12 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
             </button>
             <button 
               onClick={() => setCurrentDate(new Date())}
-              className="px-4 py-2 text-sm font-bold hover:bg-[#F5F5F0] rounded-xl transition-colors"
+              className="px-4 py-2 text-base font-bold hover:bg-[#F5F5F0] rounded-xl transition-colors"
             >
               今天
             </button>
             <button 
+              aria-label="下個月"
               onClick={() => setCurrentDate(addMonths(currentDate, 1))}
               className="p-2 hover:bg-[#F5F5F0] rounded-xl transition-colors"
             >
@@ -346,6 +362,7 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
           </div>
           
           <button 
+            aria-label="匯出 Excel"
             onClick={exportToExcel}
             className="sm:hidden p-2 text-gray-600 hover:bg-gray-100 rounded-xl border border-black/5"
           >
@@ -359,7 +376,7 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
         <button
           onClick={() => setSelectedVendorId('all')}
           className={clsx(
-            "px-4 py-1.5 rounded-full text-xs font-bold transition-all whitespace-nowrap border",
+            "px-4 py-1.5 rounded-full text-sm font-bold transition-all whitespace-nowrap border",
             selectedVendorId === 'all'
               ? "bg-[#5A5A40] text-white border-[#5A5A40]"
               : "bg-white text-gray-500 border-black/5 hover:border-gray-300"
@@ -372,7 +389,7 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
             key={vendor.id}
             onClick={() => setSelectedVendorId(vendor.id!)}
             className={clsx(
-              "px-4 py-1.5 rounded-full text-xs font-bold transition-all whitespace-nowrap border",
+              "px-4 py-1.5 rounded-full text-sm font-bold transition-all whitespace-nowrap border",
               selectedVendorId === vendor.id
                 ? "bg-[#5A5A40] text-white border-[#5A5A40]"
                 : "bg-white text-gray-500 border-black/5 hover:border-gray-300"
@@ -383,12 +400,12 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
         ))}
       </div>
 
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 min-h-0 overflow-auto">
         {viewMode === 'calendar' ? (
-          <div className="min-w-[800px] xl:min-w-0">
+          <div className="min-w-[980px]">
             <div className="grid grid-cols-7 border-b border-black/5 bg-gray-50/50">
               {weekDays.map(day => (
-                <div key={day} className="p-4 text-center text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                <div key={day} className="p-4 text-center text-[13px] font-bold text-gray-500 uppercase tracking-widest">
                   {day}
                 </div>
               ))}
@@ -414,8 +431,8 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                     className="border-r border-b border-black/5 p-2 overflow-y-auto hover:bg-gray-50 transition-colors group min-h-[120px]"
                   >
                     <div className={clsx(
-                      "text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full mb-1",
-                      isSameDay(day, new Date()) ? "bg-[#5A5A40] text-white" : "text-gray-400"
+                      "text-sm font-bold w-6 h-6 flex items-center justify-center rounded-full mb-1",
+                      isSameDay(day, new Date()) ? "bg-[#5A5A40] text-white" : "text-gray-500"
                     )}>
                       {format(day, 'd')}
                     </div>
@@ -438,12 +455,12 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                             ? `點一下用這個時段建立貼文${slot.isMoved ? `（原訂 ${slot.fromDate}）` : ''}`
                             : undefined}
                           className={clsx(
-                            "group/habit relative text-[9px] p-1 rounded bg-orange-50 text-orange-700 border flex items-center opacity-70 cursor-grab active:cursor-grabbing hover:opacity-100 transition-opacity",
+                            "group/habit relative text-sm p-2 rounded bg-orange-50 text-orange-700 border flex flex-wrap items-center gap-y-1 cursor-grab active:cursor-grabbing transition-colors",
                             slot.isMoved ? "border-orange-300 border-dashed" : "border-orange-100"
                           )}
                         >
                           <span className="font-bold mr-1">{slot.time}</span>
-                          <span className="truncate flex-1">
+                          <span className="min-w-0 basis-full line-clamp-2 break-words">
                             {slot.isMoved ? '↪' : '🔔'} {slot.vendorName}: {slot.habit.contentTypes.map(t => t === 'post' ? '貼' : '影').join('/')}
                           </span>
                           <button
@@ -451,9 +468,10 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                               e.stopPropagation();
                               dismissSlot(slot);
                             }}
-                            className="hidden group-hover/habit:flex ml-1 p-0.5 hover:bg-orange-200 rounded-full transition-colors"
+                            aria-label={`刪除 ${slot.vendorName} ${slot.time} 預排`}
+                            className="absolute right-0 top-0 flex sm:invisible sm:group-hover/habit:visible sm:group-focus-within/habit:visible items-center justify-center hover:bg-orange-200 rounded-lg transition-colors"
                           >
-                            <X size={8} />
+                            <X size={16} />
                           </button>
                         </div>
                       ))}
@@ -469,22 +487,22 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                             onDragEnd={handleDragEnd}
                             onClick={() => setSelectedPost(post)}
                             className={clsx(
-                              "text-[9px] p-1 rounded border flex flex-col leading-tight mb-1 cursor-pointer hover:shadow-md transition-all",
+                              "text-sm p-2 rounded border flex flex-col leading-normal mb-1 cursor-pointer hover:shadow-md transition-all",
                               post.status === 'published' ? "bg-green-50 text-green-700 border-green-100" : 
                               post.status === 'scheduled' ? "bg-blue-50 text-blue-700 border-blue-100" : 
                               post.status === 'pending' ? "bg-orange-50 text-orange-700 border-orange-100" :
                               "bg-gray-50 text-gray-600 border-gray-200"
                             )}
                           >
-                            <div className="flex items-center gap-1 overflow-hidden">
+                            <div className="flex flex-wrap items-center gap-1">
                               <span className="font-bold flex-shrink-0">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'HH:mm') : '-'}</span>
                               <span className="flex items-center gap-0.5 opacity-70 flex-shrink-0">
-                                {post.contentType === 'post' ? <ImageIcon size={9} /> : <Video size={9} />}
+                                {post.contentType === 'post' ? <ImageIcon size={14} /> : <Video size={14} />}
                                 [{post.contentType === 'post' ? '圖文' : '影'}]
                               </span>
-                              <span className="truncate font-bold">{vendor?.name}</span>
+                              <span className="basis-full line-clamp-2 break-words font-bold">{vendor?.name}</span>
                             </div>
-                            <div className="truncate opacity-90">{post.title}</div>
+                            <div className="line-clamp-2 break-words">{post.title}</div>
                           </div>
                         );
                       })}
@@ -495,73 +513,76 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
             </div>
           </div>
         ) : (
-          <div className="p-4 space-y-4">
-            {filteredPosts.length > 0 ? (
-              filteredPosts.map((post, idx) => {
-                const vendor = vendors.find(v => v.id === post.vendorId);
-                const prevPost = idx > 0 ? filteredPosts[idx - 1] : null;
-                const showDateHeader = !prevPost || (post.scheduledAt && prevPost.scheduledAt && !isSameDay(parseISO(post.scheduledAt), parseISO(prevPost.scheduledAt))) || (!post.scheduledAt && prevPost.scheduledAt);
-
-                return (
-                  <div key={post.id} className="space-y-2">
-                    {showDateHeader && (
-                      <div className="sticky top-0 bg-white/90 backdrop-blur-sm py-2 z-10 flex items-center">
-                        <div className="w-1 h-4 bg-[#5A5A40] rounded-full mr-2" />
-                        <span className="text-xs font-bold text-gray-500">
-                          {post.scheduledAt && post.scheduledAt.length > 0 
-                            ? `${format(parseISO(post.scheduledAt), 'MM月dd日')} (${weekDays[getDay(parseISO(post.scheduledAt))]})` 
-                            : `未定日期 / ${post.targetMonth || '本月'} 待排程`}
-                        </span>
-                      </div>
-                    )}
-                    <div 
+          <div className="p-3 sm:p-4 space-y-5">
+            {listDays.map(({ dateKey, dayPosts, daySlots }) => (
+              <section key={dateKey} className="space-y-2">
+                <h4 className="bg-white py-2 text-sm font-bold text-gray-600">
+                  {dateKey === 'unscheduled'
+                    ? `未定日期 / ${format(currentDate, 'yyyy-MM')} 待排程`
+                    : `${format(parseISO(dateKey), 'MM月dd日')} (${weekDays[getDay(parseISO(dateKey))]})`}
+                </h4>
+                {daySlots.map((slot, idx) => (
+                  <div key={`slot-${slot.vendorId}-${slot.time}-${slot.fromDate}-${idx}`} className="flex items-start gap-2 p-3 rounded-2xl border border-orange-200 bg-orange-50 text-orange-800">
+                    <button
+                      type="button"
+                      disabled={!onPlanPost}
+                      onClick={() => onPlanPost?.({
+                        vendorId: slot.vendorId,
+                        scheduledAt: format(slot.date, "yyyy-MM-dd'T'HH:mm"),
+                        contentType: slot.habit.contentTypes?.[0] === 'video' ? 'video' : 'post',
+                        platforms: slot.habit.platforms,
+                      })}
+                      className="flex-1 min-w-0 text-left space-y-1 disabled:cursor-default"
+                    >
+                      <span className="block text-sm font-bold">{slot.time} · {slot.isMoved ? '已移動預排' : '預排時段'}</span>
+                      <span className="block text-base font-bold break-words">{slot.vendorName}</span>
+                      <span className="block text-sm">{slot.habit.contentTypes.map(t => t === 'post' ? '圖文' : '短影音').join(' / ')}{onPlanPost ? ' · 點此建立貼文' : ''}</span>
+                    </button>
+                    <button type="button" aria-label={`刪除 ${slot.vendorName} ${slot.time} 預排`} onClick={() => dismissSlot(slot)} className="shrink-0 flex items-center justify-center rounded-xl hover:bg-orange-100">
+                      <X size={18} />
+                    </button>
+                  </div>
+                ))}
+                {dayPosts.map(post => {
+                  const vendor = vendors.find(v => v.id === post.vendorId);
+                  return (
+                    <button
+                      type="button"
+                      key={post.id}
                       onClick={() => setSelectedPost(post)}
                       className={clsx(
-                        "p-4 rounded-2xl border shadow-sm flex items-center space-x-4 active:scale-[0.98] transition-all",
-                        post.status === 'published' ? "bg-green-50/50 border-green-100" : 
-                        post.status === 'scheduled' ? "bg-blue-50/50 border-blue-100" : 
-                        post.status === 'pending' ? "bg-orange-50/50 border-orange-100" :
-                        "bg-white border-black/5"
+                        'w-full p-3 sm:p-4 rounded-2xl border shadow-sm flex items-start gap-3 text-left transition-colors',
+                        post.status === 'published' ? 'bg-green-50/50 border-green-100' :
+                        post.status === 'scheduled' ? 'bg-blue-50/50 border-blue-100' :
+                        post.status === 'pending' ? 'bg-orange-50/50 border-orange-100' : 'bg-white border-black/5'
                       )}
                     >
-                      <div className="text-center min-w-[50px]">
-                        <div className="text-sm font-bold text-gray-900">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'HH:mm') : '-'}</div>
-                        <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-gray-400 uppercase">
-                          {post.contentType === 'post' ? <ImageIcon size={10} /> : <Video size={10} />}
-                          {post.contentType === 'post' ? '圖文' : '短影音'}
-                        </div>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center space-x-2 mb-0.5">
-                          <span className="text-[10px] font-bold text-[#5A5A40] truncate">{vendor?.name}</span>
-                          <div className="flex gap-1">
-                            {post.platforms.map(p => (
-                              <span key={p} className="bg-gray-200/50 text-[8px] px-1 py-0.5 rounded font-bold text-gray-500">{p}</span>
-                            ))}
-                          </div>
-                        </div>
-                        <h4 className="font-bold text-sm text-gray-800 truncate">{post.title}</h4>
-                        <div className="flex items-center mt-1">
-                          <span className={clsx(
-                            "text-[8px] font-bold px-1.5 py-0.5 rounded-full",
-                            post.status === 'published' ? "bg-green-100 text-green-700" : 
-                            post.status === 'scheduled' ? "bg-blue-100 text-blue-700" : 
-                            post.status === 'pending' ? "bg-orange-100 text-orange-700" :
-                            "bg-gray-100 text-gray-700"
-                          )}>
-                            {post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : post.status === 'pending' ? '待補中' : '草稿'}
-                          </span>
-                        </div>
-                      </div>
-                      <ChevronRight size={16} className="text-gray-300" />
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                      <span className="shrink-0 text-center">
+                        <span className="block text-base font-bold text-gray-900">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'HH:mm') : '未定'}</span>
+                        <span className="block text-[13px] text-gray-600">{post.contentType === 'post' ? '圖文' : '短影音'}</span>
+                      </span>
+                      <span className="flex-1 min-w-0 space-y-1">
+                        <span className="block text-sm font-bold text-[#5A5A40] break-words">{vendor?.name}</span>
+                        <span className="line-clamp-2 text-base font-bold text-gray-800 break-words">{post.title}</span>
+                        <span className="flex flex-wrap gap-1.5">
+                          <span className={clsx('text-sm px-2 py-0.5 rounded-full',
+                            post.status === 'published' ? 'bg-green-100 text-green-800' :
+                            post.status === 'scheduled' ? 'bg-blue-100 text-blue-800' :
+                            post.status === 'pending' ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-700'
+                          )}>{post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : post.status === 'pending' ? '待補中' : '草稿'}</span>
+                          {post.platforms.map(p => <span key={p} className="bg-gray-100 text-[13px] px-2 py-0.5 rounded text-gray-600">{p}</span>)}
+                        </span>
+                      </span>
+                      <ChevronRight size={18} className="shrink-0 text-gray-500 mt-1" />
+                    </button>
+                  );
+                })}
+              </section>
+            ))}
+            {listDays.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-20 text-gray-500">
                 <CalendarIcon size={48} className="mb-4 opacity-20" />
-                <p className="text-sm italic">本月尚無排程貼文</p>
+                <p className="text-base">本月尚無排程貼文或預排時段</p>
               </div>
             )}
           </div>

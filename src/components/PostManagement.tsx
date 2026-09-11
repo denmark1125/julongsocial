@@ -418,12 +418,12 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
   });
 
   const getStatusBadge = (status: PostStatus, onClick?: () => void) => {
-    const baseClasses = "px-3 py-1 rounded-full text-[10px] font-bold flex items-center w-fit cursor-pointer transition-all hover:shadow-sm active:scale-95 border";
+    const baseClasses = "px-3 py-1 rounded-full text-sm font-bold flex items-center w-fit cursor-pointer transition-all hover:shadow-sm active:scale-95 border";
     switch (status) {
-      case 'published': return <span onClick={onClick} className={cn(baseClasses, "bg-green-100 text-green-700 border-green-200")}><CheckCircle2 size={12} className="mr-1" /> 已發布 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
-      case 'scheduled': return <span onClick={onClick} className={cn(baseClasses, "bg-blue-100 text-blue-700 border-blue-200")}><Clock size={12} className="mr-1" /> 已排程 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
-      case 'pending': return <span onClick={onClick} className={cn(baseClasses, "bg-orange-100 text-orange-700 border-orange-200")}><BellRing size={12} className="mr-1" /> 待補中 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
-      case 'draft': return <span onClick={onClick} className={cn(baseClasses, "bg-gray-100 text-gray-700 border-gray-200")}><FileEdit size={12} className="mr-1" /> 草稿 <ChevronDown size={10} className="ml-1 opacity-50" /></span>;
+      case 'published': return <button type="button" onClick={onClick} className={cn(baseClasses, "bg-green-100 text-green-700 border-green-200")}><CheckCircle2 size={12} className="mr-1" /> 已發布 <ChevronDown size={10} className="ml-1 opacity-50" /></button>;
+      case 'scheduled': return <button type="button" onClick={onClick} className={cn(baseClasses, "bg-blue-100 text-blue-700 border-blue-200")}><Clock size={12} className="mr-1" /> 已排程 <ChevronDown size={10} className="ml-1 opacity-50" /></button>;
+      case 'pending': return <button type="button" onClick={onClick} className={cn(baseClasses, "bg-orange-100 text-orange-700 border-orange-200")}><BellRing size={12} className="mr-1" /> 待補中 <ChevronDown size={10} className="ml-1 opacity-50" /></button>;
+      case 'draft': return <button type="button" onClick={onClick} className={cn(baseClasses, "bg-gray-100 text-gray-700 border-gray-200")}><FileEdit size={12} className="mr-1" /> 草稿 <ChevronDown size={10} className="ml-1 opacity-50" /></button>;
     }
   };
 
@@ -474,16 +474,16 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
   });
 
   return (
-    <div className="space-y-6">
+    <div className="readability-surface space-y-6 min-w-0">
       {/* Statistics Section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-4">
         {vendorStats.map(stat => (
           <div key={stat.id} className="bg-white p-4 rounded-3xl border border-black/5 shadow-sm">
             <div className="flex justify-between items-start mb-2">
-              <div className="font-bold text-sm truncate pr-2">{stat.name}</div>
+              <div className="font-bold text-base line-clamp-2 break-words pr-2">{stat.name}</div>
               <div className="flex items-center gap-1.5 shrink-0">
                 {stat.monthAdjustments.length > 0 && (
-                  <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-100">
+                  <span className="text-[13px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-100">
                     {stat.monthAdjustments.reduce((s, a) => s + a.videoDelta, 0) > 0 ? '+' : ''}
                     {stat.monthAdjustments.reduce((s, a) => s + a.videoDelta, 0)}
                   </span>
@@ -496,13 +496,13 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                 >
                   <Gift size={13} />
                 </button>
-                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">本月進度</div>
+                <div className="text-[13px] font-bold text-gray-500 uppercase tracking-wider">本月進度</div>
               </div>
             </div>
             <div className="flex items-end justify-between mb-1">
-              <div className="text-2xl font-bold serif">{stat.count} <span className="text-xs text-gray-400 font-sans">/ {stat.target}</span></div>
+              <div className="text-2xl font-bold serif">{stat.count} <span className="text-sm text-gray-500 font-sans">/ {stat.target}</span></div>
               <div className={cn(
-                "text-[10px] font-bold px-2 py-0.5 rounded-full",
+                "text-[13px] font-bold px-2 py-0.5 rounded-full",
                 stat.count >= stat.target ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
               )}>
                 {stat.percentage}%
@@ -511,7 +511,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
             <div className="flex gap-2 mb-2">
               {stat.hasPosts && (
                 <div className="flex-1">
-                  <div className="flex justify-between text-[8px] font-bold text-blue-400 mb-0.5">
+                  <div className="flex justify-between text-[13px] font-bold text-blue-400 mb-0.5">
                     <span>圖文</span>
                     <span>{stat.postCount}/{stat.targetPosts}</span>
                   </div>
@@ -525,7 +525,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
               )}
               {stat.hasVideos && (
                 <div className="flex-1">
-                  <div className="flex justify-between text-[8px] font-bold text-orange-400 mb-0.5">
+                  <div className="flex justify-between text-[13px] font-bold text-orange-400 mb-0.5">
                     <span>影音</span>
                     <span>{stat.videoCount}/{stat.targetVideos}</span>
                   </div>
@@ -554,18 +554,18 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="space-y-1">
           <h2 className="text-2xl font-bold serif text-[#5A5A40]">貼文管理</h2>
-          <p className="text-sm text-gray-500">追蹤所有貼文的發布狀態與成效</p>
+          <p className="text-base text-gray-500">追蹤所有貼文的發布狀態與成效</p>
         </div>
-        <div className="flex gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
           <button 
             onClick={() => setIsTrackingModalOpen(true)}
-            className="flex-1 sm:flex-none flex items-center justify-center px-4 py-2 bg-orange-50 text-orange-600 rounded-xl shadow-sm border border-orange-100 hover:bg-orange-100 transition-all text-sm font-bold"
+            className="flex-1 basis-[140px] sm:basis-auto sm:flex-none flex items-center justify-center px-4 py-2 bg-orange-50 text-orange-600 rounded-xl shadow-sm border border-orange-100 hover:bg-orange-100 transition-all text-base font-bold"
           >
             <BellRing size={18} className="mr-2" /> 上片排程表
           </button>
           <button 
             onClick={exportToExcel}
-            className="flex-1 sm:flex-none flex items-center justify-center px-4 py-2 bg-white text-gray-600 rounded-xl shadow-sm border border-black/5 hover:bg-gray-50 transition-all text-sm"
+            className="flex-1 basis-[140px] sm:basis-auto sm:flex-none flex items-center justify-center px-4 py-2 bg-white text-gray-600 rounded-xl shadow-sm border border-black/5 hover:bg-gray-50 transition-all text-base"
           >
             <Download size={18} className="mr-2" /> 匯出 Excel
           </button>
@@ -591,7 +591,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
               });
               setIsModalOpen(true);
             }}
-            className="flex-1 sm:flex-none flex items-center justify-center px-6 py-2 bg-[#5A5A40] text-white rounded-xl shadow-lg hover:bg-[#4a4a35] transition-all text-sm font-bold"
+            className="flex-1 basis-[140px] sm:basis-auto sm:flex-none flex items-center justify-center px-6 py-2 bg-[#5A5A40] text-white rounded-xl shadow-lg hover:bg-[#4a4a35] transition-all text-base font-bold"
           >
             <Plus size={18} className="mr-2" /> 新增貼文
           </button>
@@ -629,8 +629,8 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
               key={m}
               onClick={() => setSelectedMonth(m)}
               className={cn(
-                "px-3 py-1 rounded-lg text-xs font-bold transition-all whitespace-nowrap",
-                selectedMonth === m ? "bg-[#5A5A40] text-white" : "text-gray-400 hover:bg-gray-100"
+                "px-3 py-1 rounded-lg text-sm font-bold transition-all whitespace-nowrap",
+                selectedMonth === m ? "bg-[#5A5A40] text-white" : "text-gray-500 hover:bg-gray-100"
               )}
             >
               {format(parseISO(`${m}-01`), 'MM月')}
@@ -652,7 +652,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
             key={status.id}
             onClick={() => setSelectedStatus(status.id)}
             className={cn(
-              "px-4 py-1.5 rounded-full text-xs font-bold transition-all whitespace-nowrap border flex items-center",
+              "px-4 py-1.5 rounded-full text-sm font-bold transition-all whitespace-nowrap border flex items-center",
               selectedStatus === status.id 
                 ? "bg-[#5A5A40] text-white border-[#5A5A40]" 
                 : "bg-white text-gray-500 border-black/5 hover:border-gray-300"
@@ -662,7 +662,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
             {status.id === 'scheduled' && <Clock size={12} className="mr-1.5" />}
             {status.id === 'published' && <CheckCircle2 size={12} className="mr-1.5" />}
             {status.label}
-            <span className="ml-1.5 opacity-50 text-[10px]">
+            <span className="ml-1.5 opacity-50 text-[13px]">
               ({posts.filter(p => {
                 const matchesSearch = p.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                   vendors.find(v => v.id === p.vendorId)?.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -681,7 +681,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
         <button
           onClick={() => setSelectedVendorId('all')}
           className={cn(
-            "px-4 py-1.5 rounded-full text-xs font-bold transition-all whitespace-nowrap border",
+            "px-4 py-1.5 rounded-full text-sm font-bold transition-all whitespace-nowrap border",
             selectedVendorId === 'all' 
               ? "bg-[#5A5A40] text-white border-[#5A5A40]" 
               : "bg-white text-gray-500 border-black/5 hover:border-gray-300"
@@ -694,7 +694,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
             key={vendor.id}
             onClick={() => setSelectedVendorId(vendor.id!)}
             className={cn(
-              "px-4 py-1.5 rounded-full text-xs font-bold transition-all whitespace-nowrap border",
+              "px-4 py-1.5 rounded-full text-sm font-bold transition-all whitespace-nowrap border",
               selectedVendorId === vendor.id 
                 ? "bg-[#5A5A40] text-white border-[#5A5A40]" 
                 : "bg-white text-gray-500 border-black/5 hover:border-gray-300"
@@ -712,49 +712,49 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
             <thead>
               <tr className="bg-[#F5F5F0] border-b border-black/5">
                 <th 
-                  className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
                   onClick={() => handleSort('platforms')}
                 >
                   <div className="flex items-center">發布社群 <SortIcon field="platforms" /></div>
                 </th>
                 <th 
-                  className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
                   onClick={() => handleSort('contentType')}
                 >
                   <div className="flex items-center">內容類型 <SortIcon field="contentType" /></div>
                 </th>
                 <th 
-                  className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
                   onClick={() => handleSort('status')}
                 >
                   <div className="flex items-center">發布狀態 <SortIcon field="status" /></div>
                 </th>
                 <th 
-                  className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
                   onClick={() => handleSort('scheduledAt')}
                 >
                   <div className="flex items-center">發布時間 <SortIcon field="scheduledAt" /></div>
                 </th>
-                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">貼文位置</th>
+                <th className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider">貼文位置</th>
                 <th 
-                  className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors"
                   onClick={() => handleSort('title')}
                 >
                   <div className="flex items-center">文案標題 / 內容 <SortIcon field="title" /></div>
                 </th>
                 <th 
-                  className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider text-center cursor-pointer hover:bg-gray-100 transition-colors"
                   onClick={() => handleSort('clientConfirmed')}
                 >
                   <div className="flex items-center justify-center">客戶確認 <SortIcon field="clientConfirmed" /></div>
                 </th>
                 <th 
-                  className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-center cursor-pointer hover:bg-gray-100 transition-colors"
+                  className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider text-center cursor-pointer hover:bg-gray-100 transition-colors"
                   onClick={() => handleSort('internalConfirmed')}
                 >
                   <div className="flex items-center justify-center">內部檢核 <SortIcon field="internalConfirmed" /></div>
                 </th>
-                <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">操作</th>
+                <th className="p-4 text-sm font-bold text-gray-500 uppercase tracking-wider">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-black/5">
@@ -767,9 +767,9 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                     <td className="p-4">
                       {vendor?.selfPublishing ? (
                         <div className="flex flex-col gap-1">
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 font-bold w-fit">廠商自行發布專案</span>
-                          <span className="text-[9px] text-gray-400">認列：{post.platforms.join(', ')}</span>
-                          <div className="text-xs text-gray-400 truncate max-w-[100px]">{vendor?.name}</div>
+                          <span className="text-[13px] px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 font-bold w-fit">廠商自行發布專案</span>
+                          <span className="text-[13px] text-gray-500">認列：{post.platforms.join(', ')}</span>
+                          <div className="text-sm text-gray-500 truncate max-w-[100px]">{vendor?.name}</div>
                         </div>
                       ) : (
                         <>
@@ -781,10 +781,10 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                                   key={p}
                                   onClick={() => togglePlatformPublished(post, p)}
                                   className={cn(
-                                    "text-[10px] px-1.5 py-0.5 rounded font-bold transition-all flex items-center gap-1",
+                                    "text-[13px] px-1.5 py-0.5 rounded font-bold transition-all flex items-center gap-1",
                                     isPublished 
                                       ? "bg-green-100 text-green-700 border border-green-200" 
-                                      : "bg-gray-100 text-gray-400 border border-gray-200 hover:border-gray-400"
+                                      : "bg-gray-100 text-gray-500 border border-gray-200 hover:border-gray-400"
                                   )}
                                   title={isPublished ? `已在 ${p} 發布` : `標記 ${p} 為已發布`}
                                 >
@@ -794,13 +794,13 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                               );
                             })}
                           </div>
-                          <div className="text-xs text-gray-400 truncate max-w-[100px]">{vendor?.name}</div>
+                          <div className="text-sm text-gray-500 truncate max-w-[100px]">{vendor?.name}</div>
                         </>
                       )}
                     </td>
                     <td className="p-4">
                       <span className={cn(
-                        "text-[10px] px-2 py-0.5 rounded font-bold",
+                        "text-[13px] px-2 py-0.5 rounded font-bold",
                         post.contentType === 'video' ? "bg-orange-100 text-orange-700" : "bg-blue-100 text-blue-700"
                       )}>
                         {post.contentType === 'video' ? '短影音' : '圖文'}
@@ -818,7 +818,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                                 ? "bottom-full mb-1 slide-in-from-bottom-2" 
                                 : "top-full mt-1 slide-in-from-top-2"
                             )}>
-                              <div className="px-3 py-1 text-[9px] font-bold text-gray-400 uppercase tracking-widest border-b border-black/5 mb-1">變更狀態</div>
+                              <div className="px-3 py-1 text-[13px] font-bold text-gray-500 uppercase tracking-widest border-b border-black/5 mb-1">變更狀態</div>
                               {(['draft', 'scheduled', 'published', 'pending'] as PostStatus[]).map(s => (
                                 <button 
                                   key={s}
@@ -827,7 +827,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                                     setOpenStatusId(null);
                                   }}
                                   className={cn(
-                                    "block w-full text-left px-4 py-2.5 text-xs hover:bg-[#F5F5F0] transition-colors",
+                                    "block w-full text-left px-4 py-2.5 text-sm hover:bg-[#F5F5F0] transition-colors",
                                     post.status === s ? "font-bold text-[#5A5A40] bg-[#F5F5F0]" : "text-gray-600"
                                   )}
                                 >
@@ -840,14 +840,14 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                       </div>
                     </td>
                     <td className="p-4">
-                      <div className="text-sm font-medium">
+                      <div className="text-base font-medium">
                         {post.scheduledAt && post.scheduledAt.length > 0 ? format(parseISO(post.scheduledAt), 'MM/dd') : (
-                          <span className="text-gray-400 italic">未定</span>
+                          <span className="text-gray-500 italic">未定</span>
                         )}
                       </div>
-                      <div className="text-xs text-gray-400">
+                      <div className="text-sm text-gray-500">
                         {post.scheduledAt && post.scheduledAt.length > 0 ? format(parseISO(post.scheduledAt), 'HH:mm') : (
-                          <span className="text-[10px]">歸檔: {post.targetMonth}</span>
+                          <span className="text-[13px]">歸檔: {post.targetMonth}</span>
                         )}
                       </div>
                     </td>
@@ -857,25 +857,25 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                           href={post.postUrl} 
                           target="_blank" 
                           rel="noopener noreferrer"
-                          className="flex items-center text-blue-500 hover:text-blue-700 font-bold text-xs"
+                          className="flex items-center text-blue-500 hover:text-blue-700 font-bold text-sm"
                         >
                           <ExternalLink size={14} className="mr-1" /> 前往位置
                         </a>
                       ) : (
-                        <span className="text-gray-300 text-xs italic">未設定</span>
+                        <span className="text-gray-300 text-sm italic">未設定</span>
                       )}
                     </td>
                     <td className="p-4 max-w-xs">
-                      <div className="font-bold text-sm truncate">{post.title}</div>
-                      <div className="text-xs text-gray-500 line-clamp-2 mt-1">{post.content}</div>
+                      <div className="font-bold text-base line-clamp-2 break-words">{post.title}</div>
+                      <div className="text-sm text-gray-500 line-clamp-2 mt-1">{post.content}</div>
                     </td>
                     <td className="p-4 text-center">
-                      <button onClick={() => toggleConfirmation(post, 'clientConfirmed')}>
+                      <button aria-label="切換業主審核" onClick={() => toggleConfirmation(post, 'clientConfirmed')}>
                         {post.clientConfirmed ? <CheckSquare className="mx-auto text-green-500" size={20} /> : <Square className="mx-auto text-gray-300" size={20} />}
                       </button>
                     </td>
                     <td className="p-4 text-center">
-                      <button onClick={() => toggleConfirmation(post, 'internalConfirmed')}>
+                      <button aria-label="切換內部檢核" onClick={() => toggleConfirmation(post, 'internalConfirmed')}>
                         {post.internalConfirmed ? <CheckSquare className="mx-auto text-green-500" size={20} /> : <Square className="mx-auto text-gray-300" size={20} />}
                       </button>
                     </td>
@@ -918,7 +918,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
         {/* Mobile Card View */}
         <div className="md:hidden divide-y divide-black/5">
           {sortedPosts.length === 0 ? (
-            <div className="p-8 text-center text-gray-400 italic">本月尚無貼文</div>
+            <div className="p-8 text-center text-gray-500 italic">本月尚無貼文</div>
           ) : (
             sortedPosts.map((post, index) => {
               const vendor = vendors.find(v => v.id === post.vendorId);
@@ -926,19 +926,19 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
 
               return (
                 <div key={post.id} className="p-4 space-y-3">
-                  <div className="flex justify-between items-start">
-                    <div className="space-y-1">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs font-bold text-gray-400">{vendor?.name}</span>
-                        <div className="flex gap-1">
+                  <div className="flex flex-col gap-2">
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-bold text-gray-500">{vendor?.name}</span>
+                        <div className="flex flex-wrap gap-1">
                           {post.platforms.map(p => (
-                            <span key={p} className="bg-gray-100 text-[9px] px-1 py-0.5 rounded font-bold">{p}</span>
+                            <span key={p} className="bg-gray-100 text-[13px] px-1 py-0.5 rounded font-bold">{p}</span>
                           ))}
                         </div>
                       </div>
-                      <h4 className="font-bold text-sm">{post.title}</h4>
+                      <h4 className="font-bold text-base line-clamp-2 break-words">{post.title}</h4>
                     </div>
-                    <div className="flex space-x-1">
+                    <div className="flex gap-2 self-end">
                       <button 
                         onClick={() => handleCopyContent(post.content)}
                         className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg"
@@ -952,12 +952,14 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                           setFormData(post);
                           setIsModalOpen(true);
                         }}
+                        aria-label="編輯貼文"
                         className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg"
                       >
                         <FileEdit size={16} />
                       </button>
                       <button 
                         onClick={() => setDeletingPostId(post.id!)}
+                        aria-label="刪除貼文"
                         className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
                       >
                         <Trash2 size={16} />
@@ -965,8 +967,8 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between text-xs pt-2 border-t border-black/5">
-                    <div className="flex items-center space-x-3">
+                  <div className="flex flex-wrap gap-2 items-center justify-between text-sm pt-2 border-t border-black/5">
+                    <div className="flex flex-wrap items-center gap-3">
                       <div className="flex items-center text-gray-500">
                         <CalendarIcon size={12} className="mr-1" />
                         {post.scheduledAt ? format(parseISO(post.scheduledAt), 'MM/dd HH:mm') : '-'}
@@ -982,7 +984,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                                 ? "top-full mt-1 slide-in-from-top-2"
                                 : "bottom-full mb-1 slide-in-from-bottom-2"
                             )}>
-                              <div className="px-3 py-1 text-[9px] font-bold text-gray-400 uppercase tracking-widest border-b border-black/5 mb-1">變更狀態</div>
+                              <div className="px-3 py-1 text-[13px] font-bold text-gray-500 uppercase tracking-widest border-b border-black/5 mb-1">變更狀態</div>
                               {(['draft', 'scheduled', 'published', 'pending'] as PostStatus[]).map(s => (
                                 <button 
                                   key={s}
@@ -991,7 +993,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                                     setOpenStatusId(null);
                                   }}
                                   className={cn(
-                                    "block w-full text-left px-4 py-2.5 text-xs hover:bg-[#F5F5F0] transition-colors",
+                                    "block w-full text-left px-4 py-2.5 text-sm hover:bg-[#F5F5F0] transition-colors",
                                     post.status === s ? "font-bold text-[#5A5A40] bg-[#F5F5F0]" : "text-gray-600"
                                   )}
                                 >
@@ -1003,16 +1005,16 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center space-x-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <div className="flex items-center space-x-1">
-                        <span className="text-[9px] text-gray-400">客:</span>
-                        <button onClick={() => toggleConfirmation(post, 'clientConfirmed')}>
+                        <span className="text-[13px] text-gray-500">客:</span>
+                        <button aria-label="切換業主審核" onClick={() => toggleConfirmation(post, 'clientConfirmed')}>
                           {post.clientConfirmed ? <CheckSquare className="text-green-500" size={14} /> : <Square className="text-gray-300" size={14} />}
                         </button>
                       </div>
                       <div className="flex items-center space-x-1">
-                        <span className="text-[9px] text-gray-400">內:</span>
-                        <button onClick={() => toggleConfirmation(post, 'internalConfirmed')}>
+                        <span className="text-[13px] text-gray-500">內:</span>
+                        <button aria-label="切換內部檢核" onClick={() => toggleConfirmation(post, 'internalConfirmed')}>
                           {post.internalConfirmed ? <CheckSquare className="text-green-500" size={14} /> : <Square className="text-gray-300" size={14} />}
                         </button>
                       </div>
@@ -1026,14 +1028,14 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                         className="flex items-center space-x-1"
                       >
                         {post.clientConfirmed ? <CheckSquare className="text-green-500" size={16} /> : <Square className="text-gray-300" size={16} />}
-                        <span className="text-[10px] text-gray-500">業主</span>
+                        <span className="text-[13px] text-gray-500">業主</span>
                       </button>
                       <button 
                         onClick={() => toggleConfirmation(post, 'internalConfirmed')}
                         className="flex items-center space-x-1"
                       >
                         {post.internalConfirmed ? <CheckSquare className="text-green-500" size={16} /> : <Square className="text-gray-300" size={16} />}
-                        <span className="text-[10px] text-gray-500">內部</span>
+                        <span className="text-[13px] text-gray-500">內部</span>
                       </button>
                     </div>
                     {post.postUrl && (
@@ -1041,7 +1043,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                         href={post.postUrl} 
                         target="_blank" 
                         rel="noopener noreferrer"
-                        className="text-blue-500 font-bold text-[10px] flex items-center"
+                        className="text-blue-500 font-bold text-[13px] flex items-center"
                       >
                         <ExternalLink size={12} className="mr-1" /> 連結
                       </a>
@@ -1062,7 +1064,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
               <Trash2 className="text-red-500" size={32} />
             </div>
             <h3 className="text-xl font-bold text-center mb-2 serif">確定要刪除嗎？</h3>
-            <p className="text-gray-500 text-center text-sm mb-8">
+            <p className="text-gray-500 text-center text-base mb-8">
               此動作將永久刪除這則貼文，且無法復原。
               <br />
               <span className="text-green-700">掛在上面的成片素材會自動放回庫存</span>，可以重新排程，不會報廢。
@@ -1124,7 +1126,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
         const history = [...(liveVendor.monthlyAdjustments || [])].sort((a, b) => b.month.localeCompare(a.month) || b.createdAt.localeCompare(a.createdAt));
         return (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-3xl w-full max-w-md max-h-[90vh] overflow-auto shadow-2xl">
+            <div className="bg-white rounded-3xl w-full max-w-md max-h-[90dvh] overflow-auto shadow-2xl">
               <div className="p-6">
                 <div className="flex justify-between items-center mb-1">
                   <h3 className="text-lg font-bold serif flex items-center"><Gift size={18} className="mr-2 text-amber-500" />{liveVendor.name}</h3>
@@ -1132,11 +1134,11 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                     <X size={20} />
                   </button>
                 </div>
-                <p className="text-xs text-gray-400 mb-5">套用月份：{format(parseISO(`${selectedMonth}-01`), 'yyyy年 MM月')}（只調整這個月自己的目標數字，月份一過自動失效；不會動到已經回填的起始欠片，要沖銷/抵銷欠片請去拍攝進度頁的「校正起始欠片」填負數）</p>
+                <p className="text-sm text-gray-500 mb-5">套用月份：{format(parseISO(`${selectedMonth}-01`), 'yyyy年 MM月')}（只調整這個月自己的目標數字，月份一過自動失效；不會動到已經回填的起始欠片，要沖銷/抵銷欠片請去拍攝進度頁的「校正起始欠片」填負數）</p>
 
                 <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-100 space-y-3 mb-5">
                   <div>
-                    <label className="block text-xs font-medium text-amber-800 mb-1">影音支數調整（加贈填正數，扣片填負數）</label>
+                    <label className="block text-sm font-medium text-amber-800 mb-1">影音支數調整（加贈填正數，扣片填負數）</label>
                     <input
                       type="number"
                       value={adjustDelta}
@@ -1146,7 +1148,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-amber-800 mb-1">原因</label>
+                    <label className="block text-sm font-medium text-amber-800 mb-1">原因</label>
                     <input
                       type="text"
                       value={adjustReason}
@@ -1158,21 +1160,21 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                   <button
                     type="button"
                     onClick={handleAddAdjustment}
-                    className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold text-sm shadow hover:bg-amber-600 transition-all"
+                    className="w-full bg-amber-500 text-white py-2.5 rounded-xl font-bold text-base shadow hover:bg-amber-600 transition-all"
                   >
                     新增這筆調整
                   </button>
                 </div>
 
-                <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">歷史調整紀錄</div>
+                <div className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-2">歷史調整紀錄</div>
                 {history.length === 0 ? (
-                  <p className="text-sm text-gray-400 italic">目前沒有任何調整紀錄</p>
+                  <p className="text-base text-gray-500 italic">目前沒有任何調整紀錄</p>
                 ) : (
                   <div className="space-y-2">
                     {history.map((adj, idx) => {
                       const originalIndex = (liveVendor.monthlyAdjustments || []).indexOf(adj);
                       return (
-                        <div key={idx} className="flex items-start justify-between gap-2 p-3 bg-[#F5F5F0] rounded-xl text-sm">
+                        <div key={idx} className="flex items-start justify-between gap-2 p-3 bg-[#F5F5F0] rounded-xl text-base">
                           <div>
                             <div className="font-bold">
                               {format(parseISO(`${adj.month}-01`), 'yyyy/MM')}
@@ -1180,7 +1182,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                                 {adj.videoDelta > 0 ? '+' : ''}{adj.videoDelta} 支
                               </span>
                             </div>
-                            <div className="text-xs text-gray-500 mt-0.5">{adj.reason}</div>
+                            <div className="text-sm text-gray-500 mt-0.5">{adj.reason}</div>
                           </div>
                           <button
                             onClick={() => handleDeleteAdjustment(liveVendor, originalIndex)}
@@ -1202,8 +1204,8 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl w-full max-w-3xl max-h-[90vh] overflow-auto shadow-2xl">
-            <div className="p-8">
+          <div className="bg-white rounded-3xl w-full max-w-3xl max-h-[90dvh] overflow-auto shadow-2xl">
+            <div className="p-4 sm:p-8">
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-2xl font-bold serif">{editingPost ? '編輯貼文' : '新增貼文'}</h3>
                 <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-gray-100 rounded-full">
@@ -1214,7 +1216,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
               <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">所屬廠商</label>
+                    <label className="block text-base font-medium text-gray-700 mb-1">所屬廠商</label>
                     <select 
                       required
                       value={formData.vendorId}
@@ -1245,7 +1247,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">目標月份 (計算KPI用)</label>
+                    <label className="block text-base font-medium text-gray-700 mb-1">目標月份 (計算KPI用)</label>
                     <select 
                       required
                       value={formData.targetMonth}
@@ -1260,7 +1262,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">文案標題</label>
+                    <label className="block text-base font-medium text-gray-700 mb-1">文案標題</label>
                     <input 
                       type="text" 
                       required
@@ -1271,7 +1273,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">內容類型</label>
+                    <label className="block text-base font-medium text-gray-700 mb-1">內容類型</label>
                     <div className="flex gap-2">
                       {['post', 'video'].map(type => (
                         <button
@@ -1290,8 +1292,8 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                             });
                           }}
                           className={cn(
-                            "flex-1 py-2 rounded-xl text-sm font-bold transition-all",
-                            formData.contentType === type ? "bg-[#5A5A40] text-white" : "bg-gray-100 text-gray-400"
+                            "flex-1 py-2 rounded-xl text-base font-bold transition-all",
+                            formData.contentType === type ? "bg-[#5A5A40] text-white" : "bg-gray-100 text-gray-500"
                           )}
                         >
                           {type === 'post' ? '圖文' : '短影音'}
@@ -1300,18 +1302,18 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">發布狀態</label>
-                    <div className="flex flex-wrap gap-2">
+                    <label className="block text-base font-medium text-gray-700 mb-1">發布狀態</label>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       {(['draft', 'scheduled', 'published', 'pending'] as PostStatus[]).map(s => (
                         <button
                           key={s}
                           type="button"
                           onClick={() => setFormData({ ...formData, status: s })}
                           className={cn(
-                            "flex-1 py-2 rounded-xl text-[10px] font-bold transition-all border",
+                            "flex-1 py-2 rounded-xl text-[13px] font-bold transition-all border",
                             formData.status === s 
                               ? "bg-[#5A5A40] text-white border-[#5A5A40]" 
-                              : "bg-gray-50 text-gray-400 border-black/5 hover:border-gray-200"
+                              : "bg-gray-50 text-gray-500 border-black/5 hover:border-gray-200"
                           )}
                         >
                           {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : s === 'published' ? '已發布' : '待補中'}
@@ -1320,7 +1322,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-base font-medium text-gray-700 mb-1">
                       選擇{formData.contentType === 'video' ? '影片' : '貼文'}素材 (庫存)
                     </label>
                     <select 
@@ -1362,18 +1364,18 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                       }
                     </select>
                     {assets.filter(a => a.vendorId === formData.vendorId && a.type === formData.contentType && isAssetSelectable(a, postIndex) && a.stage === 'finished').length === 0 && (
-                      <p className="text-[10px] text-red-500 mt-1 font-bold">⚠️ 此廠商目前無可用{formData.contentType === 'video' ? '影片' : '貼文'}成片素材，請先至資料庫上架</p>
+                      <p className="text-[13px] text-red-500 mt-1 font-bold">⚠️ 此廠商目前無可用{formData.contentType === 'video' ? '影片' : '貼文'}成片素材，請先至資料庫上架</p>
                     )}
                   </div>
                   <div>
                     <div className="flex justify-between items-center mb-1">
-                      <label className="block text-sm font-medium text-gray-700">預計發布時間 (選填)</label>
+                      <label className="block text-base font-medium text-gray-700">預計發布時間 (選填)</label>
                       <div className="flex gap-1">
                         {formData.scheduledAt && (
                           <button 
                             type="button"
                             onClick={() => setFormData({ ...formData, scheduledAt: '' })}
-                            className="text-[10px] text-red-500 hover:underline font-bold mr-2"
+                            className="text-[13px] text-red-500 hover:underline font-bold mr-2"
                           >
                             清除
                           </button>
@@ -1381,14 +1383,14 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                         <button 
                           type="button" 
                           onClick={() => setQuickTime(20)}
-                          className="text-[10px] bg-gray-100 px-2 py-0.5 rounded hover:bg-gray-200"
+                          className="text-[13px] bg-gray-100 px-2 py-0.5 rounded hover:bg-gray-200"
                         >
                           20:00
                         </button>
                         <button 
                           type="button" 
                           onClick={() => setQuickTime(21)}
-                          className="text-[10px] bg-gray-100 px-2 py-0.5 rounded hover:bg-gray-200"
+                          className="text-[13px] bg-gray-100 px-2 py-0.5 rounded hover:bg-gray-200"
                         >
                           21:00
                         </button>
@@ -1411,7 +1413,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                     
                     {suggestedDates.length > 0 && (
                       <div className="space-y-2">
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">建議發布時間 (依發布習慣)</p>
+                        <p className="text-[13px] font-bold text-gray-500 uppercase tracking-wider">建議發布時間 (依發布習慣)</p>
                         <div className="flex flex-wrap gap-1">
                           {suggestedDates.map((s, idx) => (
                             <button
@@ -1425,7 +1427,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                                   scheduledAt: format(s.date, "yyyy-MM-dd'T'HH:mm"),
                                 });
                               }}
-                              className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-1 rounded-lg hover:bg-emerald-100 transition-colors"
+                              className="text-[13px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-1 rounded-lg hover:bg-emerald-100 transition-colors"
                             >
                               {format(s.date, 'MM/dd (eee) HH:mm')}
                             </button>
@@ -1435,7 +1437,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                     )}
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">貼文類型 (可自訂)</label>
+                    <label className="block text-base font-medium text-gray-700 mb-1">貼文類型 (可自訂)</label>
                     <div className="relative">
                       <input 
                         type="text"
@@ -1454,7 +1456,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">文案內容</label>
+                    <label className="block text-base font-medium text-gray-700 mb-1">文案內容</label>
                     <textarea 
                       rows={6}
                       value={formData.content}
@@ -1464,9 +1466,9 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">貼文位置連結 (如 Drive/Notion/社群連結)</label>
+                    <label className="block text-base font-medium text-gray-700 mb-1">貼文位置連結 (如 Drive/Notion/社群連結)</label>
                     <div className="relative">
-                      <ExternalLink className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                      <ExternalLink className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={16} />
                       <input 
                         type="url" 
                         value={formData.postUrl}
@@ -1477,11 +1479,11 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">發布平台</label>
+                    <label className="block text-base font-medium text-gray-700 mb-1">發布平台</label>
                     {vendors.find(v => v.id === formData.vendorId)?.selfPublishing ? (
                       <div className="bg-green-50 p-4 rounded-2xl border border-green-100 mb-2">
-                        <p className="text-xs text-green-800 font-bold mb-1">✓ 廠商自行發布模式</p>
-                        <p className="text-[10px] text-green-600/70">此廠商設定為自行發布。系統將僅記錄用於服務次數認列。您仍可選取預計認列的平台：</p>
+                        <p className="text-sm text-green-800 font-bold mb-1">✓ 廠商自行發布模式</p>
+                        <p className="text-[13px] text-green-600/70">此廠商設定為自行發布。系統將僅記錄用於服務次數認列。您仍可選取預計認列的平台：</p>
                         <div className="flex flex-wrap gap-2 mt-3">
                           {platformOptionsFor(vendors.find(v => v.id === formData.vendorId), formData.platforms || []).map(p => (
                             <button
@@ -1494,7 +1496,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                                 setFormData({ ...formData, platforms: newPlatforms });
                               }}
                               className={cn(
-                                "px-3 py-1 rounded-full text-xs font-bold transition-all",
+                                "px-3 py-1 rounded-full text-sm font-bold transition-all",
                                 formData.platforms?.includes(p) ? "bg-green-600 text-white" : "bg-white text-green-300 border border-green-100"
                               )}
                             >
@@ -1516,8 +1518,8 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                               setFormData({ ...formData, platforms: newPlatforms });
                             }}
                             className={cn(
-                              "px-3 py-1 rounded-full text-xs font-bold transition-all",
-                              formData.platforms?.includes(p) ? "bg-[#5A5A40] text-white" : "bg-gray-100 text-gray-400"
+                              "px-3 py-1 rounded-full text-sm font-bold transition-all",
+                              formData.platforms?.includes(p) ? "bg-[#5A5A40] text-white" : "bg-gray-100 text-gray-500"
                             )}
                           >
                             {p}
