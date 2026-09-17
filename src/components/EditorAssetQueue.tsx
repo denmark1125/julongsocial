@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { collection, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import {
-  Asset, AssetFlowStage, DURATION_TIER_LABEL, DurationTier, EDITOR_FEE_BY_TIER,
+  Asset, AssetFlowStage, DURATION_TIER_LABEL, DurationTier,
   Post, UserProfile, Vendor, deriveFlowStage,
 } from '../types';
 import {
@@ -15,11 +15,13 @@ import {
   isFlowStale,
   sortFlowColumn,
 } from '../lib/assetFlow';
+import { visibleVendors } from '../lib/vendorStatus';
 import {
   Scissors, Film, CheckCircle2, UploadCloud, Clock, Flame,
   CalendarClock, ChevronDown, ChevronRight, ChevronLeft, PackageCheck, Search, X,
+  ArrowLeft, LayoutGrid,
 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { differenceInCalendarDays, format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
 
 /**
@@ -331,6 +333,9 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
   const [urgentOnly, setUrgentOnly] = useState(false);
   const [sortBy, setSortBy] = useState<'flow' | 'newest' | 'vendor'>('flow');
   const [page, setPage] = useState(1);
+  // 兩層：先看「我負責哪幾個 IP、各自什麼狀況」，選了才進那一家的清單。
+  // 以前一打開就是混排清單，長期難產的 IP 會把第一頁整個吃掉，其他家等於不存在。
+  const [view, setView] = useState<'overview' | 'list'>('overview');
   // null＝使用者還沒自己選過，這時自動落在「有事要做」的那一頁，不要開在空白頁
   const [tab, setTab] = useState<Bucket | null>(null);
   // 交片送審的確認視窗：同時要選這支是 60 秒以上還是以下（決定單價）
@@ -455,6 +460,74 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
   const uploadedThisMonth = myVideos.filter(a =>
     a.cloudUploadedAt && format(parseISO(a.cloudUploadedAt), 'yyyy-MM') === thisMonth
   ).length;
+
+  /**
+   * 這家 IP 最近一次「有新東西進來」是什麼時候：新素材進系統、交片送審、或上傳雲端，取最近的那一次。
+   * 這是總覽排序的依據 —— 最近有在動的 IP 排前面，長期沒東西進來的自己沉下去，
+   * 不必靠任何人工標記。
+   * ⚠️ createdAt 是「素材建進系統」的時間，不是拍攝日。同事補建一批舊素材會讓那家跳到最前面，
+   *    那其實是對的（有新工作進來了），不要為此另外修正。
+   */
+  const supplyTime = (a: Asset): number => {
+    let best = 0;
+    for (const raw of [a.createdAt, a.submittedAt, a.cloudUploadedAt]) {
+      if (!raw) continue;
+      const t = new Date(raw).getTime();
+      if (!Number.isNaN(t) && t > best) best = t;
+    }
+    return best;
+  };
+
+  /** 超過這個天數沒有新素材，卡片就改口說「已 N 天沒有新素材」，不再報一個早就過期的日期 */
+  const SUPPLY_QUIET_DAYS = 14;
+
+  /**
+   * 總覽要列哪幾家：我被指派的（排除已終止），加上任何還有片掛在我身上的 ——
+   * 廠商就算被終止，他手上沒做完的片也不能從畫面上消失。
+   */
+  const overviewVendorIds: string[] = Array.from(new Set<string>([
+    ...visibleVendors(vendors).map(v => v.id!),
+    ...displayed.map(a => a.vendorId),
+  ]));
+
+  /**
+   * 逐 IP 彙總。
+   * ⚠️ 全部從上面同一份 displayed / myVideos 算出來，**不可以另外數一份**：
+   *    總覽各卡加總必須等於頁首那兩張卡，同一張畫面上兩個數字打架就沒人敢信了。
+   */
+  const ipRows = overviewVendorIds.map(vid => {
+    const mine = displayed.filter(a => a.vendorId === vid);
+    const all = myVideos.filter(a => a.vendorId === vid);
+    const lastSupplyMs = all.reduce((m, a) => Math.max(m, supplyTime(a)), 0);
+    return {
+      vendorId: vid,
+      name: vendorName(vid),
+      toEdit: mine.filter(a => bucketOf(a) === 'to_edit').length,
+      toUpload: mine.filter(a => bucketOf(a) === 'to_upload').length,
+      urgent: mine.filter(a => a.isUrgent && ACTIONABLE.includes(bucketOf(a)!)).length,
+      uploadedThisMonth: all.filter(a =>
+        a.cloudUploadedAt && format(parseISO(a.cloudUploadedAt), 'yyyy-MM') === thisMonth
+      ).length,
+      lastSupplyMs,
+    };
+  }).sort((x, y) => {
+    // 急件的 IP 最前（人標的訊號優先於自動判斷）；再來是有待辦的；沒事做的沉到最後 ——
+    // 沒事做的 IP 不該只因為剛上傳完就排第一。
+    const rank = (r: typeof x) => (r.urgent > 0 ? 0 : r.toEdit + r.toUpload > 0 ? 1 : 2);
+    if (rank(x) !== rank(y)) return rank(x) - rank(y);
+    if (x.lastSupplyMs !== y.lastSupplyMs) return y.lastSupplyMs - x.lastSupplyMs;
+    return x.name.localeCompare(y.name, 'zh-Hant');
+  });
+
+  // 只帶一個 IP 的剪輯師不需要總覽，多一層只是多按一下（跟下面「依 IP」膠囊列同一個判斷）
+  const activeView: 'overview' | 'list' = ipRows.length >= 2 ? view : 'list';
+
+  const openVendor = (vendorId: string) => {
+    setVendorFilter(vendorId);
+    // 回到「自動落在第一個有東西的分區」，否則會帶著上一家選過的分區進來、開在空白頁
+    setTab(null);
+    setView('list');
+  };
 
   // 送審前先問長度分級：這一步同時決定這支多少錢，所以不能只用 window.confirm 帶過。
   const advance = (asset: Asset) => {
@@ -600,7 +673,9 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
             <Scissors size={20} /> 我的剪輯任務
           </h2>
           <p className="text-xs text-gray-400 mt-1">
-            剪完按「交片送審」；檔案傳上雲端後就按「上傳雲端」，不用等我們通知。
+            {activeView === 'overview'
+              ? '選一個 IP 進去看，或直接看全部。'
+              : '剪完按「交片送審」；檔案傳上雲端後就按「上傳雲端」，不用等我們通知。'}
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -619,8 +694,79 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
         </div>
       </div>
 
+      {activeView === 'overview' && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {ipRows.map(row => {
+              const pending = row.toEdit + row.toUpload;
+              const quietDays = row.lastSupplyMs
+                ? differenceInCalendarDays(new Date(), new Date(row.lastSupplyMs))
+                : null;
+              return (
+                <button
+                  key={row.vendorId}
+                  type="button"
+                  onClick={() => openVendor(row.vendorId)}
+                  className={pending > 0
+                    ? 'text-left bg-white rounded-2xl border border-black/5 shadow-sm p-4 hover:border-[#5A5A40]/40 transition-colors'
+                    : 'text-left bg-white/60 rounded-2xl border border-black/5 p-4 hover:border-[#5A5A40]/30 transition-colors'}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className={pending > 0
+                      ? 'font-bold text-[#5A5A40] break-all'
+                      : 'font-bold text-gray-400 break-all'}>{row.name}</span>
+                    {row.urgent > 0 && (
+                      <span className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-bold">
+                        <Flame size={10} /> 急件 {row.urgent}
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="mt-2 text-sm font-bold text-[#1a1a1a]">
+                    {pending > 0
+                      ? <>待剪 {row.toEdit} 支<span className="mx-1.5 text-gray-300">・</span>待上傳 {row.toUpload} 支</>
+                      : <span className="text-gray-400">目前沒有待辦</span>}
+                  </p>
+
+                  <div className="mt-2 flex items-end justify-between gap-2">
+                    <span className="text-[11px] text-gray-400">
+                      {quietDays === null
+                        ? '還沒有素材'
+                        : quietDays >= SUPPLY_QUIET_DAYS
+                          ? `已 ${quietDays} 天沒有新素材`
+                          : `最近有新素材 ${format(new Date(row.lastSupplyMs), 'MM/dd')}`}
+                    </span>
+                    <span className="text-[11px] text-gray-400 shrink-0">
+                      本月已上傳 {row.uploadedThisMonth} 支
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => { setVendorFilter('all'); setTab(null); setView('list'); }}
+            className="w-full py-3 rounded-2xl bg-white border border-black/5 shadow-sm text-xs font-bold text-gray-500 hover:text-[#5A5A40] flex items-center justify-center gap-1.5"
+          >
+            <LayoutGrid size={13} /> 全部一起看
+          </button>
+        </>
+      )}
+
+      {activeView === 'list' && ipRows.length >= 2 && (
+        <button
+          type="button"
+          onClick={() => setView('overview')}
+          className="flex items-center gap-1 text-[11px] font-bold text-gray-400 hover:text-[#5A5A40]"
+        >
+          <ArrowLeft size={13} /> 回總覽
+        </button>
+      )}
+
       {/* 只帶一個 IP 的剪輯師不需要這排，多一列按鈕反而是雜訊 */}
-      {filterVendorIds.length >= 2 && (
+      {activeView === 'list' && filterVendorIds.length >= 2 && (
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[10px] font-bold text-gray-400 w-10 shrink-0">依 IP</span>
           <button
@@ -647,6 +793,7 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
         </div>
       )}
 
+      {activeView === 'list' && (
       <div className="flex items-center gap-2 flex-wrap">
         <div className="relative flex-1 min-w-[170px]">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
@@ -662,9 +809,11 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
           <option value="flow">預設順序</option><option value="newest">最新加入</option><option value="vendor">依 IP</option>
         </select>
       </div>
+      )}
 
       {/* 大分頁而不是三個區塊疊在一起：手機上一路捲到底才看得到「待上傳雲端」，
           而那正是最常用的一區。一次只顯示一類，捲動長度就固定了。 */}
+      {activeView === 'list' && (
       <div className="grid grid-cols-3 gap-2">
         {TABS.map(t => {
           const count = t.key === 'to_edit' ? toEdit.length : t.key === 'to_upload' ? toUpload.length : done.length;
@@ -687,8 +836,9 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
           );
         })}
       </div>
+      )}
 
-      {activeTab === 'to_edit' && (
+      {activeView === 'list' && activeTab === 'to_edit' && (
         <Section
           title="待剪"
           hint="剪完按「交片送審」，系統會自動通知同事拿去給業主審。"
@@ -703,7 +853,7 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
 
       {/* 這一區是重點：只要送審過、還沒上傳的都在這，不管業主審完沒有。
           上傳是請款的認定依據，必須由剪輯師自己按，也不該被審核進度卡住。 */}
-      {activeTab === 'to_upload' && (
+      {activeView === 'list' && activeTab === 'to_upload' && (
         <Section
           title="待上傳雲端"
           hint="已交片的都在這。檔案傳上雲端後就按「上傳雲端」，不用等業主審完 —— 這一步決定這支算不算你這個月的請款。"
@@ -717,7 +867,7 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
       )}
 
       {/* 唯讀：你該做的都做完了，留著是為了讓你核對這個月上傳了哪幾支 */}
-      {activeTab === 'done' && (
+      {activeView === 'list' && activeTab === 'done' && (
         <Section
           title="已完成"
           hint="你這邊都處理完了。這些就是本月請款的依據，可對照「我的請款」核對。"
@@ -730,7 +880,7 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
         </Section>
       )}
 
-      {currentList.length > 5 && (
+      {activeView === 'list' && currentList.length > 5 && (
         <div className="flex items-center justify-center gap-3 pt-1">
           <button type="button" disabled={activePage <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}
             className="p-2 rounded-xl bg-white border border-black/5 text-[#5A5A40] disabled:opacity-30" aria-label="上一頁"><ChevronLeft size={16} /></button>
@@ -740,8 +890,10 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
         </div>
       )}
 
-      {/* 交片送審：確認片名 + 選長度分級。分級直接決定單價，所以放在這一步問，
-          不要等到請款頁才補 —— 那時候片已經上傳、記憶也模糊了。 */}
+      {/* 交片送審：確認片名 + 選長度分級。趁剪輯師還記得這支多長的時候問，
+          等到請款頁才補，片已經上傳、記憶也模糊了。
+          ⚠️ 這裡刻意不顯示金額：分級雖然決定單價，但金額是財務的事，
+             剪輯師只要分辨秒數就好（老闆明確要求，別再把 NT$ 加回來）。 */}
       {submitAsset && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           onMouseDown={() => !busyId && setSubmitAsset(null)}>
@@ -750,7 +902,7 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
             <p className="mt-2 text-sm text-gray-600 break-words">{submitAsset.title}</p>
 
             <p className="mt-5 text-sm font-bold text-gray-700">這支影片多長？</p>
-            <p className="mt-1 text-xs text-gray-500">長度決定這支的剪輯費。選錯了可以請管理員修改。</p>
+            <p className="mt-1 text-xs text-gray-500">選錯了可以再跟我們說。</p>
             <div className="mt-3 grid grid-cols-2 gap-3">
               {(['under60', 'over60'] as DurationTier[]).map(t => (
                 <button
@@ -764,9 +916,6 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
                   }`}
                 >
                   <span className="block text-base font-bold text-[#1a1a1a]">{DURATION_TIER_LABEL[t]}</span>
-                  <span className="block mt-1 text-sm text-[#8B7355] font-bold">
-                    NT$ {EDITOR_FEE_BY_TIER[t].toLocaleString()}
-                  </span>
                 </button>
               ))}
             </div>

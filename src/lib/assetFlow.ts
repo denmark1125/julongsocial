@@ -293,6 +293,15 @@ export function getFlowDueInfo(
 }
 
 /**
+ * 卡超過這個天數，就不再把它當成「最該先做的那一支」。
+ *
+ * 卡這麼久幾乎都不是剪輯師沒動手（素材難產、業主失聯、這檔根本還沒定案），
+ * 而舊的排序是「卡越久分數越高」，等於讓這種片永遠佔住第一頁——
+ * 每頁只有 5 支，一個長期難產的 IP 就能把其他 IP 真正該剪的片整批擠到第二頁去。
+ */
+export const FLOW_STUCK_SINK_DAYS = 30;
+
+/**
  * 看板欄內排序：急件 → 逾期/即將到期 → 卡最久 → 發布日最近。
  * 不再用全域 manualPriorityRank 決定順序（拖一筆會覆寫整份清單、且永不清除，
  * 反而讓新進的急件永遠排在舊清單後面）。
@@ -304,12 +313,21 @@ export function sortFlowColumn(
 ): Asset[] {
   const weight = (a: Asset): number => {
     const due = getFlowDueInfo(a, posts, now);
+    const stuck = getFlowDaysStuck(a, now);
+
+    // 沒被標急件、也沒有任何排程在等它，卻卡了一個月以上 → 沉到最後面。
+    // ⚠️ 兩道逃生門是刻意的：標成急件、或小編真的把它排進某則有日期的貼文，
+    //    它就立刻回到正常權重浮上來。「沉底」永遠只代表「現在沒人在等它」，
+    //    不是把片藏起來——它還在清單裡，只是不再壓著別人。
+    // 仍然照卡的天數排（越久越後面），這樣它們彼此之間的順序是穩定的，不會每次重整亂跳。
+    if (!a.isUrgent && !due && stuck >= FLOW_STUCK_SINK_DAYS) return -stuck;
+
     let w = 0;
     if (a.isUrgent) w += 10000;
     if (due?.overdue) w += 5000;
     else if (due?.imminent) w += 2000;
     if (isFlowStale(a, now)) w += 1000;
-    return w + Math.min(getFlowDaysStuck(a, now), 90);
+    return w + Math.min(stuck, 90);
   };
   return [...assets].sort((x, y) => weight(y) - weight(x));
 }
