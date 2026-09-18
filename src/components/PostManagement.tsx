@@ -13,7 +13,7 @@ import {
 import { db, auth } from '../firebase';
 import { isClientApproved } from '../lib/assetFlow';
 import { listPlannedSlots } from '../lib/plannedSlots';
-import { Post, Vendor, PostStatus, Asset, PlannedSlotMove, ShootBooking } from '../types';
+import { Post, Vendor, PostStatus, Asset, PlannedSlotMove, ShootBooking, getVendorDefaultPlatforms, platformOptionsFor } from '../types';
 import type { PostPrefill } from './CalendarView';
 import { 
   Plus, 
@@ -99,7 +99,9 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
     postUrl: '',
     clientConfirmed: false,
     internalConfirmed: false,
-    platforms: ['IG']
+    // 這時候還沒有廠商可以推導預設平台。真正的帶入在「新增貼文」/選廠商/切內容形式三處，
+    // 原本這裡寫死 'IG'，等於不管哪一家、不管影音圖文，開起來都先錯一半。
+    platforms: [] as string[]
   });
 
   const [suggestedDates, setSuggestedDates] = useState<{date: Date, habit: any}[]>([]);
@@ -155,7 +157,12 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
       postUrl: '',
       clientConfirmed: false,
       internalConfirmed: false,
-      platforms: prefill.platforms && prefill.platforms.length > 0 ? prefill.platforms : ['IG'],
+      // 平台只認廠商資料卡（它內部才會退回發布習慣）。不要改用 prefill 帶進來的平台——
+      // 那是照「發布習慣」算的，不分圖文/短影音，會蓋過廠商卡上分開設好的答案。
+      platforms: getVendorDefaultPlatforms(
+        vendors.find(v => v.id === prefill.vendorId),
+        prefill.contentType || 'post'
+      ),
     });
     setIsModalOpen(true);
     onPrefillConsumed?.();
@@ -565,17 +572,21 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
           <button 
             onClick={() => {
               setEditingPost(null);
+              const firstVendor = visibleVendors(vendors)[0];
               setFormData({
-                vendorId: visibleVendors(vendors)[0]?.id || '',
+                vendorId: firstVendor?.id || '',
                 title: '',
                 content: '',
                 status: 'draft',
                 scheduledAt: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
                 targetMonth: selectedMonth,
                 type: '專業',
+                // 原本這裡漏了 contentType，整份 formData 被換掉之後它就是 undefined：
+                // 內容形式兩顆按鈕都不會亮，素材下拉也因為 a.type === undefined 而一支都撈不到。
+                contentType: 'post',
                 clientConfirmed: false,
                 internalConfirmed: false,
-                platforms: ['IG'],
+                platforms: getVendorDefaultPlatforms(firstVendor, 'post'),
                 postUrl: ''
               });
               setIsModalOpen(true);
@@ -1219,7 +1230,13 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                           }
                         }
                         
-                        setFormData({ ...formData, vendorId, contentType: defaultContentType });
+                        // 平台跟著廠商走。換一家之後還套著上一家的平台，正是小編要回頭改的主因。
+                        setFormData({
+                          ...formData,
+                          vendorId,
+                          contentType: defaultContentType,
+                          platforms: getVendorDefaultPlatforms(selectedVendor, defaultContentType),
+                        });
                       }}
                       className="w-full p-2 bg-[#F5F5F0] rounded-xl border-none"
                     >
@@ -1262,7 +1279,16 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                           type="button"
                           // 用 '' 而不是 undefined：Firestore SDK 預設寫入 undefined 會直接丟例外
                           // （連安全規則都碰不到），以前切換內容類型後存檔必炸、還被 catch 吞成「儲存失敗」。
-                          onClick={() => setFormData({ ...formData, contentType: type as 'post' | 'video', assetId: '' })}
+                          onClick={() => {
+                            const nextType = type as 'post' | 'video';
+                            setFormData({
+                              ...formData,
+                              contentType: nextType,
+                              assetId: '',
+                              // 影音跟圖文發的地方本來就不一樣（影音多一個 TikTok/YT），所以要重新帶
+                              platforms: getVendorDefaultPlatforms(vendors.find(v => v.id === formData.vendorId), nextType),
+                            });
+                          }}
                           className={cn(
                             "flex-1 py-2 rounded-xl text-sm font-bold transition-all",
                             formData.contentType === type ? "bg-[#5A5A40] text-white" : "bg-gray-100 text-gray-400"
@@ -1392,10 +1418,11 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                               key={idx}
                               type="button"
                               onClick={() => {
-                                setFormData({ 
-                                  ...formData, 
+                                // 平台一律走廠商資料卡（getVendorDefaultPlatforms 內部才會退回發布習慣），
+                                // 這裡不可以自己讀 s.habit.platforms —— 那會讓習慣的設定蓋過廠商卡。
+                                setFormData({
+                                  ...formData,
                                   scheduledAt: format(s.date, "yyyy-MM-dd'T'HH:mm"),
-                                  platforms: s.habit.platforms || formData.platforms
                                 });
                               }}
                               className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-1 rounded-lg hover:bg-emerald-100 transition-colors"
@@ -1456,7 +1483,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                         <p className="text-xs text-green-800 font-bold mb-1">✓ 廠商自行發布模式</p>
                         <p className="text-[10px] text-green-600/70">此廠商設定為自行發布。系統將僅記錄用於服務次數認列。您仍可選取預計認列的平台：</p>
                         <div className="flex flex-wrap gap-2 mt-3">
-                          {['IG', 'FB', 'TikTok', 'YT', 'LINE'].map(p => (
+                          {platformOptionsFor(vendors.find(v => v.id === formData.vendorId), formData.platforms || []).map(p => (
                             <button
                               key={p}
                               type="button"
@@ -1478,7 +1505,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                       </div>
                     ) : (
                       <div className="flex flex-wrap gap-2">
-                        {['IG', 'FB', 'TikTok', 'YT', 'LINE'].map(p => (
+                        {platformOptionsFor(vendors.find(v => v.id === formData.vendorId), formData.platforms || []).map(p => (
                           <button
                             key={p}
                             type="button"

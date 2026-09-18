@@ -13,7 +13,7 @@ import {
   orderBy
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Vendor, SocialAccount, OperationType, Editor, PauseRecord, UserProfile, VendorTargetChange, VendorSecrets, socialAccountKey } from '../types';
+import { Vendor, SocialAccount, OperationType, Editor, PauseRecord, UserProfile, VendorTargetChange, VendorSecrets, socialAccountKey, platformOptionsFor, platformsFromHabits } from '../types';
 import { Plus, Trash2, Edit2, ExternalLink, Shield, X, Eye, EyeOff, Users, ChevronDown, ChevronUp, Settings2, Snowflake, RotateCcw, PowerOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { clsx, type ClassValue } from 'clsx';
@@ -48,6 +48,7 @@ export default function VendorManagement() {
   const [pauseUntilInput, setPauseUntilInput] = useState('');
   const [endModalVendor, setEndModalVendor] = useState<Vendor | null>(null);
   const [endedAtInput, setEndedAtInput] = useState('');
+  const [customPlatformInput, setCustomPlatformInput] = useState<{ video: string; post: string }>({ video: '', post: '' });
   const [targetChangeMonth, setTargetChangeMonth] = useState('');
   const [targetChangeReason, setTargetChangeReason] = useState('');
   const currentMonth = format(new Date(), 'yyyy-MM');
@@ -56,8 +57,10 @@ export default function VendorManagement() {
     socialAccounts: [{ platform: 'IG', username: '', password: '' }],
     postingHabits: [] as any[],
     cooperationItems: [] as string[],
-    monthlyTargetPosts: 8,
-    monthlyTargetVideos: 0,
+    // 預設短影音 8、圖文 0：這是短影音公司，圖文才是少數。
+    // 以前反過來，導致只勾短影音的客戶也被塞進 8 支圖文目標（極酵文創就是這樣建出來的）。
+    monthlyTargetPosts: 0,
+    monthlyTargetVideos: 8,
     targetHistory: [] as VendorTargetChange[],
     cooperationStartMonth: '',
     weeklyPattern: null as number[] | null,
@@ -66,7 +69,8 @@ export default function VendorManagement() {
     assignedUserIds: [] as string[],
     editorId: '',
     editorName: '',
-    selfPublishing: false
+    selfPublishing: false,
+    defaultPlatforms: { video: [] as string[], post: [] as string[] },
   });
 
   useEffect(() => {
@@ -218,6 +222,37 @@ export default function VendorManagement() {
     }
   };
 
+  /** 這一排是廠商卡上明確存過的，還是剛才從發布習慣帶進來的（只影響提示文字） */
+  const formDataHasExplicit = (kind: 'video' | 'post') =>
+    Boolean(editingVendor?.defaultPlatforms?.[kind]?.length);
+
+  const toggleDefaultPlatform = (kind: 'video' | 'post', platform: string) => {
+    const current = formData.defaultPlatforms?.[kind] || [];
+    const next = current.includes(platform)
+      ? current.filter(p => p !== platform)
+      : [...current, platform];
+    setFormData({
+      ...formData,
+      defaultPlatforms: { ...formData.defaultPlatforms, [kind]: next },
+    });
+  };
+
+  const addCustomPlatform = (kind: 'video' | 'post') => {
+    const name = (customPlatformInput[kind] || '').trim();
+    if (!name) return;
+    const current = formData.defaultPlatforms?.[kind] || [];
+    // 大小寫不同但其實是同一個平台（youtube / YouTube）會變成兩顆各自獨立的按鈕，先擋掉
+    if (current.some(p => p.toLowerCase() === name.toLowerCase())) {
+      toast.error(`「${name}」已經在清單裡了`);
+      return;
+    }
+    setFormData({
+      ...formData,
+      defaultPlatforms: { ...formData.defaultPlatforms, [kind]: [...current, name] },
+    });
+    setCustomPlatformInput({ ...customPlatformInput, [kind]: '' });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth.currentUser) return;
@@ -242,10 +277,10 @@ export default function VendorManagement() {
         (formData.monthlyTargetVideos !== prevVideos || formData.monthlyTargetPosts !== prevPosts);
 
       if (targetsChanged) {
-        if (!targetChangeMonth) {
-          toast.error('每月片數有變動，請先選「從哪個月開始生效」');
-          return;
-        }
+        // ⚠️ 改支數**永遠不擋存檔**。以前這裡沒填生效月份就 return，等於為了修正一個
+        //    建檔時的預設值（沒人要的圖文 8 支）被擋在外面，而那家根本還沒有任何歷史要保護。
+        //    沒填就當成「從這個月起生效」：更早的月份仍然沿用舊數字，歷史欠片一樣不會被改寫。
+        const effectiveFrom = targetChangeMonth || format(new Date(), 'yyyy-MM');
         if (targetHistory.length === 0) {
           // 沒有任何紀錄時先把「原本的數字」補成基準，否則變更月之前的月份會找不到對照而拿到新數字
           targetHistory.push({
@@ -257,9 +292,9 @@ export default function VendorManagement() {
           });
         }
         targetHistory = [
-          ...targetHistory.filter(r => r.fromMonth !== targetChangeMonth),
+          ...targetHistory.filter(r => r.fromMonth !== effectiveFrom),
           {
-            fromMonth: targetChangeMonth,
+            fromMonth: effectiveFrom,
             videos: formData.monthlyTargetVideos,
             posts: formData.monthlyTargetPosts,
             createdAt: new Date().toISOString(),
@@ -285,8 +320,11 @@ export default function VendorManagement() {
         targetHistory,
         ...(latestTargets ? { monthlyTargetVideos: latestTargets.videos, monthlyTargetPosts: latestTargets.posts } : {}),
         ...statusFields,
-        createdBy: auth.currentUser.uid,
-        createdAt: new Date().toISOString()
+        // 編輯時不可覆寫這兩個欄位——以前每存一次檔，建檔日期就被洗成當下時間，
+        // 「這家什麼時候開始合作」的線索等於每次編輯都消失一次。
+        ...(editingVendor
+          ? {}
+          : { createdBy: auth.currentUser.uid, createdAt: new Date().toISOString() }),
       };
 
       const previousEditorId = editingVendor?.editorId;
@@ -305,7 +343,7 @@ export default function VendorManagement() {
       toast.success(editingVendor ? '廠商資料已更新' : '廠商資料已建立');
 
       // 模擬存檔後的廠商清單(不用等 onSnapshot 回來)，用來重算剪輯師的廠商存取範圍
-      const savedVendor: Vendor = { ...(data as Vendor), id: savedVendorId };
+      const savedVendor: Vendor = { ...(editingVendor || {} as Vendor), ...(data as Vendor), id: savedVendorId };
       const nextVendors = editingVendor
         ? vendors.map(v => v.id === savedVendorId ? savedVendor : v)
         : [...vendors, savedVendor];
@@ -323,8 +361,8 @@ export default function VendorManagement() {
         socialAccounts: [{ platform: 'IG', username: '', password: '' }], 
         postingHabits: [],
         cooperationItems: [],
-        monthlyTargetPosts: 8,
-        monthlyTargetVideos: 0,
+        monthlyTargetPosts: 0,
+        monthlyTargetVideos: 8,
         targetHistory: [],
         cooperationStartMonth: '',
         weeklyPattern: null,
@@ -332,7 +370,8 @@ export default function VendorManagement() {
         pauseHistory: [],
         assignedUserIds: [],
         editorName: '',
-        selfPublishing: false
+        selfPublishing: false,
+        defaultPlatforms: { video: [], post: [] },
       });
     } catch (error) {
       toast.error('儲存失敗');
@@ -479,8 +518,9 @@ export default function VendorManagement() {
                 socialAccounts: [{ platform: 'IG', username: '', password: '' }],
                 postingHabits: [],
                 cooperationItems: [],
-                monthlyTargetPosts: 8,
-                monthlyTargetVideos: 0,
+                defaultPlatforms: { video: [], post: [] },
+                monthlyTargetPosts: 0,
+                monthlyTargetVideos: 8,
                 targetHistory: [],
                 cooperationStartMonth: '',
                 weeklyPattern: null,
@@ -550,7 +590,18 @@ export default function VendorManagement() {
                       assignedUserIds: vendor.assignedUserIds || [],
                       editorId: vendor.editorId || '',
                       editorName: vendor.editorName || '',
-                      selfPublishing: vendor.selfPublishing || false
+                      selfPublishing: vendor.selfPublishing || false,
+                      // 還沒在這張卡上明確設定的，先帶入「發布習慣」裡已經設好的平台：
+                      // 老闆原本就在那裡設過，打開來應該是已經勾好的狀態，不是一張空表。
+                      // 按下儲存就會變成這張卡上的正式設定，之後不再依賴發布習慣。
+                      defaultPlatforms: {
+                        video: vendor.defaultPlatforms?.video?.length
+                          ? vendor.defaultPlatforms.video
+                          : platformsFromHabits(vendor.postingHabits, 'video'),
+                        post: vendor.defaultPlatforms?.post?.length
+                          ? vendor.defaultPlatforms.post
+                          : platformsFromHabits(vendor.postingHabits, 'post'),
+                      },
                     });
                     setTargetChangeMonth('');
                     setTargetChangeReason('');
@@ -874,16 +925,92 @@ export default function VendorManagement() {
                           type="checkbox"
                           checked={formData.cooperationItems.includes(item.id)}
                           onChange={() => {
-                            const newItems = formData.cooperationItems.includes(item.id)
+                            const removing = formData.cooperationItems.includes(item.id);
+                            const newItems = removing
                               ? formData.cooperationItems.filter(i => i !== item.id)
                               : [...formData.cooperationItems, item.id];
-                            setFormData({ ...formData, cooperationItems: newItems });
+                            // 取消勾選就把那一類的月目標歸零：不然畫面上寫「不合作圖文」、
+                            // 目標卻還掛著 8 篇，欠片會一路算給一個根本沒有的合作項目。
+                            // （只在取消時動數字；勾選時不自作主張幫他填，要發幾支是他自己決定的）
+                            const zeroed = removing
+                              ? (item.id === 'graphic_post'
+                                  ? { monthlyTargetPosts: 0 }
+                                  : { monthlyTargetVideos: 0 })
+                              : {};
+                            setFormData({ ...formData, cooperationItems: newItems, ...zeroed });
                           }}
                           className="rounded border-gray-300 text-[#5A5A40] focus:ring-[#5A5A40]"
                         />
                         <span className="text-sm text-gray-700">{item.label}</span>
                       </label>
                     ))}
+                  </div>
+                </div>
+
+                {/* 預設發布平台：建檔時就知道這個 IP 發哪裡，不該讓小編每則貼文重點一次。
+                    漏點的後果是貼文詳情那張「逐平台標記已發布」的清單跟著錯，她得回頭改。 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">預設發布平台</label>
+                  <p className="text-[11px] text-gray-400 mb-3">
+                    新增貼文時自動帶入這裡設定的平台，小編仍可逐篇增減。改這裡不會動到已經建好的貼文。
+                  </p>
+                  <div className="space-y-3">
+                    {([
+                      { kind: 'video' as const, label: '短影音' },
+                      { kind: 'post' as const, label: '圖文' },
+                    ]).map(({ kind, label }) => {
+                      const selected = formData.defaultPlatforms?.[kind] || [];
+                      const options = platformOptionsFor(formData as any, selected);
+                      return (
+                        <div key={kind} className="bg-[#F5F5F0] rounded-2xl p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-bold text-gray-600">{label}</span>
+                            {selected.length === 0 ? (
+                              <span className="text-[10px] text-gray-400">未設定＝小編自己點</span>
+                            ) : !formDataHasExplicit(kind) ? (
+                              <span className="text-[10px] text-gray-400">沿用下方「發布習慣」的設定，存檔後就以這裡為準</span>
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {options.map(pf => (
+                              <button
+                                key={pf}
+                                type="button"
+                                onClick={() => toggleDefaultPlatform(kind, pf)}
+                                className={cn(
+                                  'px-3 py-1 rounded-full text-xs font-bold transition-all',
+                                  selected.includes(pf)
+                                    ? 'bg-[#5A5A40] text-white'
+                                    : 'bg-white text-gray-400 border border-black/5'
+                                )}
+                              >
+                                {pf}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="flex items-center gap-2 mt-2">
+                            <input
+                              type="text"
+                              value={customPlatformInput[kind]}
+                              onChange={e => setCustomPlatformInput({ ...customPlatformInput, [kind]: e.target.value })}
+                              onKeyDown={e => {
+                                // 這是包在 <form> 裡的，Enter 不擋會直接送出整張廠商表單
+                                if (e.key === 'Enter') { e.preventDefault(); addCustomPlatform(kind); }
+                              }}
+                              placeholder="自訂平台（例：小紅書）"
+                              className="flex-1 min-w-0 px-3 py-1.5 bg-white rounded-xl border border-black/5 text-xs focus:outline-none focus:border-[#5A5A40]/30"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => addCustomPlatform(kind)}
+                              className="shrink-0 px-3 py-1.5 rounded-xl bg-white border border-black/5 text-xs font-bold text-gray-500 hover:text-[#5A5A40]"
+                            >
+                              加入
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -952,7 +1079,9 @@ export default function VendorManagement() {
                   )}
 
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5">這次變更從哪個月開始生效</label>
+                    <label className="block text-xs font-medium text-gray-600 mb-1.5">
+                      這次變更從哪個月開始生效<span className="ml-1 font-normal text-gray-400">（選填）</span>
+                    </label>
                     <input
                       type="month"
                       value={targetChangeMonth}
@@ -962,7 +1091,9 @@ export default function VendorManagement() {
                     />
                     <p className="text-xs text-gray-400 mt-1 leading-relaxed">
                       從這個月起套用上面的片數；更早的月份不受影響，已結算的目標與欠片不會被改寫。
-                      {!targetsChangedInForm && '（先改上面的每月片數才需要填）'}
+                      {targetsChangedInForm
+                        ? `不填就是從本月（${format(new Date(), 'yyyy-MM')}）起生效。`
+                        : '（先改上面的每月片數才需要填）'}
                     </p>
                     {targetsChangedInForm && deficitLockMonth && targetChangeMonth && targetChangeMonth <= deficitLockMonth && (
                       <p className="text-xs text-red-500 mt-1 leading-relaxed">
@@ -1244,7 +1375,7 @@ export default function VendorManagement() {
                         <div>
                           <label className="block text-xs font-bold text-orange-800 mb-2 uppercase tracking-wider">合作內容</label>
                           <div className="flex gap-2">
-                            {['post', 'video'].map(type => (
+                            {['video', 'post'].map(type => (
                               <button
                                 key={type}
                                 type="button"

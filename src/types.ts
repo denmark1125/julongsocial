@@ -201,6 +201,80 @@ export function socialAccountKey(acc: Pick<SocialAccount, 'platform' | 'username
   return `${acc.platform}␟${acc.username}`;
 }
 
+/**
+ * 系統內建的發布平台。以前這份清單直接寫死在 PostManagement 的兩個選擇器裡，
+ * 現在廠商管理也要用同一份，所以收成唯一出處。
+ * 這裡沒有的（客戶自己的官網、小紅書…）走廠商的自訂平台，不要為了單一客戶往這裡加。
+ */
+export const STANDARD_PLATFORMS = ['IG', 'FB', 'TikTok', 'YT', 'LINE'];
+
+/**
+ * 這個 IP 預設發到哪些平台，依內容形式分開存。
+ *
+ * 為什麼要有這個：小編每次新增貼文都要重點一次平台，而這件事建檔時就已經知道了。
+ * 漏點的後果不是少一個標籤——貼文詳情的「逐平台標記已發布」是照 post.platforms 畫的，
+ * 平台錯了那張核可清單就是錯的，她得回頭改才對得起來。
+ *
+ * ⚠️ 這是**預設值不是限制**：帶進表單之後小編仍然可以逐篇增減，
+ *    改了不會回頭動廠商設定，也不會影響已經存過的貼文。
+ */
+export interface VendorDefaultPlatforms {
+  video: string[];
+  post: string[];
+}
+
+/**
+ * 這個廠商這種內容形式預設發哪些平台。
+ *
+ * 取值順序：
+ * 1. `defaultPlatforms`（廠商資料卡上明確設定的，最高層級）
+ * 2. 退回「發布習慣」裡那排平台 —— 老闆本來就在那裡設過，不能讓它白費，
+ *    也讓還沒逐家設定的廠商維持原本的行為（不會突然變成空的）。
+ *    只取合作內容含這種形式的習慣，所以短影音跟圖文可以拿到不同答案。
+ * 3. 都沒有就空陣列，小編自己點（跟以前一樣，只是不再硬塞一個 IG）。
+ *
+ * ⚠️ 第 2 步是過渡：等每家都在廠商卡上設定好，發布習慣那排就沒人讀了，那時候才可以拆掉它。
+ */
+export function getVendorDefaultPlatforms(
+  vendor: Pick<Vendor, 'defaultPlatforms' | 'postingHabits'> | undefined,
+  contentType: 'video' | 'post'
+): string[] {
+  const explicit = vendor?.defaultPlatforms?.[contentType];
+  if (Array.isArray(explicit) && explicit.length > 0) return [...explicit];
+  return platformsFromHabits(vendor?.postingHabits, contentType);
+}
+
+/** 從發布習慣推導某種內容形式的平台（去重、保留設定順序）。 */
+export function platformsFromHabits(
+  habits: PostingHabit[] | undefined,
+  contentType: 'video' | 'post'
+): string[] {
+  const out: string[] = [];
+  for (const h of habits || []) {
+    if (!(h.contentTypes || []).includes(contentType)) continue;
+    for (const p of h.platforms || []) if (p && !out.includes(p)) out.push(p);
+  }
+  return out;
+}
+
+/**
+ * 選擇器要顯示哪些平台＝內建清單 ＋ 這個廠商用過的自訂平台。
+ * `extra` 是「已經存在這筆資料上的平台」——編輯舊貼文時一定要傳，
+ * 否則廠商後來把某個自訂平台拿掉，那則舊貼文的平台就會從畫面上消失（但資料還在）。
+ */
+export function platformOptionsFor(
+  vendor: Pick<Vendor, 'defaultPlatforms' | 'postingHabits'> | undefined,
+  extra: string[] = []
+): string[] {
+  const seen = new Set(STANDARD_PLATFORMS);
+  const out = [...STANDARD_PLATFORMS];
+  const habitPlatforms = (vendor?.postingHabits || []).flatMap(h => h.platforms || []);
+  for (const p of [...(vendor?.defaultPlatforms?.video || []), ...(vendor?.defaultPlatforms?.post || []), ...habitPlatforms, ...extra]) {
+    if (p && !seen.has(p)) { seen.add(p); out.push(p); }
+  }
+  return out;
+}
+
 export interface PostingHabit {
   daysOfWeek: number[]; // 0-6
   time: string; // HH:mm
@@ -266,6 +340,7 @@ export interface Vendor {
   editorId?: string;
   editorName?: string; // Keep for display/fallback
   selfPublishing?: boolean; // Vendor publishes by themselves
+  defaultPlatforms?: VendorDefaultPlatforms; // 這個 IP 預設的發布平台（依內容形式分開），新增貼文時自動帶入；見 VendorDefaultPlatforms
   status?: 'active' | 'paused' | 'ended'; // 不填視同 active
   pausedUntil?: string;     // YYYY-MM-DD，冷凍期預計恢復日（僅 status='paused' 時有意義）
   endedAt?: string;         // YYYY-MM-DD 終止合作日期（僅 status='ended' 時有意義）。該日所屬月份(含)起不再累計新目標/短缺，

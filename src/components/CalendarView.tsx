@@ -431,7 +431,8 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                             vendorId: slot.vendorId,
                             scheduledAt: format(slot.date, "yyyy-MM-dd'T'HH:mm"),
                             contentType: slot.habit.contentTypes?.[0] === 'video' ? 'video' : 'post',
-                            platforms: slot.habit.platforms,
+                            // 平台刻意不傳：由貼文表單照廠商資料卡帶入（見 getVendorDefaultPlatforms）。
+                            // 傳 habit.platforms 會讓發布習慣蓋過廠商卡，而習慣那份不分圖文/短影音。
                           }) : undefined}
                           title={onPlanPost
                             ? `點一下用這個時段建立貼文${slot.isMoved ? `（原訂 ${slot.fromDate}）` : ''}`
