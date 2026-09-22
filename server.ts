@@ -391,13 +391,25 @@ async function buildStockAlertMessage(): Promise<any | null> {
 
   if (urgentVendors.length === 0) return null;
 
-  const bubbles = urgentVendors.map(({ vendor, alert, monthProgress }: any) =>
+  // LINE carousel 上限 12 張，超過整則會被回 400，告急家數一多反而一則都送不出去。
+  // 欠片多的排前面，欠片一樣則庫存天數少的在前，被截掉的才是相對不那麼急的。
+  const shown = [...urgentVendors]
+    .sort((a: any, b: any) =>
+      (b.alert.owed - a.alert.owed) || (a.alert.totalRunwayDays - b.alert.totalRunwayDays)
+    )
+    .slice(0, 12);
+
+  const bubbles = shown.map(({ vendor, alert, monthProgress }: any) =>
     buildStockAlertBubble(vendor, alert, lastCompletedShootDate(vendor.id), monthProgress)
   );
 
+  // 數字給真的總數，但有截掉就要講，不然看到 12 張會以為就這些。
+  const omitted = urgentVendors.length - shown.length;
   return {
     type: "flex",
-    altText: `【聚浪拍攝提醒】${urgentVendors.length}個IP庫存告急，需盡快安排拍攝`,
+    altText: omitted > 0
+      ? `【聚浪拍攝提醒】${urgentVendors.length}個IP庫存告急，需盡快安排拍攝（卡片先附最急的 12 家）`
+      : `【聚浪拍攝提醒】${urgentVendors.length}個IP庫存告急，需盡快安排拍攝`,
     contents: { type: "carousel", contents: bubbles },
   };
 }
