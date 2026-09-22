@@ -36,3 +36,46 @@
   scrollbar-width: none;  /* Firefox */
 }
 
+
+/* Local readability pass: only calendar, post management and post details opt in.
+   Do not change root sizing: other screens and exported artwork keep their metrics. */
+/* ⚠️ 44px 是**觸控**的點擊區標準（WCAG 2.5.5），不能無差別套到桌面。
+   無差別套的後果實測：IG／FB／YT／LINE 這種行內小標籤被撐成 44×44 的灰色正方形、
+   狀態標籤變成 98×44 的大藥丸、月份鈕 57×44 —— 整排框框的比例就跑掉了。
+   桌面是滑鼠操作，WCAG 2.5.8 的門檻是 24px，那個尺寸標籤才會長回標籤的樣子。 */
+@media (max-width: 767px) {
+  .readability-surface :where(button, a) {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+@media (min-width: 768px) {
+  .readability-surface :where(button, a) {
+    min-height: 24px;
+    min-width: 24px;
+  }
+}
+
+/* 輸入欄位維持 44px 與 16px：手機上小於 16px 的輸入框會讓 iOS 自動放大整個畫面，
+   桌面的輸入框本來就該有這個高度，不會有比例問題。 */
+.readability-surface :where(input, select, textarea) {
+  font-size: 1rem;
+  line-height: 1.5;
+  min-height: 44px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.readability-surface :where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid #5a5a40;
+  outline-offset: 2px;
+}
+
+.readability-surface :where(button, a) > svg {
+  flex-shrink: 0;
+}
+
+.readability-surface .overflow-x-auto > button {
+  flex-shrink: 0;
+}

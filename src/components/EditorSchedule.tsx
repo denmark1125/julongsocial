@@ -54,7 +54,7 @@ const TONE_TEXT: Record<string, string> = {
   editor: 'text-amber-600',
   waiting: 'text-sky-600',
   alert: 'text-red-600',
-  idle: 'text-gray-400',
+  idle: 'text-gray-500',
 };
 
 const TONE_CHIP: Record<string, string> = {
@@ -257,8 +257,8 @@ export default function EditorSchedule({ userProfile }: { userProfile: UserProfi
     return (
       <div className="bg-white rounded-3xl shadow-sm border border-black/5 p-12 text-center">
         <CalendarDays className="mx-auto mb-3 text-gray-300" size={32} />
-        <p className="text-sm font-bold text-gray-500">還沒有指派給你的 IP</p>
-        <p className="text-xs text-gray-400 mt-1">請聯絡公司窗口幫你設定</p>
+        <p className="text-base font-bold text-gray-500">還沒有指派給你的 IP</p>
+        <p className="text-sm text-gray-500 mt-1">請聯絡公司窗口幫你設定</p>
       </div>
     );
   }
@@ -281,7 +281,7 @@ export default function EditorSchedule({ userProfile }: { userProfile: UserProfi
       );
     }
     return (
-      <span className={clsx('inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] font-bold', TONE_CHIP[supply.tone])}>
+      <span className={clsx('inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[13px] font-bold', TONE_CHIP[supply.tone])}>
         <SupplyIcon kind={assignment.kind} className="w-3 h-3 shrink-0" />
         {supply.label}
         {supply.detail && <span className="font-medium opacity-70">・{supply.detail}</span>}
@@ -290,7 +290,8 @@ export default function EditorSchedule({ userProfile }: { userProfile: UserProfi
   };
 
   return (
-    <div className="space-y-4">
+    // readability-surface：手機點擊區 44px、桌面 24px、輸入框 16px（避免 iOS 自動放大整頁）。
+    <div className="readability-surface space-y-4">
       <div className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
         <div className="p-4 sm:p-6 flex flex-col sm:flex-row items-center justify-between border-b border-black/5 gap-3">
           <div className="flex items-center justify-between w-full sm:w-auto">
@@ -304,8 +305,8 @@ export default function EditorSchedule({ userProfile }: { userProfile: UserProfi
                   key={mode}
                   onClick={() => setViewMode(mode)}
                   className={clsx(
-                    'px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all',
-                    viewMode === mode ? 'bg-white text-[#5A5A40] shadow-sm' : 'text-gray-400'
+                    'px-3 py-1.5 rounded-lg text-[13px] font-bold transition-all',
+                    viewMode === mode ? 'bg-white text-[#5A5A40] shadow-sm' : 'text-gray-500'
                   )}
                 >
                   {mode === 'calendar' ? '日曆' : '清單'}
@@ -318,7 +319,7 @@ export default function EditorSchedule({ userProfile }: { userProfile: UserProfi
             <button onClick={() => setCurrentDate(subMonths(currentDate, 1))} className="p-2 hover:bg-[#F5F5F0] rounded-xl transition-colors">
               <ChevronLeft size={20} />
             </button>
-            <button onClick={() => setCurrentDate(new Date())} className="px-4 py-2 text-sm font-bold hover:bg-[#F5F5F0] rounded-xl transition-colors">
+            <button onClick={() => setCurrentDate(new Date())} className="px-4 py-2 text-base font-bold hover:bg-[#F5F5F0] rounded-xl transition-colors">
               今天
             </button>
             <button onClick={() => setCurrentDate(addMonths(currentDate, 1))} className="p-2 hover:bg-[#F5F5F0] rounded-xl transition-colors">
@@ -332,7 +333,7 @@ export default function EditorSchedule({ userProfile }: { userProfile: UserProfi
             <button
               onClick={() => setSelectedVendorId('all')}
               className={clsx(
-                'px-4 py-1.5 rounded-full text-xs font-bold transition-all whitespace-nowrap border',
+                'px-4 py-1.5 rounded-full text-sm font-bold transition-all whitespace-nowrap border',
                 selectedVendorId === 'all' ? 'bg-[#5A5A40] text-white border-[#5A5A40]' : 'bg-white text-gray-500 border-black/5'
               )}
             >
@@ -343,7 +344,7 @@ export default function EditorSchedule({ userProfile }: { userProfile: UserProfi
                 key={vendor.id}
                 onClick={() => setSelectedVendorId(vendor.id!)}
                 className={clsx(
-                  'px-4 py-1.5 rounded-full text-xs font-bold transition-all whitespace-nowrap border',
+                  'px-4 py-1.5 rounded-full text-sm font-bold transition-all whitespace-nowrap border',
                   selectedVendorId === vendor.id ? 'bg-[#5A5A40] text-white border-[#5A5A40]' : 'bg-white text-gray-500 border-black/5'
                 )}
               >
@@ -358,7 +359,7 @@ export default function EditorSchedule({ userProfile }: { userProfile: UserProfi
             <div className="min-w-[760px] xl:min-w-0">
               <div className="grid grid-cols-7 border-b border-black/5 bg-gray-50/50">
                 {WEEK_LABELS.map(d => (
-                  <div key={d} className="p-3 text-center text-[10px] font-bold text-gray-400 uppercase tracking-widest">{d}</div>
+                  <div key={d} className="p-3 text-center text-[13px] font-bold text-gray-500 uppercase tracking-widest">{d}</div>
                 ))}
               </div>
               <div className="grid grid-cols-7 auto-rows-[minmax(110px,auto)]">
@@ -376,8 +377,8 @@ export default function EditorSchedule({ userProfile }: { userProfile: UserProfi
                       )}
                     >
                       <div className={clsx(
-                        'text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full mb-1',
-                        isToday ? 'bg-[#5A5A40] text-white' : 'text-gray-400'
+                        'text-sm font-bold w-6 h-6 flex items-center justify-center rounded-full mb-1',
+                        isToday ? 'bg-[#5A5A40] text-white' : 'text-gray-500'
                       )}>
                         {format(day, 'd')}
                       </div>
@@ -386,7 +387,7 @@ export default function EditorSchedule({ userProfile }: { userProfile: UserProfi
                           <div
                             key={item.id}
                             className={clsx(
-                              'text-[9px] p-1 rounded border leading-tight',
+                              'text-[13px] p-1 rounded border leading-tight',
                               item.isPost ? 'bg-white border-black/10' : 'bg-orange-50/60 border-orange-100'
                             )}
                           >
@@ -394,7 +395,7 @@ export default function EditorSchedule({ userProfile }: { userProfile: UserProfi
                               <span className="font-bold shrink-0">{item.time}</span>
                               <span className="truncate font-bold">{item.vendorName}</span>
                             </div>
-                            <div className="mt-0.5 text-[9px]">{renderChip(item, 'tiny')}</div>
+                            <div className="mt-0.5 text-[13px]">{renderChip(item, 'tiny')}</div>
                           </div>
                         ))}
                       </div>
@@ -407,27 +408,27 @@ export default function EditorSchedule({ userProfile }: { userProfile: UserProfi
         ) : (
           <div className="p-4 space-y-5">
             {listDays.length === 0 && (
-              <p className="text-center text-sm text-gray-400 py-10">這個月沒有排程</p>
+              <p className="text-center text-base text-gray-500 py-10">這個月沒有排程</p>
             )}
             {listDays.map(day => (
               <div key={day.toString()} className="space-y-2">
                 <div className="flex items-center">
                   <div className={clsx('w-1 h-4 rounded-full mr-2', isSameDay(day, new Date()) ? 'bg-[#5A5A40]' : 'bg-gray-300')} />
-                  <span className="text-xs font-bold text-gray-500">
+                  <span className="text-sm font-bold text-gray-500">
                     {format(day, 'MM月dd日')} ({WEEK_LABELS[getDay(day)]})
                   </span>
                 </div>
                 {(itemsByDay.get(format(day, 'yyyy-MM-dd')) || []).map(item => (
                   <div key={item.id} className="p-4 rounded-2xl border border-black/5 bg-white shadow-sm">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-sm font-bold text-[#5A5A40]">{item.time}</span>
-                      <span className="text-sm font-bold text-gray-700">{item.vendorName}</span>
-                      <span className="flex items-center gap-0.5 text-[10px] text-gray-400">
+                      <span className="text-base font-bold text-[#5A5A40]">{item.time}</span>
+                      <span className="text-base font-bold text-gray-700">{item.vendorName}</span>
+                      <span className="flex items-center gap-0.5 text-[13px] text-gray-500">
                         {item.contentType === 'post' ? <ImageIcon size={10} /> : <Video size={10} />}
                         {item.contentType === 'post' ? '圖文' : '影片'}
                       </span>
                     </div>
-                    <p className={clsx('text-xs mb-2', item.isPost ? 'text-gray-600' : 'text-gray-400 italic')}>{item.title}</p>
+                    <p className={clsx('text-sm mb-2', item.isPost ? 'text-gray-600' : 'text-gray-500 italic')}>{item.title}</p>
                     {renderChip(item, 'normal')}
                   </div>
                 ))}
@@ -440,29 +441,29 @@ export default function EditorSchedule({ userProfile }: { userProfile: UserProfi
       {selectedDay && viewMode === 'calendar' && (
         <div className="bg-white rounded-3xl shadow-sm border border-black/5 p-5">
           <div className="flex items-center justify-between mb-3">
-            <h4 className="text-sm font-bold text-[#5A5A40]">
+            <h4 className="text-base font-bold text-[#5A5A40]">
               {format(selectedDay, 'MM月dd日')} ({WEEK_LABELS[getDay(selectedDay)]})
-              {!isSameMonth(selectedDay, currentDate) && <span className="text-gray-400 font-medium">（其他月份）</span>}
+              {!isSameMonth(selectedDay, currentDate) && <span className="text-gray-500 font-medium">（其他月份）</span>}
             </h4>
-            <button onClick={() => setSelectedDay(null)} className="text-xs font-bold text-gray-400 hover:text-gray-600">關閉</button>
+            <button onClick={() => setSelectedDay(null)} className="text-sm font-bold text-gray-500 hover:text-gray-600">關閉</button>
           </div>
           {detailItems.length === 0 ? (
-            <p className="text-xs text-gray-400">這天沒有排程</p>
+            <p className="text-sm text-gray-500">這天沒有排程</p>
           ) : (
             <div className="space-y-3">
               {detailItems.map(item => (
                 <div key={item.id} className="flex flex-col sm:flex-row sm:items-center gap-2 pb-3 border-b border-black/5 last:border-0 last:pb-0">
                   <div className="sm:w-[190px] shrink-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-[#5A5A40]">{item.time}</span>
-                      <span className="text-sm font-bold text-gray-700">{item.vendorName}</span>
+                      <span className="text-base font-bold text-[#5A5A40]">{item.time}</span>
+                      <span className="text-base font-bold text-gray-700">{item.vendorName}</span>
                     </div>
-                    <span className="flex items-center gap-0.5 text-[10px] text-gray-400 mt-0.5">
+                    <span className="flex items-center gap-0.5 text-[13px] text-gray-500 mt-0.5">
                       {item.contentType === 'post' ? <ImageIcon size={10} /> : <Video size={10} />}
                       {item.contentType === 'post' ? '圖文' : '影片'}
                     </span>
                   </div>
-                  <p className={clsx('flex-1 text-xs', item.isPost ? 'text-gray-600' : 'text-gray-400 italic')}>{item.title}</p>
+                  <p className={clsx('flex-1 text-sm', item.isPost ? 'text-gray-600' : 'text-gray-500 italic')}>{item.title}</p>
                   <div className="shrink-0">{renderChip(item, 'normal')}</div>
                 </div>
               ))}
@@ -471,7 +472,7 @@ export default function EditorSchedule({ userProfile }: { userProfile: UserProfi
         </div>
       )}
 
-      <p className="text-[11px] text-gray-400 leading-relaxed px-1">
+      <p className="text-[13px] text-gray-500 leading-relaxed px-1">
         這頁是唯讀的，內容跟公司內部的社群日曆是同一份資料。
         素材狀態只判斷今天起 {SUPPLY_HORIZON_DAYS} 天內的排程，更遠的顯示「—」。
         排程有問題請直接聯絡窗口，不用在這裡處理。

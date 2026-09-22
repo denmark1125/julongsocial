@@ -85,9 +85,9 @@ function Step({
   const clickable = state === 'active' && !!onClick;
   const style =
     state === 'done'
-      ? 'bg-gray-50 border-black/5 text-gray-400'
+      ? 'bg-gray-50 border-black/5 text-gray-500'
       : state === 'locked'
-        ? 'bg-white border-dashed border-black/15 text-gray-400'
+        ? 'bg-white border-dashed border-black/15 text-gray-500'
         : tone === 'cloud'
           ? 'bg-sky-600 border-sky-600 text-white shadow-sm hover:bg-sky-700'
           : 'bg-[#5A5A40] border-[#5A5A40] text-white shadow-sm hover:bg-[#4a4a35]';
@@ -98,11 +98,11 @@ function Step({
       disabled={!clickable || busy}
       className={`flex-1 min-w-0 rounded-xl px-3 py-2 text-left transition-all border ${style} disabled:opacity-100 ${clickable ? '' : 'cursor-default'}`}
     >
-      <span className="flex items-center gap-1.5 text-[11px] font-bold">
+      <span className="flex items-center gap-1.5 text-[13px] font-bold">
         {state === 'done' ? <CheckCircle2 size={12} /> : icon}
         {busy && clickable ? '處理中...' : label}
       </span>
-      <span className={state === 'active' ? 'block text-[9.5px] mt-0.5 text-white/70' : 'block text-[9.5px] mt-0.5 text-gray-400'}>
+      <span className={state === 'active' ? 'block text-[9.5px] mt-0.5 text-white/70' : 'block text-[9.5px] mt-0.5 text-gray-500'}>
         {caption}
       </span>
     </button>
@@ -160,21 +160,21 @@ function ClientBadge({ asset }: { asset: Asset }) {
   const stage = deriveFlowStage(asset);
   if (stage === 'ready') {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 text-[9px] font-bold border border-green-200">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 text-[13px] font-bold border border-green-200">
         <PackageCheck size={9} /> 已完成，可排程
       </span>
     );
   }
   if (stage === 'to_upload') {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 text-[9px] font-bold border border-green-200">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 text-[13px] font-bold border border-green-200">
         <CheckCircle2 size={9} /> 業主已通過
       </span>
     );
   }
   if (stage === 'client_review') {
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-50 text-gray-500 text-[9px] font-bold border border-black/5">
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-50 text-gray-500 text-[13px] font-bold border border-black/5">
         <Clock size={9} /> 業主審核中
       </span>
     );
@@ -206,25 +206,25 @@ function AssetCard({
     <div className="p-4 space-y-3">
       <div className="min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-bold text-[#5A5A40] text-sm">{vendorName}</span>
+          <span className="font-bold text-[#5A5A40] text-base">{vendorName}</span>
           {asset.isUrgent && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[9px] font-bold border border-red-200">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[13px] font-bold border border-red-200">
               <Flame size={9} /> 急件
             </span>
           )}
           {showClientBadge && <ClientBadge asset={asset} />}
         </div>
-        <p className="text-sm text-gray-600 truncate mt-0.5">{asset.title}</p>
+        <p className="text-base text-gray-600 truncate mt-0.5">{asset.title}</p>
 
         <div className="flex items-center gap-3 mt-1 flex-wrap">
           {due && (
             <span
               className={
                 due.overdue
-                  ? 'inline-flex items-center gap-1 text-[10px] font-bold text-red-600'
+                  ? 'inline-flex items-center gap-1 text-[13px] font-bold text-red-600'
                   : due.imminent
-                    ? 'inline-flex items-center gap-1 text-[10px] font-bold text-amber-600'
-                    : 'inline-flex items-center gap-1 text-[10px] text-gray-400'
+                    ? 'inline-flex items-center gap-1 text-[13px] font-bold text-amber-600'
+                    : 'inline-flex items-center gap-1 text-[13px] text-gray-500'
               }
             >
               <CalendarClock size={10} />
@@ -235,12 +235,12 @@ function AssetCard({
             </span>
           )}
           <span className={stale
-            ? 'inline-flex items-center gap-1 text-[10px] font-bold text-red-500'
-            : 'inline-flex items-center gap-1 text-[10px] text-gray-400'}
+            ? 'inline-flex items-center gap-1 text-[13px] font-bold text-red-500'
+            : 'inline-flex items-center gap-1 text-[13px] text-gray-500'}
           >
             <Clock size={10} /> 停留 {days} 天
           </span>
-          <span className="text-[10px] text-gray-400">
+          <span className="text-[13px] text-gray-500">
             {asset.filmingDate ? `${format(parseISO(asset.filmingDate), 'MM/dd')} 拍攝` : '未填拍攝日'}
           </span>
         </div>
@@ -254,7 +254,7 @@ function AssetCard({
           type="button"
           onClick={onUndoSubmit}
           disabled={busy}
-          className="mt-2 text-[10px] text-gray-400 hover:text-red-500 underline decoration-dotted underline-offset-2 disabled:opacity-50"
+          className="mt-2 text-[13px] text-gray-500 hover:text-red-500 underline decoration-dotted underline-offset-2 disabled:opacity-50"
         >
           送審按錯了？撤回到待剪
         </button>
@@ -267,7 +267,7 @@ function AssetCard({
           type="button"
           onClick={onUndoUpload}
           disabled={busy}
-          className="mt-2 text-[10px] text-gray-400 hover:text-red-500 underline decoration-dotted underline-offset-2 disabled:opacity-50"
+          className="mt-2 text-[13px] text-gray-500 hover:text-red-500 underline decoration-dotted underline-offset-2 disabled:opacity-50"
         >
           上傳按錯了？取消這個標記
         </button>
@@ -293,7 +293,7 @@ function Section({
   const headerTone =
     tone === 'danger' ? 'text-red-600'
       : tone === 'cloud' ? 'text-sky-700'
-        : tone === 'muted' ? 'text-gray-400'
+        : tone === 'muted' ? 'text-gray-500'
           : 'text-[#5A5A40]';
   const border = tone === 'danger' ? 'border-red-200' : tone === 'cloud' ? 'border-sky-200' : 'border-black/5';
 
@@ -304,16 +304,16 @@ function Section({
         disabled={!collapsible}
         className={`w-full text-left px-5 pt-4 pb-3 border-b border-black/5 ${collapsible ? 'hover:bg-black/[0.015]' : 'cursor-default'}`}
       >
-        <h3 className={`text-sm font-bold flex items-center gap-2 ${headerTone}`}>
+        <h3 className={`text-base font-bold flex items-center gap-2 ${headerTone}`}>
           {collapsible && (open ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}
           {icon} {title}
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-black/5 text-gray-500">{count}</span>
+          <span className="text-[13px] font-bold px-2 py-0.5 rounded-full bg-black/5 text-gray-500">{count}</span>
         </h3>
-        <p className="text-[11px] text-gray-400 mt-0.5">{hint}</p>
+        <p className="text-[13px] text-gray-500 mt-0.5">{hint}</p>
       </button>
       {open && (
         count === 0
-          ? <div className="p-8 text-center text-gray-400 italic text-xs">{empty}</div>
+          ? <div className="p-8 text-center text-gray-500 italic text-sm">{empty}</div>
           : <div className="divide-y divide-black/5">{children}</div>
       )}
     </div>
@@ -676,7 +676,7 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
         </div>
         <div>
           <h3 className="text-lg font-bold serif text-[#5A5A40]">我的剪輯任務</h3>
-          <p className="text-xs text-amber-600 bg-amber-50 px-4 py-2 rounded-xl mt-3">
+          <p className="text-sm text-amber-600 bg-amber-50 px-4 py-2 rounded-xl mt-3">
             目前尚未被指派任何廠商，請聯繫管理員設定。
           </p>
         </div>
@@ -693,13 +693,15 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
   });
 
   return (
-    <div className="space-y-4">
+    // readability-surface：手機點擊區 44px、桌面 24px、輸入框 16px（避免 iOS 自動放大整頁）。
+    // 規則寫在 index.css，是 opt-in 的，掛在哪一頁就只影響那一頁。
+    <div className="readability-surface space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold serif text-[#5A5A40] flex items-center gap-2">
             <Scissors size={20} /> 我的剪輯任務
           </h2>
-          <p className="text-xs text-gray-400 mt-1">
+          <p className="text-sm text-gray-500 mt-1">
             {activeView === 'overview'
               ? '選一個 IP 進去看，或直接看全部。'
               : '剪完按「交片送審」；檔案傳上雲端後就按「上傳雲端」，不用等我們通知。'}
@@ -707,15 +709,15 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm">
-            <p className="text-[10px] font-bold text-gray-400">待處理</p>
+            <p className="text-[13px] font-bold text-gray-500">待處理</p>
             <p className="text-lg font-bold leading-none text-[#5A5A40]">
-              {pendingCount('all')} <span className="text-xs font-normal text-gray-400">支</span>
+              {pendingCount('all')} <span className="text-sm font-normal text-gray-500">支</span>
             </p>
           </div>
           <div className="bg-white px-4 py-2 rounded-2xl border border-sky-200 shadow-sm">
-            <p className="text-[10px] font-bold text-gray-400">本月已上傳</p>
+            <p className="text-[13px] font-bold text-gray-500">本月已上傳</p>
             <p className="text-lg font-bold leading-none text-sky-700">
-              {uploadedThisMonth} <span className="text-xs font-normal text-gray-400">支</span>
+              {uploadedThisMonth} <span className="text-sm font-normal text-gray-500">支</span>
             </p>
           </div>
         </div>
@@ -741,29 +743,29 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
                   <div className="flex items-start justify-between gap-2">
                     <span className={pending > 0
                       ? 'font-bold text-[#5A5A40] break-all'
-                      : 'font-bold text-gray-400 break-all'}>{row.name}</span>
+                      : 'font-bold text-gray-500 break-all'}>{row.name}</span>
                     {row.urgent > 0 && (
-                      <span className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-bold">
+                      <span className="shrink-0 flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500 text-white text-[13px] font-bold">
                         <Flame size={10} /> 急件 {row.urgent}
                       </span>
                     )}
                   </div>
 
-                  <p className="mt-2 text-sm font-bold text-[#1a1a1a]">
+                  <p className="mt-2 text-base font-bold text-[#1a1a1a]">
                     {pending > 0
                       ? <>待剪 {row.toEdit} 支<span className="mx-1.5 text-gray-300">・</span>待上傳 {row.toUpload} 支</>
-                      : <span className="text-gray-400">目前沒有待辦</span>}
+                      : <span className="text-gray-500">目前沒有待辦</span>}
                   </p>
 
                   <div className="mt-2 flex items-end justify-between gap-2">
-                    <span className="text-[11px] text-gray-400">
+                    <span className="text-[13px] text-gray-500">
                       {quietDays === null
                         ? '還沒有素材'
                         : quietDays >= SUPPLY_QUIET_DAYS
                           ? `已 ${quietDays} 天沒有新素材`
                           : `最近有新素材 ${format(new Date(row.lastSupplyMs), 'MM/dd')}`}
                     </span>
-                    <span className="text-[11px] text-gray-400 shrink-0">
+                    <span className="text-[13px] text-gray-500 shrink-0">
                       本月已上傳 {row.uploadedThisMonth} 支
                     </span>
                   </div>
@@ -775,7 +777,7 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
           <button
             type="button"
             onClick={() => { setVendorFilter('all'); setTab(null); setView('list'); }}
-            className="w-full py-3 rounded-2xl bg-white border border-black/5 shadow-sm text-xs font-bold text-gray-500 hover:text-[#5A5A40] flex items-center justify-center gap-1.5"
+            className="w-full py-3 rounded-2xl bg-white border border-black/5 shadow-sm text-sm font-bold text-gray-500 hover:text-[#5A5A40] flex items-center justify-center gap-1.5"
           >
             <LayoutGrid size={13} /> 全部一起看
           </button>
@@ -786,7 +788,7 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
         <button
           type="button"
           onClick={() => setView('overview')}
-          className="flex items-center gap-1 text-[11px] font-bold text-gray-400 hover:text-[#5A5A40]"
+          className="flex items-center gap-1 text-[13px] font-bold text-gray-500 hover:text-[#5A5A40]"
         >
           <ArrowLeft size={13} /> 回總覽
         </button>
@@ -795,12 +797,12 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
       {/* 只帶一個 IP 的剪輯師不需要這排，多一列按鈕反而是雜訊 */}
       {activeView === 'list' && filterVendorIds.length >= 2 && (
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-bold text-gray-400 w-10 shrink-0">依 IP</span>
+          <span className="text-[13px] font-bold text-gray-500 w-10 shrink-0">依 IP</span>
           <button
             onClick={() => setVendorFilter('all')}
             className={activeVendorId === 'all'
-              ? 'px-3 py-1 rounded-full text-[11px] font-bold bg-[#5A5A40] text-white'
-              : 'px-3 py-1 rounded-full text-[11px] font-bold bg-white border border-black/5 text-gray-500 hover:text-[#5A5A40]'}
+              ? 'px-3 py-1 rounded-full text-[13px] font-bold bg-[#5A5A40] text-white'
+              : 'px-3 py-1 rounded-full text-[13px] font-bold bg-white border border-black/5 text-gray-500 hover:text-[#5A5A40]'}
           >
             全部
             {pendingCount('all') > 0 && <span className="ml-1.5 opacity-70">{pendingCount('all')}</span>}
@@ -810,8 +812,8 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
               key={vid}
               onClick={() => setVendorFilter(vid)}
               className={activeVendorId === vid
-                ? 'px-3 py-1 rounded-full text-[11px] font-bold bg-[#5A5A40] text-white'
-                : 'px-3 py-1 rounded-full text-[11px] font-bold bg-white border border-black/5 text-gray-500 hover:text-[#5A5A40]'}
+                ? 'px-3 py-1 rounded-full text-[13px] font-bold bg-[#5A5A40] text-white'
+                : 'px-3 py-1 rounded-full text-[13px] font-bold bg-white border border-black/5 text-gray-500 hover:text-[#5A5A40]'}
             >
               {vendorName(vid)}
               {pendingCount(vid) > 0 && <span className="ml-1.5 opacity-70">{pendingCount(vid)}</span>}
@@ -825,14 +827,14 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
         <div className="relative flex-1 min-w-[170px]">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜尋片名或 IP"
-            className="w-full pl-8 pr-8 py-2 rounded-xl text-xs bg-white border border-black/5 focus:outline-none focus:border-[#5A5A40]/30" />
+            className="w-full pl-8 pr-8 py-2 rounded-xl text-sm bg-white border border-black/5 focus:outline-none focus:border-[#5A5A40]/30" />
           {search && <button type="button" onClick={() => setSearch('')} aria-label="清除搜尋" className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500"><X size={13} /></button>}
         </div>
         <button type="button" onClick={() => setUrgentOnly(v => !v)} className={urgentOnly
-          ? 'px-3 py-2 rounded-xl text-[11px] font-bold bg-red-500 text-white'
-          : 'px-3 py-2 rounded-xl text-[11px] font-bold bg-white border border-black/5 text-gray-500'}>只看急件</button>
+          ? 'px-3 py-2 rounded-xl text-[13px] font-bold bg-red-500 text-white'
+          : 'px-3 py-2 rounded-xl text-[13px] font-bold bg-white border border-black/5 text-gray-500'}>只看急件</button>
         <select value={sortBy} onChange={e => setSortBy(e.target.value as 'flow' | 'newest' | 'vendor')}
-          className="px-3 py-2 rounded-xl text-[11px] font-bold bg-white border border-black/5 text-gray-500 focus:outline-none">
+          className="px-3 py-2 rounded-xl text-[13px] font-bold bg-white border border-black/5 text-gray-500 focus:outline-none">
           <option value="flow">預設順序</option><option value="newest">最新加入</option><option value="vendor">依 IP</option>
         </select>
       </div>
@@ -853,11 +855,11 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
                 ? `rounded-2xl px-3 py-3 text-left border shadow-sm ${t.onClass}`
                 : 'rounded-2xl px-3 py-3 text-left border border-black/5 bg-white text-gray-500 hover:text-[#5A5A40]'}
             >
-              <span className="flex items-center gap-1.5 text-[11px] font-bold">
+              <span className="flex items-center gap-1.5 text-[13px] font-bold">
                 {t.icon} {t.title}
               </span>
               <span className={on ? 'block text-xl font-bold leading-none mt-1' : 'block text-xl font-bold leading-none mt-1 text-[#5A5A40]'}>
-                {count}<span className="text-[10px] font-normal opacity-70 ml-1">支</span>
+                {count}<span className="text-[13px] font-normal opacity-70 ml-1">支</span>
               </span>
             </button>
           );
@@ -911,7 +913,7 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
         <div className="flex items-center justify-center gap-3 pt-1">
           <button type="button" disabled={activePage <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}
             className="p-2 rounded-xl bg-white border border-black/5 text-[#5A5A40] disabled:opacity-30" aria-label="上一頁"><ChevronLeft size={16} /></button>
-          <span className="text-xs font-bold text-gray-500">第 {activePage} / {pageCount} 頁・每頁 5 支</span>
+          <span className="text-sm font-bold text-gray-500">第 {activePage} / {pageCount} 頁・每頁 5 支</span>
           <button type="button" disabled={activePage >= pageCount} onClick={() => setPage(p => Math.min(pageCount, p + 1))}
             className="p-2 rounded-xl bg-white border border-black/5 text-[#5A5A40] disabled:opacity-30" aria-label="下一頁"><ChevronRight size={16} /></button>
         </div>
@@ -926,10 +928,10 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
           onMouseDown={() => !busyId && setSubmitAsset(null)}>
           <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-xl" onMouseDown={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold serif text-[#5A5A40]">確定要交片送審嗎？</h3>
-            <p className="mt-2 text-sm text-gray-600 break-words">{submitAsset.title}</p>
+            <p className="mt-2 text-base text-gray-600 break-words">{submitAsset.title}</p>
 
-            <p className="mt-5 text-sm font-bold text-gray-700">這支影片多長？</p>
-            <p className="mt-1 text-xs text-gray-500">選錯了可以再跟我們說。</p>
+            <p className="mt-5 text-base font-bold text-gray-700">這支影片多長？</p>
+            <p className="mt-1 text-sm text-gray-500">選錯了可以再跟我們說。</p>
             <div className="mt-3 grid grid-cols-2 gap-3">
               {(['under60', 'over60'] as DurationTier[]).map(t => (
                 <button
@@ -947,7 +949,7 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
               ))}
             </div>
 
-            <p className="mt-5 text-xs text-gray-500">
+            <p className="mt-5 text-sm text-gray-500">
               送出後會移到「待上傳雲端」。若誤按，在尚未上傳前都可以自己撤回。
             </p>
             <div className="mt-5 flex gap-3">
