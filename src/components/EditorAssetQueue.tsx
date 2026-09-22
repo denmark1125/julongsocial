@@ -320,7 +320,12 @@ function Section({
   );
 }
 
-export default function EditorAssetQueue({ userProfile }: { userProfile: UserProfile | null }) {
+export default function EditorAssetQueue({ userProfile, jumpToVendorId, onJumpConsumed }: {
+  userProfile: UserProfile | null;
+  /** 從「上片排程」點庫存標籤跳過來時要打開的 IP */
+  jumpToVendorId?: string | null;
+  onJumpConsumed?: () => void;
+}) {
   const vendorIds = userProfile?.assignedVendorIds || [];
   const vendorIdsKey = [...vendorIds].sort().join(',');
 
@@ -555,6 +560,17 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
     setTab(null);
     setView('list');
   };
+
+  // 從上片排程點「庫存有 N 支待剪」過來。直接落在那家 IP 的待剪分區，
+  // 因為他點那個標籤就是想知道「是哪幾支」。片名只在這裡出現——
+  // 日曆那邊一律不接片名，那會變成系統把某一支配給了某一天，而那個配對不存在。
+  useEffect(() => {
+    if (!jumpToVendorId) return;
+    openVendor(jumpToVendorId);
+    setTab('to_edit');
+    onJumpConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpToVendorId]);
 
   // 送審前先問長度分級：這一步同時決定這支多少錢，所以不能只用 window.confirm 帶過。
   const advance = (asset: Asset) => {

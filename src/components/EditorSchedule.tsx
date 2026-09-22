@@ -78,7 +78,11 @@ function SupplyIcon({ kind, className }: { kind?: SupplyAssignment['kind']; clas
   return <Icon className={className} />;
 }
 
-export default function EditorSchedule({ userProfile }: { userProfile: UserProfile | null }) {
+export default function EditorSchedule({ userProfile, onOpenVendorQueue }: {
+  userProfile: UserProfile | null;
+  /** 點「庫存有 N 支待剪」時，帶去工作台看那家 IP 到底是哪幾支 */
+  onOpenVendorQueue?: (vendorId: string) => void;
+}) {
   const vendorIds = useMemo(() => userProfile?.assignedVendorIds || [], [userProfile?.assignedVendorIds]);
   const vendorIdsKey = [...vendorIds].sort().join(',');
 
@@ -272,6 +276,15 @@ export default function EditorSchedule({ userProfile }: { userProfile: UserProfi
     // （表格裡的「—」是必要的佔位，卡片沒有這個需要）。
     if (assignment.kind === 'not_video') return null;
     const supply = describeSupply(assignment);
+    // 只有「庫存有 N 支待剪」可以點：那是唯一一種「球在我手上、而且我會想知道是哪幾支」的狀態。
+    // 點下去是帶到工作台那家 IP 的待剪清單，**不是**在這格展開片名：
+    // 把片名放在某一天旁邊等於宣稱那支被排給那天，而誰剪哪一支是同事人工分配的。
+    // ⚠️ tiny 那版在月曆的日期格裡，**而日期格本身就是一顆 <button>**（點了開當日明細）。
+    // 按鈕包按鈕是不合法的 HTML，而且實測過：點擊會被外層日期格接走，裡面那顆永遠不會觸發。
+    // 所以月曆格維持純文字：點那一格會先開當日明細，明細裡的標籤才是可點的。
+    const canOpen = size === 'normal' && assignment.kind === 'to_edit' && !!onOpenVendorQueue;
+    const openQueue = () => onOpenVendorQueue?.(item.vendorId);
+
     if (size === 'tiny') {
       return (
         <span className={clsx('flex items-center gap-0.5 font-bold', TONE_TEXT[supply.tone])}>
@@ -280,12 +293,26 @@ export default function EditorSchedule({ userProfile }: { userProfile: UserProfi
         </span>
       );
     }
-    return (
-      <span className={clsx('inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[13px] font-bold', TONE_CHIP[supply.tone])}>
+
+    const inner = (
+      <>
         <SupplyIcon kind={assignment.kind} className="w-3 h-3 shrink-0" />
         {supply.label}
         {supply.detail && <span className="font-medium opacity-70">・{supply.detail}</span>}
-      </span>
+      </>
+    );
+    const cls = clsx('inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[13px] font-bold', TONE_CHIP[supply.tone]);
+    return canOpen ? (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); openQueue(); }}
+        title="看這家 IP 的待剪清單"
+        className={clsx(cls, 'underline decoration-dotted underline-offset-2 hover:brightness-95')}
+      >
+        {inner}
+      </button>
+    ) : (
+      <span className={cls}>{inner}</span>
     );
   };
 

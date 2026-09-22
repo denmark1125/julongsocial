@@ -42,6 +42,9 @@ export default function App() {
   // 從社群日曆點橘色預排帶過去「新增貼文」的預填。放在這裡是因為它要跨分頁存活：
   // 切到 posts 的當下 CalendarView 已經被卸載了，狀態留在它身上會跟著消失。
   const [postPrefill, setPostPrefill] = useState<PostPrefill | null>(null);
+  // 剪輯師從「上片排程」點某一格的庫存標籤時，要帶到工作台看那家 IP 的待剪清單。
+  // 跟 postPrefill 同一套做法：App 持有、傳下去、收到的人用完回報清掉。
+  const [editorJumpVendorId, setEditorJumpVendorId] = useState<string | null>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
@@ -273,9 +276,20 @@ export default function App() {
     if (userProfile?.role === 'editor') {
       switch (activeTab) {
         case 'editorInvoice': return <EditorInvoicePage userProfile={userProfile} />;
-        case 'editorSchedule': return <EditorSchedule userProfile={userProfile} />;
+        case 'editorSchedule': return (
+          <EditorSchedule
+            userProfile={userProfile}
+            onOpenVendorQueue={(vendorId) => { setEditorJumpVendorId(vendorId); setActiveTab('editorQueue'); }}
+          />
+        );
         case 'editorQueue':
-        default: return <EditorAssetQueue userProfile={userProfile} />;
+        default: return (
+          <EditorAssetQueue
+            userProfile={userProfile}
+            jumpToVendorId={editorJumpVendorId}
+            onJumpConsumed={() => setEditorJumpVendorId(null)}
+          />
+        );
       }
     }
     const allowedRoles = TAB_ROLES[activeTab];
