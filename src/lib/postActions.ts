@@ -64,6 +64,12 @@ export async function setPostStatus(
   { assets, vendors }: StatusChangeContext
 ): Promise<boolean> {
   if (newStatus === 'published') {
+    // 審核是兩段：內部檢核→業主審核。原本只檔了業主這一段，
+    // 內部檢核沒勾也能直接發布，等於主管那一關可以整個跳過。
+    if (!post.internalConfirmed) {
+      toast.error('尚未內部檢核，無法發布');
+      return false;
+    }
     if (!post.clientConfirmed) {
       toast.error('必須先經業主審核確認後才可發布');
       return false;
