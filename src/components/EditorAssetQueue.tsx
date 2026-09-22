@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { collection, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import {
   Asset, AssetFlowStage, DURATION_TIER_LABEL, DurationTier,
@@ -18,7 +18,7 @@ import {
 import { visibleVendors } from '../lib/vendorStatus';
 import {
   Scissors, Film, CheckCircle2, UploadCloud, Clock, Flame,
-  CalendarClock, ChevronDown, ChevronRight, ChevronLeft, PackageCheck, Search, X,
+  CalendarClock, Check, ChevronDown, ChevronRight, PackageCheck, Search, X,
   ArrowLeft, LayoutGrid,
 } from 'lucide-react';
 import { differenceInCalendarDays, format, parseISO } from 'date-fns';
@@ -33,6 +33,9 @@ import toast from 'react-hot-toast';
  * 都該待在同一個要動手的區塊裡，而不是被埋在最下面的唯讀區。
  */
 type Bucket = 'to_edit' | 'to_upload' | 'done';
+
+/** 一次多看幾支。初始也是這個數字。 */
+const PAGE_STEP = 20;
 
 function bucketOf(asset: Asset): Bucket | null {
   const stage = deriveFlowStage(asset);
@@ -184,6 +187,7 @@ function ClientBadge({ asset }: { asset: Asset }) {
 
 function AssetCard({
   asset, vendorName, posts, busy, onAdvance, onUpload, onUndoSubmit, onUndoUpload, showClientBadge,
+  selected, onToggleSelect,
 }: {
   // 這個專案沒有安裝 @types/react，JSX.IntrinsicAttributes 不存在，
   // 所以 key 要自己宣告成 prop，否則 tsc 會當成多餘屬性報錯。
@@ -197,6 +201,9 @@ function AssetCard({
   onUndoSubmit?: () => void;
   onUndoUpload?: () => void;
   showClientBadge?: boolean;
+  /** 有傳 onToggleSelect 才會出現勾選框（目前只有「待上傳雲端」那一區用） */
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   const due = getFlowDueInfo(asset, posts);
   const days = getFlowDaysStuck(asset);
@@ -206,6 +213,18 @@ function AssetCard({
     <div className="p-4 space-y-3">
       <div className="min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
+          {onToggleSelect && (
+            <button
+              type="button"
+              onClick={onToggleSelect}
+              aria-label={selected ? '取消選取' : '選取這支'}
+              className={selected
+                ? 'shrink-0 w-5 h-5 rounded-md bg-[#5A5A40] text-white flex items-center justify-center'
+                : 'shrink-0 w-5 h-5 rounded-md border-2 border-gray-300 hover:border-[#5A5A40]'}
+            >
+              {selected && <Check size={13} />}
+            </button>
+          )}
           <span className="font-bold text-[#5A5A40] text-base">{vendorName}</span>
           {asset.isUrgent && (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[13px] font-bold border border-red-200">
@@ -216,15 +235,17 @@ function AssetCard({
         </div>
         <p className="text-base text-gray-600 truncate mt-0.5">{asset.title}</p>
 
-        <div className="flex items-center gap-3 mt-1 flex-wrap">
+        {/* 每個標籤都 nowrap：中文沒有詞界，不鎖的話手機上會在「停留 12 天」中間斷成兩行留孤字。
+            要換行就整個標籤換下一行。 */}
+        <div className="flex items-center gap-x-3 gap-y-1 mt-1 flex-wrap">
           {due && (
             <span
               className={
                 due.overdue
-                  ? 'inline-flex items-center gap-1 text-[13px] font-bold text-red-600'
+                  ? 'inline-flex items-center gap-1 text-[13px] font-bold text-red-600 whitespace-nowrap'
                   : due.imminent
-                    ? 'inline-flex items-center gap-1 text-[13px] font-bold text-amber-600'
-                    : 'inline-flex items-center gap-1 text-[13px] text-gray-500'
+                    ? 'inline-flex items-center gap-1 text-[13px] font-bold text-amber-600 whitespace-nowrap'
+                    : 'inline-flex items-center gap-1 text-[13px] text-gray-500 whitespace-nowrap'
               }
             >
               <CalendarClock size={10} />
@@ -235,12 +256,12 @@ function AssetCard({
             </span>
           )}
           <span className={stale
-            ? 'inline-flex items-center gap-1 text-[13px] font-bold text-red-500'
-            : 'inline-flex items-center gap-1 text-[13px] text-gray-500'}
+            ? 'inline-flex items-center gap-1 text-[13px] font-bold text-red-500 whitespace-nowrap'
+            : 'inline-flex items-center gap-1 text-[13px] text-gray-500 whitespace-nowrap'}
           >
             <Clock size={10} /> 停留 {days} 天
           </span>
-          <span className="text-[13px] text-gray-500">
+          <span className="text-[13px] text-gray-500 whitespace-nowrap">
             {asset.filmingDate ? `${format(parseISO(asset.filmingDate), 'MM/dd')} 拍攝` : '未填拍攝日'}
           </span>
         </div>
@@ -340,12 +361,21 @@ export default function EditorAssetQueue({ userProfile, jumpToVendorId, onJumpCo
   const [search, setSearch] = useState('');
   const [urgentOnly, setUrgentOnly] = useState(false);
   const [sortBy, setSortBy] = useState<'flow' | 'newest' | 'vendor'>('flow');
-  const [page, setPage] = useState(1);
+  // 不用頁碼用「再看 N 支」：待剪 30 支時每頁 5 支等於要翻 6 頁，
+  // 而剪輯師的使用情境是「從頭掃一遍看有什麼」，不是「跳到第 4 頁」。
+  const [visibleCount, setVisibleCount] = useState(PAGE_STEP);
   // 兩層：先看「我負責哪幾個 IP、各自什麼狀況」，選了才進那一家的清單。
   // 以前一打開就是混排清單，長期難產的 IP 會把第一頁整個吃掉，其他家等於不存在。
   const [view, setView] = useState<'overview' | 'list'>('overview');
   // null＝使用者還沒自己選過，這時自動落在「有事要做」的那一頁，不要開在空白頁
   const [tab, setTab] = useState<Bucket | null>(null);
+  // 總覽預設只列「有待辦」的 IP。沒事的那幾家收在一行後面 ——
+  // 14 家裡常常一半寫著「目前沒有待辦」，卻跟有事的那幾家佔一樣大的版面。
+  const [showIdleIps, setShowIdleIps] = useState(false);
+  // 「待上傳雲端」的多選。只有這一區做批次 ——
+  // 交片送審要逐支選長度分級決定單價，批次只會讓人亂按。
+  const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
+  const [batchBusy, setBatchBusy] = useState(false);
   // 交片送審的確認視窗：同時要選這支是 60 秒以上還是以下（決定單價）
   const [submitAsset, setSubmitAsset] = useState<Asset | null>(null);
   const [submitTier, setSubmitTier] = useState<DurationTier>('under60');
@@ -481,11 +511,20 @@ export default function EditorAssetQueue({ userProfile, jumpToVendorId, onJumpCo
     tab ?? (toEdit.length > 0 ? 'to_edit' : toUpload.length > 0 ? 'to_upload' : 'to_edit');
 
   const currentList = activeTab === 'to_edit' ? toEdit : activeTab === 'to_upload' ? toUpload : done;
-  const pageCount = Math.max(1, Math.ceil(currentList.length / 5));
-  const activePage = Math.min(page, pageCount);
-  const pagedList = currentList.slice((activePage - 1) * 5, activePage * 5);
+  const pagedList = currentList.slice(0, visibleCount);
+  const remainingCount = currentList.length - pagedList.length;
+  // 只算還在目前清單裡的：勾完之後資料可能已經變了（別人改了狀態），
+  // 數字要跟畫面上看得到的一致，不然按鈕會寫著一個你看不到的數字。
+  const selectedCount = currentList.filter(a => selectedIds[a.id!]).length;
 
-  useEffect(() => { setPage(1); }, [activeTab, activeVendorId, search, urgentOnly, sortBy]);
+  // 換分區、換 IP、搜尋、篩急件、改排序都要收回去 ——
+  // 不收的話切到別家會直接展開一大串，反而更難看。
+  useEffect(() => {
+    setVisibleCount(PAGE_STEP);
+    // 選取也要清掉：篩選改了以後畫面上看不到的那幾支還被勾著，
+    // 按下去會一次改掉一批自己沒在看的片。
+    setSelectedIds({});
+  }, [activeTab, activeVendorId, search, urgentOnly, sortBy]);
 
   const thisMonth = format(new Date(), 'yyyy-MM');
   // 本月已上傳＝本月可請款的支數。用本地時區換算，不可以用 ISO 字串裁切（差 8 小時會算到上個月）
@@ -550,6 +589,10 @@ export default function EditorAssetQueue({ userProfile, jumpToVendorId, onJumpCo
     if (x.lastSupplyMs !== y.lastSupplyMs) return y.lastSupplyMs - x.lastSupplyMs;
     return x.name.localeCompare(y.name, 'zh-Hant');
   });
+
+  // 有待辦（含急件）的排在上面的格子，其餘收起來。排序已經在 ipRows 做過，這裡只是切兩段。
+  const busyIpRows = ipRows.filter(r => r.toEdit + r.toUpload > 0 || r.urgent > 0);
+  const idleIpRows = ipRows.filter(r => !(r.toEdit + r.toUpload > 0 || r.urgent > 0));
 
   // 只帶一個 IP 的剪輯師不需要總覽，多一層只是多按一下（跟下面「依 IP」膠囊列同一個判斷）
   const activeView: 'overview' | 'list' = ipRows.length >= 2 ? view : 'list';
@@ -657,6 +700,48 @@ export default function EditorAssetQueue({ userProfile, jumpToVendorId, onJumpCo
     }
   };
 
+  /**
+   * 一次標記多支已上傳。
+   *
+   * ⚠️ 每一支都走跟單支完全相同的 buildCloudUploadUpdate()，不在這裡另外組欄位。
+   *    那支函式裡有兩個不能重犯的坑（cloudUploadedAt 用 || 不能用 ??、
+   *    billableEditorId 只在未定案時寫），寫兩份遲早分岔。
+   */
+  const markUploadedBatch = async () => {
+    if (!auth.currentUser) return;
+    const targets = currentList.filter(a => selectedIds[a.id!]);
+    if (targets.length === 0) return;
+    if (!window.confirm(`把選取的 ${targets.length} 支都標記為已上傳雲端？
+
+這一步決定這幾支算不算你這個月的請款。`)) return;
+
+    setBatchBusy(true);
+    try {
+      // Firestore 一批上限 500，取 400 留餘裕（比照後台舊帳盤點的做法）
+      for (let i = 0; i < targets.length; i += 400) {
+        const batch = writeBatch(db);
+        for (const asset of targets.slice(i, i + 400)) {
+          batch.update(
+            doc(db, 'assets', asset.id!),
+            buildCloudUploadUpdate(asset, {
+              byUid: auth.currentUser.uid,
+              byName: userProfile?.displayName || userProfile?.username,
+              billableEditorId: myEditorId,
+            })
+          );
+        }
+        await batch.commit();
+      }
+      toast.success(`已標記 ${targets.length} 支上傳完成`);
+      setSelectedIds({});
+    } catch (error) {
+      console.error('Batch mark uploaded failed:', error);
+      toast.error('部分或全部沒成功，請重新整理後再試一次');
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
   const markUploaded = async (asset: Asset) => {
     if (!auth.currentUser) return;
     setBusyId(asset.id!);
@@ -742,7 +827,7 @@ export default function EditorAssetQueue({ userProfile, jumpToVendorId, onJumpCo
       {activeView === 'overview' && (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {ipRows.map(row => {
+            {(showIdleIps ? ipRows : busyIpRows).map(row => {
               const pending = row.toEdit + row.toUpload;
               const quietDays = row.lastSupplyMs
                 ? differenceInCalendarDays(new Date(), new Date(row.lastSupplyMs))
@@ -789,6 +874,24 @@ export default function EditorAssetQueue({ userProfile, jumpToVendorId, onJumpCo
               );
             })}
           </div>
+
+          {/* 沒事的 IP 收成一行。不是藏起來 —— 數字還在、點一下就展開，
+              只是不讓它們跟真的有事的那幾家占一樣大的版面。 */}
+          {idleIpRows.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowIdleIps(v => !v)}
+              className="w-full py-2.5 rounded-2xl text-[13px] font-bold text-gray-500 hover:text-[#5A5A40] flex items-center justify-center gap-1.5"
+            >
+              {showIdleIps
+                ? <>收起沒有待辦的 {idleIpRows.length} 個 IP</>
+                : <>另外 {idleIpRows.length} 個 IP 目前沒有待辦</>}
+            </button>
+          )}
+
+          {busyIpRows.length === 0 && !showIdleIps && (
+            <p className="text-center text-sm text-gray-500 py-6">所有 IP 都沒有待辦了。</p>
+          )}
 
           <button
             type="button"
@@ -858,8 +961,10 @@ export default function EditorAssetQueue({ userProfile, jumpToVendorId, onJumpCo
 
       {/* 大分頁而不是三個區塊疊在一起：手機上一路捲到底才看得到「待上傳雲端」，
           而那正是最常用的一區。一次只顯示一類，捲動長度就固定了。 */}
+      {/* 手機上硬排三欄會把「待上傳雲端」擠成兩行，改成可橫滑；
+          sm 以上空間夠就回到三欄。flex-shrink-0 由 .readability-surface 的規則代勞。 */}
       {activeView === 'list' && (
-      <div className="grid grid-cols-3 gap-2">
+      <div className="flex gap-2 overflow-x-auto sm:grid sm:grid-cols-3">
         {TABS.map(t => {
           const count = t.key === 'to_edit' ? toEdit.length : t.key === 'to_upload' ? toUpload.length : done.length;
           const on = activeTab === t.key;
@@ -868,10 +973,10 @@ export default function EditorAssetQueue({ userProfile, jumpToVendorId, onJumpCo
               key={t.key}
               onClick={() => setTab(t.key)}
               className={on
-                ? `rounded-2xl px-3 py-3 text-left border shadow-sm ${t.onClass}`
-                : 'rounded-2xl px-3 py-3 text-left border border-black/5 bg-white text-gray-500 hover:text-[#5A5A40]'}
+                ? `rounded-2xl px-3 py-3 text-left border shadow-sm min-w-[8.5rem] sm:min-w-0 ${t.onClass}`
+                : 'rounded-2xl px-3 py-3 text-left border border-black/5 bg-white text-gray-500 hover:text-[#5A5A40] min-w-[8.5rem] sm:min-w-0'}
             >
-              <span className="flex items-center gap-1.5 text-[13px] font-bold">
+              <span className="flex items-center gap-1.5 text-[13px] font-bold whitespace-nowrap">
                 {t.icon} {t.title}
               </span>
               <span className={on ? 'block text-xl font-bold leading-none mt-1' : 'block text-xl font-bold leading-none mt-1 text-[#5A5A40]'}>
@@ -896,6 +1001,35 @@ export default function EditorAssetQueue({ userProfile, jumpToVendorId, onJumpCo
         </Section>
       )}
 
+      {/* 批次列：選了才出現，沒選時不占版面。預設不預先全選 ——
+          一次改幾十支的請款歸屬應該是他主動選的，不是預設勾好等他按。 */}
+      {activeView === 'list' && activeTab === 'to_upload' && pagedList.length > 0 && (
+        <div className="flex items-center justify-between gap-3 flex-wrap px-1">
+          <button
+            type="button"
+            onClick={() => {
+              const allSelected = pagedList.every(a => selectedIds[a.id!]);
+              const next = { ...selectedIds };
+              for (const a of pagedList) next[a.id!] = !allSelected;
+              setSelectedIds(next);
+            }}
+            className="text-[13px] font-bold text-gray-500 hover:text-[#5A5A40]"
+          >
+            {pagedList.every(a => selectedIds[a.id!]) ? '取消全選' : `選取這 ${pagedList.length} 支`}
+          </button>
+          {selectedCount > 0 && (
+            <button
+              type="button"
+              disabled={batchBusy}
+              onClick={markUploadedBatch}
+              className="px-4 py-2 rounded-xl bg-[#5A5A40] text-white text-[13px] font-bold disabled:opacity-50"
+            >
+              {batchBusy ? '處理中…' : `把選取的 ${selectedCount} 支標記已上傳`}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* 這一區是重點：只要送審過、還沒上傳的都在這，不管業主審完沒有。
           上傳是請款的認定依據，必須由剪輯師自己按，也不該被審核進度卡住。 */}
       {activeView === 'list' && activeTab === 'to_upload' && (
@@ -907,7 +1041,17 @@ export default function EditorAssetQueue({ userProfile, jumpToVendorId, onJumpCo
           icon={<UploadCloud size={14} />}
           empty="目前沒有待上傳的片"
         >
-          {pagedList.map(a => <AssetCard {...cardProps(a)} onUpload={() => markUploaded(a)} onUndoSubmit={() => undoSubmit(a)} onUndoUpload={() => undoUploaded(a)} showClientBadge />)}
+          {pagedList.map(a => (
+            <AssetCard
+              {...cardProps(a)}
+              onUpload={() => markUploaded(a)}
+              onUndoSubmit={() => undoSubmit(a)}
+              onUndoUpload={() => undoUploaded(a)}
+              showClientBadge
+              selected={!!selectedIds[a.id!]}
+              onToggleSelect={() => setSelectedIds(prev => ({ ...prev, [a.id!]: !prev[a.id!] }))}
+            />
+          ))}
         </Section>
       )}
 
@@ -925,14 +1069,14 @@ export default function EditorAssetQueue({ userProfile, jumpToVendorId, onJumpCo
         </Section>
       )}
 
-      {activeView === 'list' && currentList.length > 5 && (
-        <div className="flex items-center justify-center gap-3 pt-1">
-          <button type="button" disabled={activePage <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}
-            className="p-2 rounded-xl bg-white border border-black/5 text-[#5A5A40] disabled:opacity-30" aria-label="上一頁"><ChevronLeft size={16} /></button>
-          <span className="text-sm font-bold text-gray-500">第 {activePage} / {pageCount} 頁・每頁 5 支</span>
-          <button type="button" disabled={activePage >= pageCount} onClick={() => setPage(p => Math.min(pageCount, p + 1))}
-            className="p-2 rounded-xl bg-white border border-black/5 text-[#5A5A40] disabled:opacity-30" aria-label="下一頁"><ChevronRight size={16} /></button>
-        </div>
+      {activeView === 'list' && remainingCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setVisibleCount(n => n + PAGE_STEP)}
+          className="w-full py-3 rounded-2xl bg-white border border-black/5 shadow-sm text-sm font-bold text-gray-500 hover:text-[#5A5A40]"
+        >
+          再看 {Math.min(remainingCount, PAGE_STEP)} 支（還有 {remainingCount} 支）
+        </button>
       )}
 
       {/* 交片送審：確認片名 + 選長度分級。趁剪輯師還記得這支多長的時候問，
