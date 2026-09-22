@@ -447,6 +447,13 @@ export interface FlowLogEntry {
 export interface Asset {
   id?: string;
   vendorId: string;
+  /**
+   * IP 名稱快照。被逐支指名到「自己沒負責的 IP」的剪輯師讀不到那家 vendor 文件
+   *（規則是逐文件評估的，指名只開那一支片，不開整家 IP），
+   * 沒有這個快照的話他的工作台跟請款單都會顯示「未知 IP」。
+   * 改派時順手寫入；舊素材可能沒有，所以是選填。
+   */
+  vendorName?: string;
   editorId?: string; // Link to freelance editor
   /**
    * 認列月份（YYYY-MM）。按「標記完成」時選定，預設當月；取消完成時清空。

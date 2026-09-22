@@ -14,6 +14,7 @@ import {
   FLOW_OWNER_LABEL,
 } from '../types';
 import { buildFlowUpdate, getClientApprovalTarget, getFlowDaysStuck, getFlowDueInfo, isFlowStale, sortFlowColumn } from '../lib/assetFlow';
+import { getWorkingEditorId } from '../lib/editorBilling';
 import { Scissors, UserCheck, PenLine, Clock, Flame, CalendarClock, ThumbsUp } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -66,7 +67,7 @@ export default function ProductionFlowBoard({
 
   const vendorMap = new Map(vendors.map(v => [v.id, v]));
   // 素材可以逐支覆寫剪輯師，沒填的才回退到廠商的負責剪輯師（跟素材資料庫同一套判斷）
-  const effectiveEditorId = (a: Asset) => a.editorId || vendorMap.get(a.vendorId)?.editorId || '';
+  const effectiveEditorId = (a: Asset) => getWorkingEditorId(a, vendors) || '';
   const editorName = (id: string) => editors.find(e => e.id === id)?.name || '未指派';
 
   const settledPostIds = new Set(

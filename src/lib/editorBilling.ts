@@ -194,14 +194,54 @@ export function monthLabel(month: string): string {
 }
 
 /**
+ * 這支片**現在該由誰做**。逐支指派優先，沒指派才回退到廠商的預設剪輯師。
+ *
+ * 這段判斷原本有三份各自獨立的實作——這裡、AssetDatabase 的 getEffectiveEditorId()、
+ * ProductionFlowBoard 的 effectiveEditorId()，而且前者多一層 billableEditorId、後兩者沒有，
+ * 導致「畫面上顯示的剪輯師」跟「請款算給誰」可能不同人。
+ * 現在統一成這一支，其他地方一律 import，不要再各寫一份。
+ *
+ * ⚠️ 跟 getBillableEditorId() 是兩個不同的問題，不要混用：
+ *   - 這一支＝「誰要動手剪」，會跟著逐支指派即時變動（工作台、看板、催剪輯清單用）
+ *   - getBillableEditorId()＝「誰領這支的錢」，優先採用上傳當下凍結的值（請款、對帳用）
+ */
+export function getWorkingEditorId(
+  asset: Pick<Asset, 'editorId' | 'vendorId'>,
+  vendors: Vendor[]
+): string | undefined {
+  if (asset.editorId) return asset.editorId;
+  return vendors.find(v => v.id === asset.vendorId)?.editorId;
+}
+
+/**
  * 這支片的請款歸屬。
- * billableEditorId 是上傳當下凍結的值，最準；沒有才退回逐支指派、再退回廠商的預設剪輯師
- *（跟 AssetDatabase.getEffectiveEditorId 同一套 fallback）。
+ * billableEditorId 是上傳當下凍結的值，最準；沒有才回退到「現在該由誰做」。
+ * 凍結的用意是：日後換掉廠商的預設剪輯師，不會把舊片的錢一起搬到新人身上。
  */
 export function getBillableEditorId(asset: Asset, vendors: Vendor[]): string | undefined {
   if (asset.billableEditorId) return asset.billableEditorId;
-  if (asset.editorId) return asset.editorId;
-  return vendors.find(v => v.id === asset.vendorId)?.editorId;
+  return getWorkingEditorId(asset, vendors);
+}
+
+/**
+ * 這支片現在能不能改派剪輯師。
+ *
+ * 抽成純函式而不是把條件寫在 JSX 裡，是因為這組判斷同時要用在「按鈕出不出現」跟
+ * 「真的寫入前」兩個地方（沿用交棒鏈防呆的做法），寫兩份遲早分岔；而且這樣測得到。
+ */
+export function canReassignEditor(
+  asset: Pick<Asset, 'cloudUploadedAt' | 'editorInvoiceId' | 'voidedAt'>,
+  role: string | undefined
+): { ok: boolean; reason?: string; needsConfirm?: boolean } {
+  // 剪輯師不能改自己的歸屬——安全規則也擋（editorId 不在 isEditorAssetUpdate 白名單）
+  if (role === 'editor') return { ok: false, reason: '剪輯師不能改派' };
+  if (asset.voidedAt) return { ok: false, reason: '已作廢的片不用改派' };
+  // 已入單＝帳務凍結。規則層也擋（touchesEditorAssignment + assetInvoiced）
+  if (asset.editorInvoiceId) return { ok: false, reason: '已納入請款單，帳務凍結' };
+  // 已上傳＝剪輯費已經歸屬出去了，這時改派只會讓「誰剪的」跟「誰領錢」打架。
+  // 真的要換人重剪請走作廢重建，不是改派。
+  if (asset.cloudUploadedAt) return { ok: false, reason: '已上傳雲端、剪輯費已歸屬，不能改派' };
+  return { ok: true, needsConfirm: true };
 }
 
 export interface EditorMonthSummary {

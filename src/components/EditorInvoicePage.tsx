@@ -60,7 +60,10 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
   const myEditorId = userProfile?.linkedEditorId;
 
   const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [assets, setAssets] = useState<Asset[]>([]);
+  // 跟工作台一樣兩個來源：我負責的 IP ＋ 逐支指名給我的片。
+  // 少了第二條，幫別的 IP 剪的片會剪了卻請不到款。
+  const [vendorAssets, setVendorAssets] = useState<Asset[]>([]);
+  const [assignedAssets, setAssignedAssets] = useState<Asset[]>([]);
   const [invoices, setInvoices] = useState<EditorInvoice[]>([]);
   const [month, setMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -72,7 +75,7 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
   const [doneInfo, setDoneInfo] = useState<{ month: string; count: number; total: number } | null>(null);
 
   useEffect(() => {
-    if (vendorIds.length === 0) { setVendors([]); setAssets([]); return; }
+    if (vendorIds.length === 0) { setVendors([]); setVendorAssets([]); return; }
     const unsubs = vendorIds.flatMap(vid => [
       onSnapshot(doc(db, 'vendors', vid), snap => {
         setVendors(prev => {
@@ -81,7 +84,7 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
         });
       }),
       onSnapshot(query(collection(db, 'assets'), where('vendorId', '==', vid)), snap => {
-        setAssets(prev => {
+        setVendorAssets(prev => {
           const others = prev.filter(a => a.vendorId !== vid);
           return [...others, ...snap.docs.map(d => ({ id: d.id, ...d.data() } as Asset))];
         });
@@ -103,7 +106,30 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
     return () => unsub();
   }, [myEditorId]);
 
-  const vendorName = (vendorId: string) => vendors.find(v => v.id === vendorId)?.name || '未知 IP';
+  // 逐片指名給我的素材。跟上面那條一樣，where 不能省。
+  useEffect(() => {
+    if (!myEditorId) { setAssignedAssets([]); return; }
+    const unsub = onSnapshot(
+      query(collection(db, 'assets'), where('editorId', '==', myEditorId)),
+      snap => setAssignedAssets(snap.docs.map(d => ({ id: d.id, ...d.data() } as Asset))),
+      err => console.warn('讀取指派給我的素材失敗', err)
+    );
+    return () => unsub();
+  }, [myEditorId]);
+
+  const assets = useMemo(() => {
+    const m = new Map<string, Asset>();
+    for (const a of vendorAssets) m.set(a.id!, a);
+    for (const a of assignedAssets) m.set(a.id!, a);
+    return [...m.values()];
+  }, [vendorAssets, assignedAssets]);
+
+  // 指名給我、但 IP 不在我範圍內的片讀不到 vendor 文件，退回素材上的名稱快照。
+  // 這裡特別重要：請款單上印「未知 IP」會被凍進單子裡，事後改不掉。
+  const vendorName = (vendorId: string) =>
+    vendors.find(v => v.id === vendorId)?.name
+    || assets.find(a => a.vendorId === vendorId && a.vendorName)?.vendorName
+    || '未知 IP';
 
   // 只算掛在我名下的片：素材可逐支覆寫剪輯師，別人的片不該進我的請款單。
   // ⚠️ 刻意**不排除 archived**：業主不用那支片時我們會封存，但剪輯師已經剪完也上傳了，

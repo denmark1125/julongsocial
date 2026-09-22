@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { collection, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import {
@@ -325,7 +325,10 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
   const vendorIdsKey = [...vendorIds].sort().join(',');
 
   const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [assets, setAssets] = useState<Asset[]>([]);
+  // 素材有兩個來源：我負責的 IP（廠商層）、以及逐支指名給我的片（素材層）。
+  // 分開存是因為兩邊的訂閱範圍不同，混在同一個陣列裡會互相覛掉。
+  const [vendorAssets, setVendorAssets] = useState<Asset[]>([]);
+  const [assignedAssets, setAssignedAssets] = useState<Asset[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [vendorFilter, setVendorFilter] = useState<string>('all');
@@ -356,11 +359,11 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
   }, [vendorIdsKey]);
 
   useEffect(() => {
-    if (vendorIds.length === 0) { setAssets([]); return; }
+    if (vendorIds.length === 0) { setVendorAssets([]); return; }
     const unsubs = vendorIds.map(vid => {
       const q = query(collection(db, 'assets'), where('vendorId', '==', vid));
       return onSnapshot(q, (snap) => {
-        setAssets(prev => {
+        setVendorAssets(prev => {
           const others = prev.filter(a => a.vendorId !== vid);
           return [...others, ...snap.docs.map(d => ({ id: d.id, ...d.data() } as Asset))];
         });
@@ -369,6 +372,29 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
     return () => unsubs.forEach(u => u());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vendorIdsKey]);
+
+  // 逐片指名給我的素材。這條查詢自帶 where('editorId','==',我)，每一筆都滿足安全規則的
+  // 「這支片指名給我」條件（firestore.rules 的 assetAssignedToMe），所以不會整條 permission-denied。
+  // ⚠️ 絕對不能改成用 vendorId 查沒被指派的廠商——那會整條 403，不是回空陣列。
+  const myEditorId = userProfile?.linkedEditorId;
+
+  useEffect(() => {
+    if (!myEditorId) { setAssignedAssets([]); return; }
+    const q = query(collection(db, 'assets'), where('editorId', '==', myEditorId));
+    return onSnapshot(q, (snap) => {
+      setAssignedAssets(snap.docs.map(d => ({ id: d.id, ...d.data() } as Asset)));
+    }, (error) => {
+      console.error('讀取指派給我的素材失敗:', error);
+    });
+  }, [myEditorId]);
+
+  // 兩個來源依 id 去重。同一支片兩邊都來時內容一樣，後蓋前無害。
+  const assets = useMemo(() => {
+    const m = new Map<string, Asset>();
+    for (const a of vendorAssets) m.set(a.id!, a);
+    for (const a of assignedAssets) m.set(a.id!, a);
+    return [...m.values()];
+  }, [vendorAssets, assignedAssets]);
 
   useEffect(() => {
     if (vendorIds.length === 0) { setPosts([]); return; }
@@ -385,9 +411,6 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vendorIdsKey]);
 
-  // 廠商層級的指派（assignedVendorIds）是主要範圍，但素材可以逐支覆寫剪輯師（Asset.editorId），
-  // 所以有指定且不是我的就不該出現在我的清單裡。
-  const myEditorId = userProfile?.linkedEditorId;
   const settledPostIds = new Set(
     posts.filter(p => p.status === 'scheduled' || p.status === 'published').map(p => p.id)
   );
@@ -407,7 +430,11 @@ export default function EditorAssetQueue({ userProfile }: { userProfile: UserPro
     !(a.legacySettlementStatus === 'paid' && !a.cloudUploadedAt)
   );
 
-  const vendorName = (vendorId: string) => vendors.find(v => v.id === vendorId)?.name || '未知廠商';
+  // 指名給我、但廠商不在我範圍內的片讀不到 vendor 文件，退回素材上的名稱快照
+  const vendorName = (vendorId: string) =>
+    vendors.find(v => v.id === vendorId)?.name
+    || assets.find(a => a.vendorId === vendorId && a.vendorName)?.vendorName
+    || '未知廠商';
 
   const displayed = myVideos.filter(a => bucketOf(a) !== null);
 

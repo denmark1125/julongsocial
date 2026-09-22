@@ -17,6 +17,7 @@ import { db, auth } from '../firebase';
 import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking, UserProfile, deriveFlowStage } from '../types';
 import { visibleVendors, trackedVendors, buildPostIndex, getDisplayAssetStatus } from '../lib/vendorStatus';
 import { buildFlowUpdate, buildSubmitUndoUpdate, getClientApprovalTarget, isClientApproved } from '../lib/assetFlow';
+import { getWorkingEditorId, canReassignEditor } from '../lib/editorBilling';
 import { 
   Video, 
   Plus, 
@@ -76,6 +77,8 @@ export default function AssetDatabase() {
   const [savingNote, setSavingNote] = useState(false);
   // 強制刪除只開給工程師，所以這頁要知道自己是誰（比照 ShootBookings 的做法）
   const [me, setMe] = useState<UserProfile | null>(null);
+  // 正在改派的那一張卡（null＝都沒在改）
+  const [reassigningId, setReassigningId] = useState<string | null>(null);
   // 按「標記完成」時要選認列月份（預設當月）。所有 IP 一律走同一套，不做特例：
   // 不列入統計的廠商（例如秀姨）選了也不影響數字，因為她本來就不進欠片計算。
   const [completingAsset, setCompletingAsset] = useState<Asset | null>(null);
@@ -239,6 +242,9 @@ export default function AssetDatabase() {
         ...newAsset,
         url: newAsset.url || '',
         category: newAsset.category || '未分類',
+        // IP 名稱快照：被逐支指名到自己沒負責的 IP 的剪輯師讀不到 vendor 文件，
+        // 建檔當下就寫起來，否則他的工作台跟請款單會顯示「未知 IP」。
+        vendorName: vendors.find(v => v.id === newAsset.vendorId)?.name || '',
         status: 'available',
         approved: false,
         createdAt: new Date().toISOString(),
@@ -597,10 +603,41 @@ export default function AssetDatabase() {
 
   const getEditorName = (id?: string) => editors.find(e => e.id === id)?.name || '未指定';
 
-  const getEffectiveEditorId = (asset: Asset) => {
-    if (asset.editorId) return asset.editorId;
-    const vendor = vendors.find(v => v.id === asset.vendorId);
-    return vendor?.editorId;
+  // 誰要動手剪的判斷一律走 editorBilling，不在這裡再寫一份（以前三個地方各寫一份已經分岔過）
+  const getEffectiveEditorId = (asset: Asset) => getWorkingEditorId(asset, vendors);
+
+  const reassignEditor = async (asset: Asset, nextEditorId: string) => {
+    const gate = canReassignEditor(asset, me?.role);
+    // 按鈕出現前已經檢查過一次，這裡再檢查一次：兩處用同一支純函式，不會分岔
+    if (!gate.ok) { toast.error(gate.reason || '這支片現在不能改派'); return; }
+
+    const fromName = getEditorName(getEffectiveEditorId(asset));
+    const toName = nextEditorId ? getEditorName(nextEditorId) : '先不指定';
+    if (fromName === toName) { setReassigningId(null); return; }
+    if (!window.confirm(`把「${asset.title}」從 ${fromName} 改派給 ${toName}？
+
+改派後 ${fromName} 會看不到這支片。`)) return;
+
+    try {
+      const entry = {
+        from: deriveFlowStage(asset), to: deriveFlowStage(asset),
+        at: new Date().toISOString(),
+        byUid: auth.currentUser?.uid || '',
+        byName: me?.displayName || me?.username || '',
+        note: `改派剪輯師：${fromName} → ${toName}`,
+      };
+      await updateDoc(doc(db, 'assets', asset.id!), {
+        editorId: nextEditorId,
+        // 順手補上名稱快照：改派的對象很可能讀不到這家 vendor 的文件
+        vendorName: vendors.find(v => v.id === asset.vendorId)?.name || asset.vendorName || '',
+        flowLog: [...(asset.flowLog ?? []), entry].slice(-20),
+      });
+      toast.success(`已改派給 ${toName}`);
+      setReassigningId(null);
+    } catch (error) {
+      console.error('改派失敗:', error);
+      toast.error('改派失敗，請再試一次');
+    }
   };
 
   const getVendorHabits = (vendorId: string) => {
@@ -973,7 +1010,29 @@ export default function AssetDatabase() {
                     </p>
                     <div className="flex items-center space-x-1 text-[9px] font-bold text-gray-400">
                       <Users size={10} />
-                      <span>{getEditorName(getEffectiveEditorId(asset))}</span>
+                      {reassigningId === asset.id ? (
+                        <select
+                          autoFocus
+                          className="text-[10px] font-bold border border-[#5A5A40]/30 rounded px-1 py-0.5 bg-white"
+                          defaultValue={getEffectiveEditorId(asset) || ''}
+                          onBlur={() => setReassigningId(null)}
+                          onChange={(e) => reassignEditor(asset, e.target.value)}
+                        >
+                          {editors.map(ed => <option key={ed.id} value={ed.id}>{ed.name}</option>)}
+                          <option value="">先不指定</option>
+                        </select>
+                      ) : canReassignEditor(asset, me?.role).ok ? (
+                        <button
+                          type="button"
+                          onClick={() => setReassigningId(asset.id!)}
+                          className="underline decoration-dotted hover:text-[#5A5A40] transition-colors"
+                          title="點一下改派剪輯師"
+                        >
+                          {getEditorName(getEffectiveEditorId(asset))}
+                        </button>
+                      ) : (
+                        <span>{getEditorName(getEffectiveEditorId(asset))}</span>
+                      )}
                     </div>
                   </div>
                   {asset.filmingDate && (
@@ -1195,10 +1254,14 @@ export default function AssetDatabase() {
                   onChange={(e) => {
                     const vendorId = e.target.value;
                     const vendor = vendors.find(v => v.id === vendorId);
+                    // 已經手動指定過別人的話不要覆蓋：原本這裡無條件寫成新廠商的預設剪輯師，
+                    // 「先選人再改 IP」會把剛選的人静静吐掉，而且畫面上看不出來。
+                    const prevDefault = vendors.find(v => v.id === newAsset.vendorId)?.editorId || '';
+                    const hasOverride = !!newAsset.editorId && newAsset.editorId !== prevDefault;
                     setNewAsset({
-                      ...newAsset, 
+                      ...newAsset,
                       vendorId,
-                      editorId: vendor?.editorId || ''
+                      editorId: hasOverride ? newAsset.editorId : (vendor?.editorId || '')
                     });
                   }}
                 >
@@ -1207,12 +1270,41 @@ export default function AssetDatabase() {
                 </select>
               </div>
 
-              {newAsset.editorId && (
-                <div className="px-5 py-2 bg-[#5A5A40]/5 rounded-xl border border-[#5A5A40]/10 flex items-center justify-between">
-                  <span className="text-xs font-bold text-[#5A5A40]">自動帶入剪輯師:</span>
-                  <span className="text-xs font-bold text-[#5A5A40]">{getEditorName(newAsset.editorId)}</span>
-                </div>
-              )}
+              {/* 逐片指派：原本這裡是唯讀的「自動帶入剪輯師: X」。
+                  改成下拉但**預設已經選好這個 IP 的剪輯師**，不動它就跟以前完全一樣，
+                  不會多一道手續；要換人才需要動一下。 */}
+              {newAsset.vendorId && (() => {
+                const defaultEditorId = vendors.find(v => v.id === newAsset.vendorId)?.editorId || '';
+                const isOverride = !!newAsset.editorId && newAsset.editorId !== defaultEditorId;
+                return (
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-gray-600 ml-1">剪輯師</label>
+                    <select
+                      className="w-full px-5 py-3 bg-[#F5F5F0] rounded-2xl border-none focus:ring-2 focus:ring-[#5A5A40]"
+                      value={newAsset.editorId || ''}
+                      onChange={(e) => setNewAsset({ ...newAsset, editorId: e.target.value })}
+                    >
+                      {defaultEditorId && (
+                        <option value={defaultEditorId}>（預設）{getEditorName(defaultEditorId)} · 這個 IP 的剪輯師</option>
+                      )}
+                      {editors.filter(ed => ed.id !== defaultEditorId).map(ed => (
+                        <option key={ed.id} value={ed.id}>{ed.name}</option>
+                      ))}
+                      <option value="">先不指定</option>
+                    </select>
+                    {isOverride && (
+                      <p className="text-xs text-amber-600 font-medium ml-1">
+                        這支交給 {getEditorName(newAsset.editorId)}，不是這個 IP 的預設剪輯師
+                      </p>
+                    )}
+                    {!defaultEditorId && (
+                      <p className="text-xs text-gray-500 ml-1">
+                        這個 IP 沒有預設剪輯師，每支都要自己指定
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div className="space-y-2">
                 <label className="text-sm font-bold text-gray-600 ml-1">分類</label>
