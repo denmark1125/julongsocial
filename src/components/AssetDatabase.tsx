@@ -677,7 +677,7 @@ export default function AssetDatabase() {
               <Clock size={18} />
             </div>
             <div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">待審核</p>
+              <p className="text-[13px] font-bold text-gray-400 uppercase tracking-wider">待審核</p>
               <p className="text-lg font-bold leading-none">{assets.filter(a => !isClientApproved(a) && a.status !== 'archived').length} <span className="text-xs font-normal text-gray-400">件</span></p>
             </div>
           </div>
@@ -686,7 +686,7 @@ export default function AssetDatabase() {
               <Video size={18} />
             </div>
             <div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">可用影片</p>
+              <p className="text-[13px] font-bold text-gray-400 uppercase tracking-wider">可用影片</p>
               <p className="text-lg font-bold leading-none">{videoInventory} <span className="text-xs font-normal text-gray-400">隻</span></p>
             </div>
           </div>
@@ -695,7 +695,7 @@ export default function AssetDatabase() {
               <FileText size={18} />
             </div>
             <div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">可用貼文</p>
+              <p className="text-[13px] font-bold text-gray-400 uppercase tracking-wider">可用貼文</p>
               <p className="text-lg font-bold leading-none">{postInventory} <span className="text-xs font-normal text-gray-400">篇</span></p>
             </div>
           </div>
@@ -704,7 +704,7 @@ export default function AssetDatabase() {
               <Clock size={18} />
             </div>
             <div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">已排程影片</p>
+              <p className="text-[13px] font-bold text-gray-400 uppercase tracking-wider">已排程影片</p>
               <p className="text-lg font-bold leading-none">{scheduledVideoInventory} <span className="text-xs font-normal text-gray-400">隻</span></p>
             </div>
           </div>
@@ -713,7 +713,7 @@ export default function AssetDatabase() {
               <Clock size={18} />
             </div>
             <div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">已排程貼文</p>
+              <p className="text-[13px] font-bold text-gray-400 uppercase tracking-wider">已排程貼文</p>
               <p className="text-lg font-bold leading-none">{scheduledPostInventory} <span className="text-xs font-normal text-gray-400">篇</span></p>
             </div>
           </div>
@@ -799,7 +799,7 @@ export default function AssetDatabase() {
               >
                 <span className="font-bold text-sm">所有廠商</span>
                 <span className={cn(
-                  "text-[10px] px-2 py-0.5 rounded-full font-bold",
+                  "text-[13px] px-2 py-0.5 rounded-full font-bold",
                   filterVendor === 'all' ? "bg-white/20" : "bg-gray-100"
                 )}>
                   {assets.filter(a => a.type === activeTab && effStatus(a) === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length}
@@ -823,7 +823,7 @@ export default function AssetDatabase() {
                     <div className="flex items-center justify-between w-full mb-1">
                       <span className="font-bold text-sm truncate flex-1 mr-2">{vendor.name}</span>
                       <span className={cn(
-                        "text-[10px] px-2 py-0.5 rounded-full font-bold",
+                        "text-[13px] px-2 py-0.5 rounded-full font-bold",
                         filterVendor === vendor.id ? "bg-white/20" : "bg-gray-100",
                         count === 0 && filterVendor !== vendor.id && "text-red-400"
                       )}>
@@ -832,7 +832,7 @@ export default function AssetDatabase() {
                     </div>
                     {pendingCount > 0 && (
                       <span className={cn(
-                        "text-[9px] font-medium opacity-70",
+                        "text-[13px] font-medium opacity-70",
                         filterVendor === vendor.id ? "text-white/80" : "text-amber-600"
                       )}>
                         • {pendingCount} 件待審核
@@ -845,7 +845,7 @@ export default function AssetDatabase() {
           </div>
 
           <div className="bg-amber-50 rounded-2xl p-4 border border-amber-100">
-            <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest mb-2 flex items-center">
+            <p className="text-[13px] font-bold text-amber-700 uppercase tracking-widest mb-2 flex items-center">
               <Clock size={12} className="mr-1" /> 待處理提醒
             </p>
             <p className="text-xs text-amber-800 leading-relaxed">
@@ -984,7 +984,7 @@ export default function AssetDatabase() {
               )}
               <div className="absolute top-4 left-4">
                 <span className={cn(
-                  "px-3 py-1 rounded-full text-[10px] font-bold text-white uppercase tracking-wider",
+                  "px-3 py-1 rounded-full text-[13px] font-bold text-white uppercase tracking-wider",
                   asset.stage === 'raw' ? "bg-[#8B7355]" : effStatus(asset) === 'used' ? "bg-gray-400" : "bg-[#5A5A40]"
                 )}>
                   {asset.stage === 'raw' ? '原始素材' : (asset.category || '未分類')}
@@ -992,7 +992,7 @@ export default function AssetDatabase() {
               </div>
               <div className="absolute top-4 right-4">
                 <span className={cn(
-                  "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                  "px-3 py-1 rounded-full text-[13px] font-bold uppercase tracking-wider",
                   asset.stage === 'raw' ? "bg-[#8B7355]/10 text-[#8B7355] border border-[#8B7355]/20" : 
                   effStatus(asset) === 'available' ? "bg-[#8A8A6A]/10 text-[#8A8A6A] border border-[#8A8A6A]/20" : 
                   "bg-gray-100 text-gray-500 border border-gray-200"
@@ -1005,15 +1005,15 @@ export default function AssetDatabase() {
               <div>
                 <div className="flex justify-between items-start mb-1">
                   <div className="space-y-0.5">
-                    <p className="text-[10px] font-bold text-[#5A5A40] uppercase tracking-widest">
+                    <p className="text-[13px] font-bold text-[#5A5A40] uppercase tracking-widest">
                       {getVendorName(asset.vendorId)}
                     </p>
-                    <div className="flex items-center space-x-1 text-[9px] font-bold text-gray-400">
+                    <div className="flex items-center space-x-1 text-[13px] font-bold text-gray-400">
                       <Users size={10} />
                       {reassigningId === asset.id ? (
                         <select
                           autoFocus
-                          className="text-[10px] font-bold border border-[#5A5A40]/30 rounded px-1 py-0.5 bg-white"
+                          className="text-[13px] font-bold border border-[#5A5A40]/30 rounded px-1 py-0.5 bg-white"
                           defaultValue={getEffectiveEditorId(asset) || ''}
                           onBlur={() => setReassigningId(null)}
                           onChange={(e) => reassignEditor(asset, e.target.value)}
@@ -1036,7 +1036,7 @@ export default function AssetDatabase() {
                     </div>
                   </div>
                   {asset.filmingDate && (
-                    <p className="text-[10px] font-medium text-gray-400">拍攝: {asset.filmingDate}</p>
+                    <p className="text-[13px] font-medium text-gray-400">拍攝: {asset.filmingDate}</p>
                   )}
                 </div>
                 <h4 className={cn(
@@ -1051,8 +1051,8 @@ export default function AssetDatabase() {
                   >
                     <MessageSquareText size={13} className="mt-0.5 shrink-0 text-amber-600" />
                     <span className="min-w-0">
-                      <span className="block text-[11px] leading-relaxed text-amber-900 line-clamp-2">{reviewNotes[asset.id!].text}</span>
-                      <span className="block mt-1 text-[9px] text-amber-600/70">
+                      <span className="block text-[13px] leading-relaxed text-amber-900 line-clamp-2">{reviewNotes[asset.id!].text}</span>
+                      <span className="block mt-1 text-[13px] text-amber-600/70">
                         {reviewNotes[asset.id!].updatedByName}・{new Date(reviewNotes[asset.id!].updatedAt).toLocaleDateString()}
                       </span>
                     </span>
@@ -1072,7 +1072,7 @@ export default function AssetDatabase() {
                     onClick={() => toggleUrgent(asset)}
                     title={asset.isUrgent ? '取消急件' : '標記急件'}
                     className={cn(
-                      "shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1",
+                      "shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[13px] font-bold transition-colors flex items-center space-x-1",
                       asset.isUrgent ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-400 hover:text-red-500"
                     )}
                   >
@@ -1082,7 +1082,7 @@ export default function AssetDatabase() {
                   {asset.stage === 'raw' ? (
                     <button
                       onClick={() => setConvertingAsset(asset)}
-                      className="shrink-0 whitespace-nowrap bg-[#5A5A40] text-white px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-[#4a4a35] transition-colors"
+                      className="shrink-0 whitespace-nowrap bg-[#5A5A40] text-white px-3 py-1 rounded-lg text-[13px] font-bold hover:bg-[#4a4a35] transition-colors"
                     >
                       轉為成片
                     </button>
@@ -1091,7 +1091,7 @@ export default function AssetDatabase() {
                       <button
                         onClick={() => toggleApproval(asset)}
                         className={cn(
-                          "shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[10px] font-bold transition-colors",
+                          "shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[13px] font-bold transition-colors",
                           isClientApproved(asset) ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-400"
                         )}
                       >
@@ -1103,7 +1103,7 @@ export default function AssetDatabase() {
                           onClick={() => openReviewNote(asset)}
                           title="記錄尚未審片的原因"
                           className={cn(
-                            "shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1",
+                            "shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[13px] font-bold transition-colors flex items-center space-x-1",
                             reviewNotes[asset.id!] ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-400 hover:text-gray-600"
                           )}
                         >
@@ -1114,7 +1114,7 @@ export default function AssetDatabase() {
                         <button
                           onClick={() => undoConvert(asset)}
                           title="退回待剪"
-                          className="shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1 bg-gray-100 text-gray-400 hover:bg-gray-200 hover:text-gray-600"
+                          className="shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[13px] font-bold transition-colors flex items-center space-x-1 bg-gray-100 text-gray-400 hover:bg-gray-200 hover:text-gray-600"
                         >
                           <RotateCcw size={12} /> <span>退回</span>
                         </button>
@@ -1129,7 +1129,7 @@ export default function AssetDatabase() {
                       onClick={() => toggleManualComplete(asset)}
                       title={effStatus(asset) === 'used' ? '取消完成，解鎖回可使用' : '標記完成（不排日期直接視為已使用）'}
                       className={cn(
-                        "shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[10px] font-bold transition-colors flex items-center space-x-1",
+                        "shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[13px] font-bold transition-colors flex items-center space-x-1",
                         effStatus(asset) === 'used' ? "bg-gray-200 text-gray-500" : "bg-[#5A5A40]/10 text-[#5A5A40]"
                       )}
                     >
@@ -1147,7 +1147,7 @@ export default function AssetDatabase() {
                         ? `計入 ${asset.recognizedMonth.replace('-', '/')} 的已交。點一下可以改月份。`
                         : '這支片沒有認列月份，等於不算進任何一個月的已交。點一下補上。'}
                       className={cn(
-                        "shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[10px] font-bold transition-colors",
+                        "shrink-0 whitespace-nowrap px-3 py-1 rounded-lg text-[13px] font-bold transition-colors",
                         asset.recognizedMonth
                           ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
                           : "bg-amber-100 text-amber-700 hover:bg-amber-200"
@@ -1156,9 +1156,9 @@ export default function AssetDatabase() {
                       {asset.recognizedMonth ? `已交・${Number(asset.recognizedMonth.slice(5))}月` : '未認列月份'}
                     </button>
                   )}
-                  <span className="shrink-0 whitespace-nowrap text-[10px] text-gray-400">{new Date(asset.createdAt).toLocaleDateString()}</span>
+                  <span className="shrink-0 whitespace-nowrap text-[13px] text-gray-400">{new Date(asset.createdAt).toLocaleDateString()}</span>
                   {asset.voidedAt && (
-                    <span className="text-[10px] font-bold text-red-500">已作廢{asset.voidReason ? `・${asset.voidReason}` : ''}</span>
+                    <span className="text-[13px] font-bold text-red-500">已作廢{asset.voidReason ? `・${asset.voidReason}` : ''}</span>
                   )}
                 </div>
                 <div className="flex items-center space-x-2">
@@ -1376,7 +1376,7 @@ export default function AssetDatabase() {
                 onChange={e => setCompleteMonth(e.target.value)}
                 className="w-full px-5 py-3 bg-[#F5F5F0] rounded-2xl border-none focus:ring-2 focus:ring-[#5A5A40]"
               />
-              <p className="text-[11px] text-gray-400 ml-1">
+              <p className="text-[13px] text-gray-400 ml-1">
                 預設當月。這支片會計入該月的「已交」，同時從庫存扣除，兩者互相抵銷，欠片不會因為按完成而變多。
               </p>
             </div>
@@ -1455,10 +1455,10 @@ export default function AssetDatabase() {
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end border-b border-black/5 pb-6 gap-4">
                   <div>
                     <h1 className="text-xl md:text-2xl font-black serif text-[#1a1a1a] mb-1">聚浪 Julong Agency</h1>
-                    <p className="text-gray-500 font-bold tracking-widest uppercase text-[10px] md:text-xs">素材庫存即時報表</p>
+                    <p className="text-gray-500 font-bold tracking-widest uppercase text-[13px] md:text-xs">素材庫存即時報表</p>
                   </div>
                   <div className="text-left sm:text-right">
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">導出日期</p>
+                    <p className="text-[13px] font-bold text-gray-400 uppercase tracking-widest">導出日期</p>
                     <p className="text-sm md:text-base font-bold serif flex items-center sm:justify-end">
                       <Calendar size={14} className="mr-2 text-[#5A5A40]" />
                       {new Date().toLocaleDateString()}
@@ -1472,8 +1472,8 @@ export default function AssetDatabase() {
                       <Video size={14} className="md:w-[18px] md:h-[18px]" />
                     </div>
                     <div>
-                      <p className="text-[8px] md:text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-0.5">總可用影片</p>
-                      <p className="text-base md:text-2xl font-black text-blue-900 leading-none">{videoInventory} <span className="text-[10px] font-normal opacity-40">隻</span></p>
+                      <p className="text-[13px] font-bold text-blue-400 uppercase tracking-widest mb-0.5">總可用影片</p>
+                      <p className="text-base md:text-2xl font-black text-blue-900 leading-none">{videoInventory} <span className="text-[13px] font-normal opacity-40">隻</span></p>
                     </div>
                   </div>
                   <div className="bg-purple-50/50 p-2.5 md:p-4 rounded-2xl md:rounded-3xl border border-purple-100 flex flex-col justify-between min-h-[70px] md:min-h-[100px] shadow-sm">
@@ -1481,8 +1481,8 @@ export default function AssetDatabase() {
                       <FileText size={14} className="md:w-[18px] md:h-[18px]" />
                     </div>
                     <div>
-                      <p className="text-[8px] md:text-[10px] font-bold text-purple-400 uppercase tracking-widest mb-0.5">總可用貼文</p>
-                      <p className="text-base md:text-2xl font-black text-purple-900 leading-none">{postInventory} <span className="text-[10px] font-normal opacity-40">篇</span></p>
+                      <p className="text-[13px] font-bold text-purple-400 uppercase tracking-widest mb-0.5">總可用貼文</p>
+                      <p className="text-base md:text-2xl font-black text-purple-900 leading-none">{postInventory} <span className="text-[13px] font-normal opacity-40">篇</span></p>
                     </div>
                   </div>
                   <div className="bg-orange-50/50 p-2.5 md:p-4 rounded-2xl md:rounded-3xl border border-orange-100 flex flex-col justify-between min-h-[70px] md:min-h-[100px] shadow-sm">
@@ -1490,8 +1490,8 @@ export default function AssetDatabase() {
                       <Clock size={14} className="md:w-[18px] md:h-[18px]" />
                     </div>
                     <div>
-                      <p className="text-[8px] md:text-[10px] font-bold text-orange-400 uppercase tracking-widest mb-0.5">總排程影片</p>
-                      <p className="text-base md:text-2xl font-black text-orange-900 leading-none">{scheduledVideoInventory} <span className="text-[10px] font-normal opacity-40">隻</span></p>
+                      <p className="text-[13px] font-bold text-orange-400 uppercase tracking-widest mb-0.5">總排程影片</p>
+                      <p className="text-base md:text-2xl font-black text-orange-900 leading-none">{scheduledVideoInventory} <span className="text-[13px] font-normal opacity-40">隻</span></p>
                     </div>
                   </div>
                   <div className="bg-amber-50/50 p-2.5 md:p-4 rounded-2xl md:rounded-3xl border border-amber-100 flex flex-col justify-between min-h-[70px] md:min-h-[100px] shadow-sm">
@@ -1499,22 +1499,22 @@ export default function AssetDatabase() {
                       <Clock size={14} className="md:w-[18px] md:h-[18px]" />
                     </div>
                     <div>
-                      <p className="text-[8px] md:text-[10px] font-bold text-amber-400 uppercase tracking-widest mb-0.5">總排程貼文</p>
-                      <p className="text-base md:text-2xl font-black text-amber-900 leading-none">{scheduledPostInventory} <span className="text-[10px] font-normal opacity-40">篇</span></p>
+                      <p className="text-[13px] font-bold text-amber-400 uppercase tracking-widest mb-0.5">總排程貼文</p>
+                      <p className="text-base md:text-2xl font-black text-amber-900 leading-none">{scheduledPostInventory} <span className="text-[13px] font-normal opacity-40">篇</span></p>
                     </div>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">詳細庫存清單</p>
-                  <p className="text-[9px] text-[#5A5A40] font-medium md:hidden flex items-center">
+                  <p className="text-[13px] font-bold text-gray-400 uppercase tracking-widest">詳細庫存清單</p>
+                  <p className="text-[13px] text-[#5A5A40] font-medium md:hidden flex items-center">
                     <ArrowLeftRight size={10} className="mr-1" /> 左右滑動查看
                   </p>
                 </div>
 
                 <div className="overflow-x-auto no-scrollbar -mx-4 px-4">
                   <div className="min-w-[550px] md:min-w-[750px] space-y-2">
-                    <div className="grid grid-cols-12 gap-2 px-4 py-2 text-[9px] md:text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-black/5">
+                    <div className="grid grid-cols-12 gap-2 px-4 py-2 text-[13px] font-bold text-gray-400 uppercase tracking-widest border-b border-black/5">
                       <div className="col-span-3">廠商名稱 (IP)</div>
                       <div className="col-span-2 text-center">可用影片</div>
                       <div className="col-span-2 text-center">可用貼文</div>
@@ -1524,47 +1524,47 @@ export default function AssetDatabase() {
                     </div>
                     {vendorStocks.map((stock, idx) => (
                       <div key={idx} className="grid grid-cols-12 gap-2 items-center px-4 py-3 md:py-4 bg-[#F5F5F0]/50 rounded-2xl border border-black/5 hover:bg-[#F5F5F0] transition-colors">
-                        <div className="col-span-3 font-bold text-gray-800 truncate pr-2 text-[11px] md:text-sm">{stock.name}</div>
+                        <div className="col-span-3 font-bold text-gray-800 truncate pr-2 text-[13px] md:text-sm">{stock.name}</div>
                         <div className="col-span-2 text-center">
                           {stock.hasVideos ? (
                             <span className={cn(
-                              "inline-block min-w-[20px] md:min-w-[24px] px-1.5 md:px-2 py-0.5 md:py-1 rounded-full text-[9px] md:text-[11px] font-bold",
+                              "inline-block min-w-[20px] md:min-w-[24px] px-1.5 md:px-2 py-0.5 md:py-1 rounded-full text-[13px] font-bold",
                               stock.videos < 2 ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"
                             )}>
                               {stock.videos}
                             </span>
                           ) : (
-                            <span className="text-gray-300 text-[9px]">-</span>
+                            <span className="text-gray-300 text-[13px]">-</span>
                           )}
                         </div>
                         <div className="col-span-2 text-center">
                           {stock.hasPosts ? (
-                            <span className="inline-block min-w-[20px] md:min-w-[24px] px-1.5 md:px-2 py-0.5 md:py-1 rounded-full bg-purple-100 text-purple-700 text-[9px] md:text-[11px] font-bold">
+                            <span className="inline-block min-w-[20px] md:min-w-[24px] px-1.5 md:px-2 py-0.5 md:py-1 rounded-full bg-purple-100 text-purple-700 text-[13px] font-bold">
                               {stock.posts}
                             </span>
                           ) : (
-                            <span className="text-gray-300 text-[9px]">-</span>
+                            <span className="text-gray-300 text-[13px]">-</span>
                           )}
                         </div>
                         <div className="col-span-2 text-center">
                           {stock.hasVideos ? (
-                            <span className="inline-block min-w-[20px] md:min-w-[24px] px-1.5 md:px-2 py-0.5 md:py-1 rounded-full bg-orange-100 text-orange-700 text-[9px] md:text-[11px] font-bold">
+                            <span className="inline-block min-w-[20px] md:min-w-[24px] px-1.5 md:px-2 py-0.5 md:py-1 rounded-full bg-orange-100 text-orange-700 text-[13px] font-bold">
                               {stock.scheduledVideos}
                             </span>
                           ) : (
-                            <span className="text-gray-300 text-[9px]">-</span>
+                            <span className="text-gray-300 text-[13px]">-</span>
                           )}
                         </div>
                         <div className="col-span-2 text-center">
                           {stock.hasPosts ? (
-                            <span className="inline-block min-w-[20px] md:min-w-[24px] px-1.5 md:px-2 py-0.5 md:py-1 rounded-full bg-amber-100 text-amber-700 text-[9px] md:text-[11px] font-bold">
+                            <span className="inline-block min-w-[20px] md:min-w-[24px] px-1.5 md:px-2 py-0.5 md:py-1 rounded-full bg-amber-100 text-amber-700 text-[13px] font-bold">
                               {stock.scheduledPosts}
                             </span>
                           ) : (
-                            <span className="text-gray-300 text-[9px]">-</span>
+                            <span className="text-gray-300 text-[13px]">-</span>
                           )}
                         </div>
-                        <div className="col-span-1 text-right font-black text-gray-900 text-[11px] md:text-sm">
+                        <div className="col-span-1 text-right font-black text-gray-900 text-[13px] md:text-sm">
                           {stock.videos + stock.posts + stock.scheduledVideos + stock.scheduledPosts}
                         </div>
                       </div>
@@ -1573,7 +1573,7 @@ export default function AssetDatabase() {
                 </div>
 
                 <div className="pt-6 border-t border-black/5 text-center">
-                  <p className="text-[10px] text-gray-400 italic">此報表由 Julong 社群排程系統自動生成</p>
+                  <p className="text-[13px] text-gray-400 italic">此報表由 Julong 社群排程系統自動生成</p>
                 </div>
               </div>
             </div>
@@ -1614,7 +1614,7 @@ export default function AssetDatabase() {
                 </div>
                 <div>
                   <h3 className="text-lg md:text-xl font-bold serif text-[#5A5A40]">導出剪輯師工作紀錄表</h3>
-                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">僅包含待剪輯原始素材</p>
+                  <p className="text-[13px] text-gray-400 font-bold uppercase tracking-widest">僅包含待剪輯原始素材</p>
                 </div>
               </div>
               <button onClick={() => setIsTaskListOpen(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
@@ -1726,7 +1726,7 @@ export default function AssetDatabase() {
 
                   <div className="flex justify-between items-end border-b border-gray-100 pb-4">
                     <div className="space-y-1">
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                      <p className="text-[13px] font-bold text-gray-400 uppercase tracking-widest">
                         {exportMode === 'editor' ? '剪輯師' : '廠商名稱 (IP)'}
                       </p>
                       <p className="text-xl font-bold text-[#5A5A40] serif">
@@ -1734,7 +1734,7 @@ export default function AssetDatabase() {
                       </p>
                     </div>
                     <div className="text-right space-y-1">
-                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">導出日期</p>
+                      <p className="text-[13px] font-bold text-gray-400 uppercase tracking-widest">導出日期</p>
                       <p className="text-sm font-bold flex items-center justify-end">
                         <Calendar size={14} className="mr-2 text-[#5A5A40]" />
                         {new Date().toLocaleDateString()}
@@ -1835,7 +1835,7 @@ export default function AssetDatabase() {
                       <div className="w-8 h-8 bg-[#5A5A40] rounded-lg"></div>
                       <span className="text-xs font-black tracking-widest">JULONG AGENCY</span>
                     </div>
-                    <p className="text-[10px] font-bold">INTERNAL WORK RECORD ONLY</p>
+                    <p className="text-[13px] font-bold">INTERNAL WORK RECORD ONLY</p>
                   </div>
                 </div>
               ) : (
@@ -1857,7 +1857,7 @@ export default function AssetDatabase() {
           <div className="w-full max-w-lg rounded-[28px] bg-white p-6 shadow-2xl" onMouseDown={event => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-amber-600">內部審片備註</p>
+                <p className="text-[13px] font-bold uppercase tracking-widest text-amber-600">內部審片備註</p>
                 <h3 className="mt-1 text-lg font-bold text-[#5A5A40]">{noteAsset.title}</h3>
               </div>
               <button type="button" onClick={() => setNoteAsset(null)} disabled={savingNote} className="text-gray-300 hover:text-gray-500"><X size={20} /></button>
@@ -1872,7 +1872,7 @@ export default function AssetDatabase() {
               className="mt-3 w-full resize-none rounded-2xl border border-black/10 bg-[#F5F5F0]/60 p-4 text-sm leading-relaxed outline-none focus:border-[#5A5A40]/40"
             />
             <div className="mt-4 flex items-center justify-between gap-3">
-              <p className="text-[10px] text-gray-400">清空內容並儲存，即可刪除這則備註。</p>
+              <p className="text-[13px] text-gray-400">清空內容並儲存，即可刪除這則備註。</p>
               <div className="flex gap-2">
                 <button type="button" onClick={() => setNoteAsset(null)} disabled={savingNote} className="px-4 py-2 rounded-xl text-xs font-bold text-gray-500 hover:bg-gray-50">取消</button>
                 <button type="button" onClick={saveReviewNote} disabled={savingNote} className="px-5 py-2 rounded-xl bg-[#5A5A40] text-xs font-bold text-white disabled:opacity-50">{savingNote ? '儲存中…' : '儲存備註'}</button>

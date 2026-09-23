@@ -714,7 +714,7 @@ export default function VendorManagement() {
               {vendor.cooperationItems && vendor.cooperationItems.length > 0 && (
                 <div className="flex flex-wrap gap-1 mb-2">
                   {vendor.cooperationItems.map(item => (
-                    <span key={item} className="bg-[#5A5A40]/10 text-[#5A5A40] text-[10px] px-2 py-0.5 rounded-full font-bold border border-[#5A5A40]/20">
+                    <span key={item} className="bg-[#5A5A40]/10 text-[#5A5A40] text-[13px] px-2 py-0.5 rounded-full font-bold border border-[#5A5A40]/20">
                       {item === 'short_video' ? '短影音' : '圖文'}
                     </span>
                   ))}
@@ -724,12 +724,12 @@ export default function VendorManagement() {
               {/* 顯示「這個月」實際生效的合約片數，不是單一欄位——合約中途改過片數時兩者會不一樣 */}
               <div className="flex gap-4 mb-2">
                 <div className="bg-blue-50 p-2 rounded-xl flex-1 border border-blue-100">
-                  <div className="text-[10px] text-blue-400 font-bold uppercase tracking-wider">圖文目標</div>
-                  <div className="text-sm font-bold text-blue-700">{getContractTargets(vendor, currentMonth).posts} <span className="text-[10px] font-normal">/ 月</span></div>
+                  <div className="text-[13px] text-blue-400 font-bold uppercase tracking-wider">圖文目標</div>
+                  <div className="text-sm font-bold text-blue-700">{getContractTargets(vendor, currentMonth).posts} <span className="text-[13px] font-normal">/ 月</span></div>
                 </div>
                 <div className="bg-orange-50 p-2 rounded-xl flex-1 border border-orange-100">
-                  <div className="text-[10px] text-orange-400 font-bold uppercase tracking-wider">影音目標</div>
-                  <div className="text-sm font-bold text-orange-700">{getContractTargets(vendor, currentMonth).videos} <span className="text-[10px] font-normal">/ 月</span></div>
+                  <div className="text-[13px] text-orange-400 font-bold uppercase tracking-wider">影音目標</div>
+                  <div className="text-sm font-bold text-orange-700">{getContractTargets(vendor, currentMonth).videos} <span className="text-[13px] font-normal">/ 月</span></div>
                 </div>
               </div>
               {(() => {
@@ -755,7 +755,7 @@ export default function VendorManagement() {
                 return (
                   <div key={idx} className="flex items-center justify-between p-3 bg-[#F5F5F0] rounded-xl text-sm">
                     <div className="flex items-center">
-                      <span className="bg-[#5A5A40] text-white text-[10px] px-2 py-0.5 rounded-full mr-2 font-bold">{acc.platform}</span>
+                      <span className="bg-[#5A5A40] text-white text-[13px] px-2 py-0.5 rounded-full mr-2 font-bold">{acc.platform}</span>
                       <span className="font-medium">{acc.username}</span>
                     </div>
                     <div className="flex items-center space-x-2">
@@ -785,10 +785,10 @@ export default function VendorManagement() {
                       </div>
                       <div className="flex flex-wrap gap-1 mt-1">
                         {habit.contentTypes.map(t => (
-                          <span key={t} className="bg-orange-200 text-orange-900 px-1.5 py-0.5 rounded text-[10px]">{t === 'post' ? '貼文' : '短影音'}</span>
+                          <span key={t} className="bg-orange-200 text-orange-900 px-1.5 py-0.5 rounded text-[13px]">{t === 'post' ? '貼文' : '短影音'}</span>
                         ))}
                         {habit.platforms.map(p => (
-                          <span key={p} className="bg-white/50 text-orange-700 px-1.5 py-0.5 rounded text-[10px] border border-orange-200">{p}</span>
+                          <span key={p} className="bg-white/50 text-orange-700 px-1.5 py-0.5 rounded text-[13px] border border-orange-200">{p}</span>
                         ))}
                       </div>
                     </div>
@@ -951,7 +951,7 @@ export default function VendorManagement() {
                     漏點的後果是貼文詳情那張「逐平台標記已發布」的清單跟著錯，她得回頭改。 */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">預設發布平台</label>
-                  <p className="text-[11px] text-gray-400 mb-3">
+                  <p className="text-[13px] text-gray-400 mb-3">
                     新增貼文時自動帶入這裡設定的平台，小編仍可逐篇增減。改這裡不會動到已經建好的貼文。
                   </p>
                   <div className="space-y-3">
@@ -966,9 +966,9 @@ export default function VendorManagement() {
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-xs font-bold text-gray-600">{label}</span>
                             {selected.length === 0 ? (
-                              <span className="text-[10px] text-gray-400">未設定＝小編自己點</span>
+                              <span className="text-[13px] text-gray-400">未設定＝小編自己點</span>
                             ) : !formDataHasExplicit(kind) ? (
-                              <span className="text-[10px] text-gray-400">沿用下方「發布習慣」的設定，存檔後就以這裡為準</span>
+                              <span className="text-[13px] text-gray-400">沿用下方「發布習慣」的設定，存檔後就以這裡為準</span>
                             ) : null}
                           </div>
                           <div className="flex flex-wrap gap-2">
@@ -1043,7 +1043,7 @@ export default function VendorManagement() {
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-bold text-gray-700">合約片數變更紀錄</span>
                     {targetsChangedInForm && (
-                      <span className="text-[11px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 shrink-0 whitespace-nowrap">
+                      <span className="text-[13px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 shrink-0 whitespace-nowrap">
                         片數已改動
                       </span>
                     )}
@@ -1149,7 +1149,7 @@ export default function VendorManagement() {
                       <div className="grid grid-cols-4 gap-2">
                         {formData.weeklyPattern.map((val, i) => (
                           <div key={i}>
-                            <label className="block text-[10px] text-amber-600/70 mb-1">
+                            <label className="block text-[13px] text-amber-600/70 mb-1">
                               {i < 3 ? `第${i + 1}週` : '最後一週'}
                             </label>
                             <input
@@ -1166,7 +1166,7 @@ export default function VendorManagement() {
                           </div>
                         ))}
                       </div>
-                      <p className="text-[10px] text-amber-600/70 mt-2">
+                      <p className="text-[13px] text-amber-600/70 mt-2">
                         4週加總：{formData.weeklyPattern.reduce((a, b) => a + b, 0)} 支
                         {formData.weeklyPattern.reduce((a, b) => a + b, 0) !== (formData.monthlyTargetVideos || 0)
                           ? `（跟上面月目標 ${formData.monthlyTargetVideos || 0} 支對不上，記得回頭調整月目標）`
@@ -1580,7 +1580,7 @@ export default function VendorManagement() {
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-[#5A5A40]">{ed.name}</span>
                       {ed.linkedUserUid && (
-                        <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-[9px] font-bold border border-green-200">
+                        <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-[13px] font-bold border border-green-200">
                           已有登入帳號
                         </span>
                       )}

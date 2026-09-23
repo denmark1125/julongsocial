@@ -266,20 +266,20 @@ export default function ShootBookings() {
         <div className="space-y-1">
           <h2 className="text-2xl font-bold serif text-[#5A5A40]">製作進度</h2>
           <p className="text-sm text-gray-500">從「還要再拍幾支」一路看到「這支片現在卡在誰手上」，同一條產線</p>
-          <p className="text-[11px] text-gray-400">拍完只要照平常習慣把素材上傳到「素材資料庫」，這裡的預約會自動標記完成，不用多跑一步</p>
+          <p className="text-[13px] text-gray-400">拍完只要照平常習慣把素材上傳到「素材資料庫」，這裡的預約會自動標記完成，不用多跑一步</p>
         </div>
         <div className="flex gap-4">
           <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm flex items-center space-x-3">
             <div className="bg-red-50 p-2 rounded-lg text-red-600"><AlertTriangle size={18} /></div>
             <div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">全部 IP 合計還要再拍</p>
+              <p className="text-[13px] font-bold text-gray-400 uppercase tracking-wider">全部 IP 合計還要再拍</p>
               <p className="text-lg font-bold leading-none">{totalOwed} <span className="text-xs font-normal text-gray-400">支</span></p>
             </div>
           </div>
           <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm flex items-center space-x-3">
             <div className="bg-red-50 p-2 rounded-lg text-red-600"><Film size={18} /></div>
             <div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">需處理</p>
+              <p className="text-[13px] font-bold text-gray-400 uppercase tracking-wider">需處理</p>
               <p className="text-lg font-bold leading-none">{urgentCount} <span className="text-xs font-normal text-gray-400">個 IP</span></p>
             </div>
           </div>
@@ -300,26 +300,26 @@ export default function ShootBookings() {
                       {row.vendor.name}
                       {row.frozenThisMonth && (
                         row.isEnded ? (
-                          <span className="text-[10px] font-bold text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded-full border border-gray-200">
+                          <span className="text-[13px] font-bold text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded-full border border-gray-200">
                             已終止{row.vendor.endedAt ? ` ${row.vendor.endedAt.slice(5).replace('-', '/')}` : ''}
                           </span>
                         ) : (
-                          <span className="text-[10px] font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded-full border border-cyan-100">冷凍中</span>
+                          <span className="text-[13px] font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded-full border border-cyan-100">冷凍中</span>
                         )
                       )}
                     </h3>
-                    <p className="text-[11px] text-gray-400 mt-0.5">
+                    <p className="text-[13px] text-gray-400 mt-0.5">
                       {row.frozenThisMonth
                         ? `本月${row.isEnded ? '已終止合作' : '冷凍中'}，不再累計新目標・本月已交 ${row.delivered} 支（直接沖銷欠片）・庫存 ${row.stock}`
                         : `本月 ${row.delivered}/${row.target} 支・庫存 ${row.stock}`}
                     </p>
                   </div>
                   {/* shrink-0 + nowrap 缺一不可：左邊那段說明文字一長，flex 就會把這顆 chip 壓扁成「落後待／補」兩行 */}
-                  <span className={cn('shrink-0 whitespace-nowrap px-3 py-1 rounded-full text-[10px] font-bold', s.chip)}>{s.label}</span>
+                  <span className={cn('shrink-0 whitespace-nowrap px-3 py-1 rounded-full text-[13px] font-bold', s.chip)}>{s.label}</span>
                 </div>
 
                 <div>
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">此時此刻還要再拍</p>
+                  <p className="text-[13px] font-bold text-gray-400 uppercase tracking-widest">此時此刻還要再拍</p>
                   <p className="text-4xl font-bold leading-none mt-1">
                     {row.owed} <span className="text-sm font-normal text-gray-400">支 Reels</span>
                   </p>
@@ -375,7 +375,7 @@ export default function ShootBookings() {
                   {/* 使用者最常問「沒填當月欠片，系統會不會自己依上片狀態算」：會，但只從錨點月起算，更早的一律不回頭補算。
                       沒有任何回填紀錄時錨點就是當月，等於歷史全部當 0，這點一定要講白，不然數字會被誤以為含歷史。 */}
                   {openBreakdownId === row.vendor.id && (
-                    <p className="text-[10px] text-gray-300 mt-0.5">
+                    <p className="text-[13px] text-gray-300 mt-0.5">
                       {row.breakdown.autoTrackedFrom.replace('-', '/')} 起依貼文管理的已發布／已排程自動累加；
                       {(row.vendor.deficitEntries?.length || row.vendor.manualDeficitUpdatedAt)
                         ? '更早的月份以手動回填紀錄為準'
@@ -384,14 +384,14 @@ export default function ShootBookings() {
                   )}
                   {/* gapMonths 是「有月份沒回填、數字可能不準」的警告，不能藏在收合裡 */}
                   {row.breakdown.gapMonths.length > 0 && (
-                    <p className="text-[10px] text-amber-600 mt-1">
+                    <p className="text-[13px] text-amber-600 mt-1">
                       ⚠ {row.breakdown.gapMonths.join('、')} 尚未回填，暫不計入合計
                     </p>
                   )}
                   {me && (me.role === 'engineer' || me.canEditDeficitBaseline) && (
                     <button
                       onClick={() => openDeficitModal(row.vendor)}
-                      className="flex items-center gap-1 mt-2 text-[11px] font-bold text-gray-400 hover:text-[#5A5A40]"
+                      className="flex items-center gap-1 mt-2 text-[13px] font-bold text-gray-400 hover:text-[#5A5A40]"
                     >
                       <Pencil size={11} />校正起始欠片
                     </button>
@@ -424,7 +424,7 @@ export default function ShootBookings() {
                   <div className={cn('grid gap-2', row.active ? 'grid-cols-2' : 'grid-cols-1')}>
                     {!row.active && (
                       <button onClick={() => setOpenPanel({ vendorId: row.vendor.id, type: 'book' })}
-                        className="border border-black/10 rounded-lg py-2 text-[11px] font-bold hover:border-[#5A5A40] hover:text-[#5A5A40] transition-colors">
+                        className="border border-black/10 rounded-lg py-2 text-[13px] font-bold hover:border-[#5A5A40] hover:text-[#5A5A40] transition-colors">
                         約時間
                       </button>
                     )}
@@ -432,11 +432,11 @@ export default function ShootBookings() {
                       <>
                         <button onClick={() => setOpenPanel({ vendorId: row.vendor.id, type: 'done' })}
                           title="正常不用按這顆——去素材資料庫上傳這次拍的素材，系統會自動核銷預約。這顆只是備用，用在忘記上素材庫或要手動補登的狀況"
-                          className="border border-black/10 rounded-lg py-2 text-[11px] font-bold hover:border-[#5A5A40] hover:text-[#5A5A40] transition-colors">
+                          className="border border-black/10 rounded-lg py-2 text-[13px] font-bold hover:border-[#5A5A40] hover:text-[#5A5A40] transition-colors">
                           拍完了
                         </button>
                         <button onClick={() => setOpenPanel({ vendorId: row.vendor.id, type: 'delay' })}
-                          className="border border-black/10 rounded-lg py-2 text-[11px] font-bold hover:border-red-400 hover:text-red-500 transition-colors">
+                          className="border border-black/10 rounded-lg py-2 text-[13px] font-bold hover:border-red-400 hover:text-red-500 transition-colors">
                           延期/取消
                         </button>
                       </>
@@ -479,7 +479,7 @@ export default function ShootBookings() {
                       <button onClick={() => chooseReason('client')} className="flex-1 py-2 text-xs font-bold border border-black/10 rounded-lg hover:border-[#5A5A40]">客戶因素</button>
                       <button onClick={() => chooseReason('internal')} className="flex-1 py-2 text-xs font-bold border border-black/10 rounded-lg hover:border-[#5A5A40]">我方因素</button>
                     </div>
-                    <button onClick={closePanel} className="w-full py-1 text-[11px] text-gray-400">取消操作</button>
+                    <button onClick={closePanel} className="w-full py-1 text-[13px] text-gray-400">取消操作</button>
                   </div>
                 )}
 
@@ -490,7 +490,7 @@ export default function ShootBookings() {
                     <button onClick={() => confirmReschedule(row)} className="w-full py-2 text-xs font-bold bg-[#5A5A40] text-white rounded-lg flex items-center justify-center gap-1">
                       <CalendarClock size={14} />重新約日期
                     </button>
-                    <button onClick={() => confirmCancel(row)} className="w-full py-1 text-[11px] text-gray-400 underline">或先不約，取消這次</button>
+                    <button onClick={() => confirmCancel(row)} className="w-full py-1 text-[13px] text-gray-400 underline">或先不約，取消這次</button>
                   </div>
                 )}
               </div>
@@ -512,7 +512,7 @@ export default function ShootBookings() {
       <div className="bg-white rounded-[32px] border border-black/5 shadow-sm p-6 space-y-4">
         <div>
           <h3 className="text-lg font-bold text-[#5A5A40]">本月歷史紀錄</h3>
-          <p className="text-[11px] text-gray-400 mt-0.5">每筆預約完成／延期／取消都會留下時間戳記，不會憑空消失</p>
+          <p className="text-[13px] text-gray-400 mt-0.5">每筆預約完成／延期／取消都會留下時間戳記，不會憑空消失</p>
         </div>
         <div className="space-y-2">
           {history.map(b => {
@@ -641,7 +641,7 @@ export default function ShootBookings() {
                                 <span className="ml-2 text-green-600">沖銷 {Math.abs(e.owed)} 支</span>
                               )}
                             </div>
-                            <div className={cn('text-[11px] mt-0.5', diverges ? 'text-amber-600' : 'text-gray-400')}>
+                            <div className={cn('text-[13px] mt-0.5', diverges ? 'text-amber-600' : 'text-gray-400')}>
                               {diverges ? '⚠ ' : ''}系統實算 {sysShortfall} 支（目標 {sysTarget} − 已交 {sysDelivered}）
                               {diverges ? '，以上面手填的為準' : ''}
                             </div>

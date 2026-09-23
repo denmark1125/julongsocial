@@ -532,7 +532,7 @@ export default function BillingManagement() {
                       <tr key={record.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-6 py-4">
                           <p className="font-bold text-sm">{vendor?.name}</p>
-                          <p className="text-[10px] text-gray-400">{record.billingMonth} 帳款</p>
+                          <p className="text-[13px] text-gray-400">{record.billingMonth} 帳款</p>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center text-xs text-gray-600">
@@ -545,7 +545,7 @@ export default function BillingManagement() {
                         </td>
                         <td className="px-6 py-4">
                           <span className={cn(
-                            "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                            "px-2.5 py-1 rounded-full text-[13px] font-bold uppercase tracking-wider",
                             record.status === 'paid' ? "bg-[#8A8A6A]/10 text-[#8A8A6A]" :
                             record.status === 'overdue' ? "bg-[#A67C52]/10 text-[#A67C52]" : "bg-[#8B7355]/10 text-[#8B7355]"
                           )}>
@@ -557,7 +557,7 @@ export default function BillingManagement() {
                             <button 
                               onClick={() => togglePaymentStatus(record)}
                               className={cn(
-                                "px-3 py-1 rounded-lg text-[10px] font-bold transition-all border",
+                                "px-3 py-1 rounded-lg text-[13px] font-bold transition-all border",
                                 record.status === 'paid' 
                                   ? "bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100" 
                                   : "bg-[#5A5A40] text-white border-[#5A5A40] hover:bg-[#4A4A30] shadow-sm"
@@ -636,12 +636,12 @@ export default function BillingManagement() {
                       <tr key={contract.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-6 py-4">
                           <p className="font-bold text-sm">{vendor?.name}</p>
-                          <p className="text-[10px] text-gray-400">出帳日: 每月 {contract.billingDay} 號</p>
+                          <p className="text-[13px] text-gray-400">出帳日: 每月 {contract.billingDay} 號</p>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex flex-wrap gap-1">
                             {contract.services.map((s, i) => (
-                              <span key={i} className="px-2 py-0.5 bg-gray-100 rounded text-[10px] text-gray-600">
+                              <span key={i} className="px-2 py-0.5 bg-gray-100 rounded text-[13px] text-gray-600">
                                 {s.name}
                               </span>
                             ))}
@@ -652,7 +652,7 @@ export default function BillingManagement() {
                         </td>
                         <td className="px-6 py-4">
                           <p className="text-xs text-gray-600">{contract.startDate}</p>
-                          <p className="text-[10px] text-gray-400">至 {contract.endDate || '長期'}</p>
+                          <p className="text-[13px] text-gray-400">至 {contract.endDate || '長期'}</p>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center space-x-2">

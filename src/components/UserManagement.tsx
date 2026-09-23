@@ -407,11 +407,11 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                     <td className="p-4 text-sm text-gray-600">{user.email || '-'}</td>
                     <td className="p-4">
                       {user.lineUserId ? (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700 border border-green-200">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[13px] font-bold bg-green-100 text-green-700 border border-green-200">
                           已綁定 LINE
                         </span>
                       ) : (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-400 border border-gray-200">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[13px] font-bold bg-gray-100 text-gray-400 border border-gray-200">
                           未綁定
                         </span>
                       )}
@@ -432,19 +432,19 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                     <td className="p-4">
                       {user.role === 'editor' ? (
                         <div className="max-w-[240px]">
-                          <p className="text-[10px] text-gray-400 mb-1">
+                          <p className="text-[13px] text-gray-400 mb-1">
                             對應剪輯師：{editors.find(ed => ed.id === user.linkedEditorId)?.name || '未設定'}
                           </p>
                           <div className="flex flex-wrap gap-1">
                             {vendorsForEditor(user.linkedEditorId).length === 0 ? (
-                              <span className="text-[10px] text-gray-300">目前未負責任何廠商</span>
+                              <span className="text-[13px] text-gray-300">目前未負責任何廠商</span>
                             ) : vendorsForEditor(user.linkedEditorId).map(v => (
-                              <span key={v.id} className="px-2 py-0.5 rounded-lg bg-[#F5F5F0] text-gray-600 text-[10px] font-bold">
+                              <span key={v.id} className="px-2 py-0.5 rounded-lg bg-[#F5F5F0] text-gray-600 text-[13px] font-bold">
                                 {v.name}
                               </span>
                             ))}
                           </div>
-                          <p className="text-[9px] text-gray-300 mt-1">要改請到「廠商管理」調整負責剪輯師</p>
+                          <p className="text-[13px] text-gray-300 mt-1">要改請到「廠商管理」調整負責剪輯師</p>
                         </div>
                       ) : (
                         <span className="text-xs text-gray-300">—</span>
@@ -595,12 +595,12 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                         <td className="p-4">
                           {linkedUser ? (
                             <div className="flex items-center space-x-2">
-                              <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-full font-bold border border-green-200">
+                              <span className="bg-green-100 text-green-700 text-[13px] px-2 py-0.5 rounded-full font-bold border border-green-200">
                                 已綁定：{linkedUser.displayName}
                               </span>
                             </div>
                           ) : (
-                            <span className="bg-gray-100 text-gray-400 text-[10px] px-2 py-0.5 rounded-full font-bold border border-gray-200">
+                            <span className="bg-gray-100 text-gray-400 text-[13px] px-2 py-0.5 rounded-full font-bold border border-gray-200">
                               尚未綁定
                             </span>
                           )}
@@ -748,7 +748,7 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                   </select>
                   {newUser.linkedEditorId && (
                     <div className="p-3 bg-[#F5F5F0] rounded-2xl">
-                      <p className="text-[10px] text-gray-400 mb-1">目前在「廠商管理」負責的廠商(自動帶入，不用手動勾)：</p>
+                      <p className="text-[13px] text-gray-400 mb-1">目前在「廠商管理」負責的廠商(自動帶入，不用手動勾)：</p>
                       <div className="flex flex-wrap gap-1">
                         {vendorsForEditor(newUser.linkedEditorId).length === 0 ? (
                           <span className="text-xs text-gray-400">尚未指派任何廠商</span>

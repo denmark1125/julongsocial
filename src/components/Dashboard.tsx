@@ -257,7 +257,7 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
               <stat.icon className={cn(stat.color, "w-5 h-5 md:w-6 md:h-6")} />
             </div>
             <div>
-              <p className="text-[10px] md:text-sm text-gray-500 font-medium">{stat.label}</p>
+              <p className="text-[13px] md:text-sm text-gray-500 font-medium">{stat.label}</p>
               <p className="text-lg md:text-2xl font-bold">{stat.value}</p>
             </div>
           </div>
@@ -274,7 +274,7 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                 <ListTodo className="text-[#5A5A40] mr-2 w-5 h-5 md:w-6 md:h-6" />
                 本週工作清單
               </h3>
-              <span className="text-[10px] md:text-xs text-gray-400 font-medium">
+              <span className="text-[13px] md:text-xs text-gray-400 font-medium">
                 {format(weekStart, 'MM/dd')} - {format(weekEnd, 'MM/dd')}
               </span>
             </div>
@@ -287,15 +287,15 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
               ].map((group, idx) => (
                 <div key={idx} className="bg-[#F5F5F0] p-4 md:p-5 rounded-2xl md:rounded-3xl space-y-3 md:space-y-4">
                   <div className="flex items-center justify-between">
-                    <p className="text-[10px] md:text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center">
+                    <p className="text-[13px] md:text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center">
                       <span className={`w-1.5 h-1.5 md:w-2 md:h-2 ${group.color} rounded-full mr-1.5 md:mr-2`}></span>
                       {group.label}
                     </p>
-                    <span className="text-[10px] md:text-xs font-bold text-gray-400">{group.count}</span>
+                    <span className="text-[13px] md:text-xs font-bold text-gray-400">{group.count}</span>
                   </div>
                   <div className="space-y-2">
                     {group.list.slice(0, 3).map(p => (
-                      <div key={p.id} className="bg-white p-2.5 md:p-3 rounded-xl text-[10px] shadow-sm border border-black/5">
+                      <div key={p.id} className="bg-white p-2.5 md:p-3 rounded-xl text-[13px] shadow-sm border border-black/5">
                         <p className="font-bold truncate mb-0.5 md:mb-1">{p.title}</p>
                         <p className="text-gray-400 flex items-center">
                           <Clock size={8} md:size={10} className="mr-1" />
@@ -303,8 +303,8 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                         </p>
                       </div>
                     ))}
-                    {group.count === 0 && <p className="text-[10px] text-gray-400 italic text-center py-2 md:py-4">無待辦事項</p>}
-                    {group.count > 3 && <p className="text-[10px] text-center text-[#5A5A40] font-bold">還有 {group.count - 3} 項...</p>}
+                    {group.count === 0 && <p className="text-[13px] text-gray-400 italic text-center py-2 md:py-4">無待辦事項</p>}
+                    {group.count > 3 && <p className="text-[13px] text-center text-[#5A5A40] font-bold">還有 {group.count - 3} 項...</p>}
                   </div>
                 </div>
               ))}
@@ -330,17 +330,17 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                   <div key={post.id} className="flex items-center justify-between p-3 md:p-4 rounded-2xl md:rounded-3xl hover:bg-[#F5F5F0] transition-colors group">
                     <div className="flex items-center space-x-3 md:space-x-4">
                       <div className="w-12 h-12 md:w-14 md:h-14 bg-[#F5F5F0] group-hover:bg-white rounded-xl md:rounded-2xl flex flex-col items-center justify-center text-[#5A5A40] transition-colors">
-                        <span className="text-[8px] md:text-[10px] font-bold uppercase">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'MMM') : '-'}</span>
+                        <span className="text-[13px] font-bold uppercase">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'MMM') : '-'}</span>
                         <span className="text-lg md:text-xl font-bold leading-none">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'dd') : '-'}</span>
                       </div>
                       <div className="max-w-[140px] md:max-w-[200px]">
                         <p className="font-bold text-xs md:text-sm truncate">{post.title}</p>
-                        <p className="text-[10px] md:text-xs text-gray-400 truncate">{vendor?.name} • {post.platforms.join(', ')}</p>
+                        <p className="text-[13px] md:text-xs text-gray-400 truncate">{vendor?.name} • {post.platforms.join(', ')}</p>
                       </div>
                     </div>
                     <div className="flex items-center space-x-2 md:space-x-4">
                       <span className={cn(
-                        "text-[8px] md:text-[10px] px-2 md:px-3 py-0.5 md:py-1 rounded-full font-bold uppercase tracking-wider",
+                        "text-[13px] px-2 md:px-3 py-0.5 md:py-1 rounded-full font-bold uppercase tracking-wider",
                         post.status === 'published' ? "bg-green-100 text-green-700" : 
                         post.status === 'scheduled' ? "bg-blue-100 text-blue-700" : 
                         post.status === 'pending' ? "bg-orange-100 text-orange-700" : 
@@ -365,7 +365,7 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                 <AlertCircle className="mr-2" size={18} md:size={20} />
                 影片素材警示
               </h3>
-              <span className="bg-white/20 px-2 py-1 rounded-lg text-[10px] md:text-xs font-bold">
+              <span className="bg-white/20 px-2 py-1 rounded-lg text-[13px] md:text-xs font-bold">
                 低於 {LOW_STOCK_RUNWAY_DAYS} 天
               </span>
             </div>
@@ -399,7 +399,7 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                       <p className="font-bold text-xs md:text-sm">
                         {v.name}
                         <span className={cn(
-                          "ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold align-middle",
+                          "ml-2 px-1.5 py-0.5 rounded text-[13px] font-bold align-middle",
                           v.severity === 'shoot' ? "bg-red-400/30 text-red-100" : "bg-amber-400/30 text-amber-100"
                         )}>
                           {v.severity === 'shoot' ? '需拍片' : '催剪輯'}
@@ -407,7 +407,7 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                       </p>
                       {v.severity === 'shoot' ? (
                         <>
-                          <p className="text-[10px] md:text-xs text-white/60">
+                          <p className="text-[13px] md:text-xs text-white/60">
                             成片+素材共 {v.finishedStock + v.rawStock} 部
                             {v.owed > 0
                               ? `，累計已欠 ${v.owed} 支`
@@ -415,13 +415,13 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                             ，需盡快安排拍攝
                           </p>
                           {v.owed > 0 && v.expectedByNow !== undefined && (
-                            <p className="text-[9px] md:text-[10px] text-white/40">
+                            <p className="text-[13px] text-white/40">
                               （本月目標 {v.monthTarget} 支・照節奏目前應交 {Math.max(0, Math.round(v.expectedByNow))} 支）
                             </p>
                           )}
                         </>
                       ) : (
-                        <p className="text-[10px] md:text-xs text-white/60">
+                        <p className="text-[13px] md:text-xs text-white/60">
                           成片剩 {v.finishedStock} 部只夠撐 {Math.max(0, Math.floor(v.finishedRunwayDays!))} 天，另有 {v.rawStock} 部待剪
                           {v.editorName ? `，麻煩去催剪輯師「${v.editorName}」優先剪` : '，麻煩去催剪輯師優先剪'}
                         </p>
@@ -430,7 +430,7 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {v.activeBooking && (
-                      <span className="bg-emerald-400/20 text-emerald-100 px-2 py-1 rounded-lg text-[9px] md:text-[10px] font-bold whitespace-nowrap">
+                      <span className="bg-emerald-400/20 text-emerald-100 px-2 py-1 rounded-lg text-[13px] font-bold whitespace-nowrap">
                         已預約 {format(parseISO(v.activeBooking.scheduledDate), 'MM/dd')}
                       </span>
                     )}
@@ -457,7 +457,7 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                 <BellRing className="text-[#A67C52] mr-2" size={18} md:size={20} />
                 缺漏排程提醒
               </h3>
-              <span className="bg-[#A67C52]/10 text-[#A67C52] text-[10px] md:text-xs font-bold px-2 py-0.5 md:py-1 rounded-full">
+              <span className="bg-[#A67C52]/10 text-[#A67C52] text-[13px] md:text-xs font-bold px-2 py-0.5 md:py-1 rounded-full">
                 {missingSchedules.length}
               </span>
             </div>
@@ -465,8 +465,8 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
               {missingSchedules.slice(0, 5).map((miss, idx) => (
                 <div key={idx} className="p-3 md:p-4 bg-[#F5F5F0] rounded-xl md:rounded-2xl flex justify-between items-center">
                   <div>
-                    <p className="text-[10px] md:text-xs font-bold text-gray-700">{miss.vendorName}</p>
-                    <p className="text-[8px] md:text-[10px] text-gray-400">
+                    <p className="text-[13px] md:text-xs font-bold text-gray-700">{miss.vendorName}</p>
+                    <p className="text-[13px] text-gray-400">
                       {format(miss.date, 'MM/dd (eee)')} {miss.habit.time}
                     </p>
                   </div>
@@ -490,17 +490,17 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                 <AlertTriangle className="text-[#8B4513] mr-2" size={18} md:size={20} />
                 緊急審核
               </h3>
-              <span className="bg-[#8B4513]/10 text-[#8B4513] text-[10px] md:text-xs font-bold px-2 py-0.5 md:py-1 rounded-full">
+              <span className="bg-[#8B4513]/10 text-[#8B4513] text-[13px] md:text-xs font-bold px-2 py-0.5 md:py-1 rounded-full">
                 {approvalReminders.length}
               </span>
             </div>
             <div className="space-y-2 md:space-y-3">
               {approvalReminders.slice(0, 3).map(post => (
                 <div key={post.id} className="p-3 md:p-4 border border-[#8B4513]/10 rounded-xl md:rounded-2xl bg-[#8B4513]/5 space-y-1 md:space-y-2">
-                  <p className="text-[10px] md:text-xs font-bold truncate">{post.title}</p>
+                  <p className="text-[13px] md:text-xs font-bold truncate">{post.title}</p>
                   <div className="flex justify-between items-center">
-                    <span className="text-[8px] md:text-[10px] text-gray-400">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'MM/dd HH:mm') : '-'}</span>
-                    <button onClick={() => setActiveTab('posts')} className="text-[10px] md:text-xs text-[#8B4513] font-bold">
+                    <span className="text-[13px] text-gray-400">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'MM/dd HH:mm') : '-'}</span>
+                    <button onClick={() => setActiveTab('posts')} className="text-[13px] md:text-xs text-[#8B4513] font-bold">
                       處理
                     </button>
                   </div>
@@ -516,7 +516,7 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                 <CreditCard className="text-[#5A5A40] mr-2" size={18} md:size={20} />
                 待核收帳款
               </h3>
-              <span className="bg-[#5A5A40]/10 text-[#5A5A40] text-[10px] md:text-xs font-bold px-2 py-0.5 md:py-1 rounded-full">
+              <span className="bg-[#5A5A40]/10 text-[#5A5A40] text-[13px] md:text-xs font-bold px-2 py-0.5 md:py-1 rounded-full">
                 {pendingBills.length}
               </span>
             </div>
@@ -526,14 +526,14 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                 return (
                   <div key={record.id} className="p-3 md:p-4 bg-[#F5F5F0] rounded-xl md:rounded-2xl flex justify-between items-center">
                     <div>
-                      <p className="text-[10px] md:text-xs font-bold text-gray-700">{vendor?.name}</p>
-                      <p className="text-[8px] md:text-[10px] text-gray-400">
+                      <p className="text-[13px] md:text-xs font-bold text-gray-700">{vendor?.name}</p>
+                      <p className="text-[13px] text-gray-400">
                         出帳日: {format(parseISO(record.dueDate), 'MM/dd')}
                       </p>
                     </div>
                     <div className="text-right">
                       <p className="text-xs font-bold text-[#5A5A40]">${record.amount.toLocaleString()}</p>
-                      <button onClick={() => setActiveTab('billing')} className="text-[8px] md:text-[10px] text-gray-400 hover:text-[#5A5A40] underline">
+                      <button onClick={() => setActiveTab('billing')} className="text-[13px] text-gray-400 hover:text-[#5A5A40] underline">
                         查看
                       </button>
                     </div>
@@ -556,7 +556,7 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                   <AlertCircle className="text-red-500 mr-2" size={18} md:size={20} />
                   合約即將到期
                 </h3>
-                <span className="bg-red-100 text-red-700 text-[10px] md:text-xs font-bold px-2 py-0.5 md:py-1 rounded-full">
+                <span className="bg-red-100 text-red-700 text-[13px] md:text-xs font-bold px-2 py-0.5 md:py-1 rounded-full">
                   {expiringContracts.length}
                 </span>
               </div>
@@ -566,12 +566,12 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                   return (
                     <div key={contract.id} className="p-3 md:p-4 bg-red-50 rounded-xl md:rounded-2xl flex justify-between items-center">
                       <div>
-                        <p className="text-[10px] md:text-xs font-bold text-red-700">{vendor?.name}</p>
-                        <p className="text-[8px] md:text-[10px] text-red-400">
+                        <p className="text-[13px] md:text-xs font-bold text-red-700">{vendor?.name}</p>
+                        <p className="text-[13px] text-red-400">
                           到期日: {contract.endDate}
                         </p>
                       </div>
-                      <button onClick={() => setActiveTab('billing')} className="text-[8px] md:text-[10px] text-red-700 font-bold underline">
+                      <button onClick={() => setActiveTab('billing')} className="text-[13px] text-red-700 font-bold underline">
                         續約
                       </button>
                     </div>

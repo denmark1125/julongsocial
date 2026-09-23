@@ -366,7 +366,7 @@ export default function TrackingExportModal({
               {exportMode !== 'schedule' && (
                 <button
                   onClick={() => useCustomRange ? setUseCustomRange(false) : enableCustomRange()}
-                  className="text-[10px] font-bold text-[#8B7355] hover:underline"
+                  className="text-[13px] font-bold text-[#8B7355] hover:underline"
                 >
                   {useCustomRange ? '改用快速選週' : '自訂起訖日'}
                 </button>
@@ -401,7 +401,7 @@ export default function TrackingExportModal({
                       key={opt.days}
                       onClick={() => setTrackingRangeDays(opt.days)}
                       className={clsx(
-                        "flex-1 py-1.5 rounded-xl text-[10px] font-bold transition-all",
+                        "flex-1 py-1.5 rounded-xl text-[13px] font-bold transition-all",
                         trackingRangeDays === opt.days ? "bg-white text-[#8B7355] shadow-sm" : "text-gray-400"
                       )}
                     >
@@ -438,7 +438,7 @@ export default function TrackingExportModal({
               <button 
                 onClick={() => setExportMode('missing')}
                 className={clsx(
-                  "flex-1 py-2 rounded-xl text-[10px] font-bold transition-all",
+                  "flex-1 py-2 rounded-xl text-[13px] font-bold transition-all",
                   exportMode === 'missing' ? "bg-white text-[#8B7355] shadow-sm" : "text-gray-400"
                 )}
               >
@@ -447,7 +447,7 @@ export default function TrackingExportModal({
               <button 
                 onClick={() => setExportMode('all')}
                 className={clsx(
-                  "flex-1 py-2 rounded-xl text-[10px] font-bold transition-all",
+                  "flex-1 py-2 rounded-xl text-[13px] font-bold transition-all",
                   exportMode === 'all' ? "bg-white text-[#8B7355] shadow-sm" : "text-gray-400"
                 )}
               >
@@ -456,7 +456,7 @@ export default function TrackingExportModal({
               <button 
                 onClick={() => setExportMode('schedule')}
                 className={clsx(
-                  "flex-1 py-2 rounded-xl text-[10px] font-bold transition-all",
+                  "flex-1 py-2 rounded-xl text-[13px] font-bold transition-all",
                   exportMode === 'schedule' ? "bg-white text-[#8B7355] shadow-sm" : "text-gray-400"
                 )}
               >
@@ -508,13 +508,13 @@ export default function TrackingExportModal({
               <div className="flex space-x-3">
                 <button 
                   onClick={() => setSelectedVendorIds(filteredVendors.map(v => v.id))}
-                  className="text-[10px] font-bold text-[#8B7355] hover:underline"
+                  className="text-[13px] font-bold text-[#8B7355] hover:underline"
                 >
                   全選
                 </button>
                 <button 
                   onClick={() => setSelectedVendorIds([])}
-                  className="text-[10px] font-bold text-gray-400 hover:underline"
+                  className="text-[13px] font-bold text-gray-400 hover:underline"
                 >
                   全不選
                 </button>
@@ -612,7 +612,7 @@ export default function TrackingExportModal({
                             </span>
                           </span>
                           {row.hasGap && (
-                            <span className="flex items-center text-[10px] font-black text-red-600 ml-3 shrink-0 whitespace-nowrap">
+                            <span className="flex items-center text-[13px] font-black text-red-600 ml-3 shrink-0 whitespace-nowrap">
                               <AlertTriangle className="w-3 h-3 mr-1" /> 有幾天沒片
                             </span>
                           )}
@@ -647,7 +647,7 @@ export default function TrackingExportModal({
                               ? format(parseISO(item.scheduledAt), 'MM/dd HH:mm') 
                               : format(item.date, 'MM/dd') + ' (待定)'}
                           </div>
-                          <div className="text-[10px] text-gray-400 font-medium uppercase">
+                          <div className="text-[13px] text-gray-400 font-medium uppercase">
                             {format(item.date, 'EEEE')}
                           </div>
                         </td>
@@ -656,7 +656,7 @@ export default function TrackingExportModal({
                         </td>
                         <td className="py-5 align-top">
                           <span className={clsx(
-                            "px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-tighter",
+                            "px-2 py-0.5 rounded text-[13px] font-black uppercase tracking-tighter",
                             item.type === 'video' ? "bg-blue-100 text-blue-600" : "bg-purple-100 text-purple-600"
                           )}>
                             {item.type === 'video' ? '影片' : '貼文'}
@@ -674,7 +674,7 @@ export default function TrackingExportModal({
                             {/* 這裡原本掛一個綠色「素材已到位」，它其實只代表「這列不是待補」，
                                 對預排時段一律說謊。真正的素材真相改由右邊那欄回答。 */}
                             {item.status === 'draft' && (
-                              <span className="flex items-center text-[10px] font-bold text-blue-500">
+                              <span className="flex items-center text-[13px] font-bold text-blue-500">
                                 <Clock className="w-3 h-3 mr-1" /> 尚未排程
                               </span>
                             )}
@@ -714,7 +714,7 @@ export default function TrackingExportModal({
                               {supply.detail && (
                                 /* 刻意單行截斷：片名在這格換行會把「名額」「公式」這種詞拆成上下兩行，
                                    老闆對中文孤字斷行特別敏感，寧可用 ... 收掉 */
-                                <div className="text-[10px] text-gray-400 font-medium mt-1 pl-5 truncate">
+                                <div className="text-[13px] text-gray-400 font-medium mt-1 pl-5 truncate">
                                   {supply.detail}
                                 </div>
                               )}
@@ -752,10 +752,10 @@ export default function TrackingExportModal({
 
             {/* JPG Footer */}
             <div className="p-10 bg-white/50 border-t border-black/5 flex justify-between items-center">
-              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em]">
+              <div className="text-[13px] font-bold text-gray-400 uppercase tracking-[0.2em]">
                 Generated by Forest Admin System • {format(new Date(), 'yyyy/MM/dd HH:mm')}
               </div>
-              <div className="text-[10px] font-black text-[#5A5A40]">
+              <div className="text-[13px] font-black text-[#5A5A40]">
                 CONFIDENTIAL
               </div>
             </div>

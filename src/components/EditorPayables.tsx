@@ -357,17 +357,17 @@ export default function EditorPayables() {
         <div className="bg-amber-50 rounded-2xl border border-amber-200 overflow-hidden">
           <div className="px-5 py-4 border-b border-amber-200">
             <h3 className="text-sm font-bold text-amber-800">舊帳待盤點 · 已上傳 {legacyUploaded.length} 支</h3>
-            <p className="text-[11px] text-amber-700 mt-1">切帳日前上傳的片預設不開放請款。請逐支確認舊制是否已付款。</p>
+            <p className="text-[13px] text-amber-700 mt-1">切帳日前上傳的片預設不開放請款。請逐支確認舊制是否已付款。</p>
           </div>
           <div className="divide-y divide-amber-200/70 max-h-80 overflow-y-auto">
             {legacyUploaded.map(a => (
               <div key={a.id} className="px-5 py-3 bg-white/60 flex items-center gap-3 flex-wrap">
                 <div className="flex-1 min-w-52">
                   <p className="text-xs font-bold text-gray-700">{vendors.find(v => v.id === a.vendorId)?.name || '未知 IP'}｜{a.title}</p>
-                  <p className="text-[10px] text-gray-500">{a.cloudUploadedAt ? format(parseISO(a.cloudUploadedAt), 'yyyy-MM-dd HH:mm') : ''} 上傳 · 預設 {money(getAssetFee(a))}</p>
+                  <p className="text-[13px] text-gray-500">{a.cloudUploadedAt ? format(parseISO(a.cloudUploadedAt), 'yyyy-MM-dd HH:mm') : ''} 上傳 · 預設 {money(getAssetFee(a))}</p>
                 </div>
-                <button onClick={() => settleLegacy(a, 'paid')} disabled={busyId === `legacy-${a.id}`} className="px-3 py-1.5 rounded-lg bg-gray-700 text-white text-[10px] font-bold disabled:opacity-40">舊制已結清</button>
-                <button onClick={() => settleLegacy(a, 'unpaid')} disabled={busyId === `legacy-${a.id}`} className="px-3 py-1.5 rounded-lg bg-amber-600 text-white text-[10px] font-bold disabled:opacity-40">尚未付，轉系統請款</button>
+                <button onClick={() => settleLegacy(a, 'paid')} disabled={busyId === `legacy-${a.id}`} className="px-3 py-1.5 rounded-lg bg-gray-700 text-white text-[13px] font-bold disabled:opacity-40">舊制已結清</button>
+                <button onClick={() => settleLegacy(a, 'unpaid')} disabled={busyId === `legacy-${a.id}`} className="px-3 py-1.5 rounded-lg bg-amber-600 text-white text-[13px] font-bold disabled:opacity-40">尚未付，轉系統請款</button>
               </div>
             ))}
           </div>
@@ -380,7 +380,7 @@ export default function EditorPayables() {
         <div className="bg-sky-50 rounded-2xl border border-sky-200 overflow-hidden">
           <div className="px-5 py-4 border-b border-sky-200">
             <h3 className="text-sm font-bold text-sky-800">舊帳待盤點 · 從沒上傳雲端 {legacyNeverUploaded.length} 支</h3>
-            <p className="text-[11px] text-sky-700 mt-1 leading-relaxed">
+            <p className="text-[13px] text-sky-700 mt-1 leading-relaxed">
               這些片已經交片，但剪輯師從來沒按過「上傳雲端」，多半是當年在系統外（LINE／勞報單）就領過錢了。
               標記結清後會從他的工作台消失，並留下金額與依據，日後查得到。
               <span className="font-bold">若其實還沒付，不要標在這裡</span>——請剪輯師照正常流程按「上傳雲端」，那支就會進本月請款。
@@ -394,7 +394,7 @@ export default function EditorPayables() {
                   <button
                     onClick={() => settleLegacyBatch(g.assets, g.vendorName)}
                     disabled={busyId === `legacy-batch-${g.assets[0].id}`}
-                    className="shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg bg-sky-700 text-white text-[10px] font-bold disabled:opacity-40"
+                    className="shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg bg-sky-700 text-white text-[13px] font-bold disabled:opacity-40"
                   >
                     整組標舊制已結清
                   </button>
@@ -403,14 +403,14 @@ export default function EditorPayables() {
                   <div key={a.id} className="px-5 py-2.5 flex items-center gap-3 flex-wrap border-t border-sky-100">
                     <div className="flex-1 min-w-52">
                       <p className="text-xs font-bold text-gray-700">{a.title}</p>
-                      <p className="text-[10px] text-gray-500">
+                      <p className="text-[13px] text-gray-500">
                         {a.createdAt ? `${format(parseISO(a.createdAt), 'yyyy-MM-dd')} 建檔` : ''} · 預設 {money(getAssetFee(a))}
                       </p>
                     </div>
                     <button
                       onClick={() => settleLegacy(a, 'paid')}
                       disabled={busyId === `legacy-${a.id}`}
-                      className="shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg bg-gray-700 text-white text-[10px] font-bold disabled:opacity-40"
+                      className="shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg bg-gray-700 text-white text-[13px] font-bold disabled:opacity-40"
                     >
                       舊制已結清
                     </button>
@@ -424,14 +424,14 @@ export default function EditorPayables() {
 
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-bold text-gray-400 w-10 shrink-0">月份</span>
+          <span className="text-[13px] font-bold text-gray-400 w-10 shrink-0">月份</span>
           {monthOptions.map(m => (
             <button
               key={m}
               onClick={() => setMonth(m)}
               className={month === m
-                ? 'px-3 py-1 rounded-full text-[11px] font-bold bg-[#5A5A40] text-white'
-                : 'px-3 py-1 rounded-full text-[11px] font-bold bg-white border border-black/5 text-gray-500 hover:text-[#5A5A40]'}
+                ? 'px-3 py-1 rounded-full text-[13px] font-bold bg-[#5A5A40] text-white'
+                : 'px-3 py-1 rounded-full text-[13px] font-bold bg-white border border-black/5 text-gray-500 hover:text-[#5A5A40]'}
             >
               {monthLabel(m)}<span className="ml-1 opacity-60">{m.slice(0, 4)}</span>
             </button>
@@ -450,11 +450,11 @@ export default function EditorPayables() {
         <div className="px-5 pt-4 pb-3 border-b border-black/5">
           <h3 className="text-sm font-bold text-[#5A5A40] flex items-center gap-2">
             <UsersIcon size={14} /> {monthLabel(month)}各剪輯師應付
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-black/5 text-gray-500">
+            <span className="text-[13px] font-bold px-2 py-0.5 rounded-full bg-black/5 text-gray-500">
               {summaries.length}
             </span>
           </h3>
-          <p className="text-[11px] text-gray-400 mt-0.5">
+          <p className="text-[13px] text-gray-400 mt-0.5">
             「未請款」代表片已上傳但剪輯師還沒送單，要催的是他；「已送出待付款」代表球在我們這邊。
           </p>
         </div>
@@ -478,7 +478,7 @@ export default function EditorPayables() {
                     {open ? <ChevronDown size={14} className="text-gray-400 shrink-0" />
                           : <ChevronRight size={14} className="text-gray-400 shrink-0" />}
                     <span className="font-bold text-sm text-[#5A5A40] w-32 shrink-0 truncate">{r.editorName}</span>
-                    <div className="flex-1 flex items-center gap-4 flex-wrap text-[11px]">
+                    <div className="flex-1 flex items-center gap-4 flex-wrap text-[13px]">
                       {r.unsubmittedCount > 0 && (
                         <span className="text-[#A67C52] font-bold">
                           未請款 {r.unsubmittedCount} 支 {money(r.unsubmittedAmount)}
@@ -509,32 +509,32 @@ export default function EditorPayables() {
                               <span className="text-xs font-bold text-[#5A5A40]">
                                 單號 {inv.id?.slice(-8).toUpperCase()}
                               </span>
-                              <span className="text-[11px] text-gray-400">
+                              <span className="text-[13px] text-gray-400">
                                 {inv.itemCount} 支 · {money(inv.totalAmount)}
                               </span>
                               {inv.status === 'paid' ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 text-[9px] font-bold border border-green-200">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 text-[13px] font-bold border border-green-200">
                                   <CheckCircle2 size={9} /> 已請款
                                 </span>
                               ) : inv.status === 'approved' ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[9px] font-bold border border-blue-200">公司已核准</span>
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[13px] font-bold border border-blue-200">公司已核准</span>
                               ) : inv.status === 'payment_processing' ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 text-[9px] font-bold border border-purple-200">付款處理中</span>
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 text-[13px] font-bold border border-purple-200">付款處理中</span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[9px] font-bold border border-amber-200">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[13px] font-bold border border-amber-200">
                                   <Clock size={9} /> 待公司核准
                                 </span>
                               )}
                             </div>
                             {inv.status !== 'paid' && (
                               <div className="flex items-center gap-1.5">
-                                {inv.status === 'submitted' && <button onClick={() => advanceInvoice(inv, 'approved')} disabled={busyId === inv.id} className="flex items-center gap-1 bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold disabled:opacity-40">公司核准</button>}
-                                {inv.status === 'approved' && <button onClick={() => advanceInvoice(inv, 'payment_processing')} disabled={busyId === inv.id} className="flex items-center gap-1 bg-purple-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold disabled:opacity-40">開始付款處理</button>}
-                                {inv.status === 'payment_processing' && <button onClick={() => markPaid(inv)} disabled={busyId === inv.id} className="flex items-center gap-1 bg-[#5A5A40] text-white px-3 py-1.5 rounded-lg text-[10px] font-bold disabled:opacity-40"><CheckCircle2 size={10} /> 確認已付款</button>}
+                                {inv.status === 'submitted' && <button onClick={() => advanceInvoice(inv, 'approved')} disabled={busyId === inv.id} className="flex items-center gap-1 bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[13px] font-bold disabled:opacity-40">公司核准</button>}
+                                {inv.status === 'approved' && <button onClick={() => advanceInvoice(inv, 'payment_processing')} disabled={busyId === inv.id} className="flex items-center gap-1 bg-purple-700 text-white px-3 py-1.5 rounded-lg text-[13px] font-bold disabled:opacity-40">開始付款處理</button>}
+                                {inv.status === 'payment_processing' && <button onClick={() => markPaid(inv)} disabled={busyId === inv.id} className="flex items-center gap-1 bg-[#5A5A40] text-white px-3 py-1.5 rounded-lg text-[13px] font-bold disabled:opacity-40"><CheckCircle2 size={10} /> 確認已付款</button>}
                                 <button
                                   onClick={() => voidInvoice(inv)}
                                   disabled={busyId === inv.id}
-                                  className="flex items-center gap-1 bg-white border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-[10px] font-bold hover:bg-red-50 disabled:opacity-40"
+                                  className="flex items-center gap-1 bg-white border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-[13px] font-bold hover:bg-red-50 disabled:opacity-40"
                                 >
                                   <Ban size={10} /> 作廢
                                 </button>
@@ -546,17 +546,17 @@ export default function EditorPayables() {
                               const live = assets.find(a => a.id === it.assetId);
                               const unused = live?.status === 'archived';
                               return (
-                                <div key={it.assetId} className="text-[10px] text-gray-500 flex items-center gap-1.5">
+                                <div key={it.assetId} className="text-[13px] text-gray-500 flex items-center gap-1.5">
                                   <span className="truncate">
                                     {it.vendorName}｜{it.title}（{money(it.amount)}）
                                   </span>
                                   {!live && (
-                                    <span className="shrink-0 px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 text-[9px] font-bold">
+                                    <span className="shrink-0 px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 text-[13px] font-bold">
                                       素材已刪除
                                     </span>
                                   )}
                                   {unused && (
-                                    <span className="shrink-0 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-bold">
+                                    <span className="shrink-0 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[13px] font-bold">
                                       未使用
                                     </span>
                                   )}
@@ -574,21 +574,21 @@ export default function EditorPayables() {
                           </p>
                           <div className="space-y-0.5">
                             {pending.map(a => (
-                              <div key={a.id} className="text-[10px] text-gray-500 flex items-center gap-1.5">
+                              <div key={a.id} className="text-[13px] text-gray-500 flex items-center gap-1.5">
                                 <span className="truncate">
                                   {vendors.find(v => v.id === a.vendorId)?.name || '未知 IP'}｜{a.title}
                                 </span>
                                 <button
                                   type="button"
                                   onClick={() => { setFeeCustom(''); setFeeAsset(a); }}
-                                  className="shrink-0 px-1.5 py-0.5 rounded border border-[#5A5A40]/30 text-[#5A5A40] text-[10px] font-bold hover:bg-[#5A5A40]/5"
+                                  className="shrink-0 px-1.5 py-0.5 rounded border border-[#5A5A40]/30 text-[#5A5A40] text-[13px] font-bold hover:bg-[#5A5A40]/5"
                                   title="調整這支的剪輯費"
                                 >
                                   {money(getAssetFee(a))}
                                   {a.durationTier && <span className="ml-1 opacity-60">{DURATION_TIER_LABEL[a.durationTier]}</span>}
                                 </button>
                                 {a.status === 'archived' && (
-                                  <span className="shrink-0 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-bold">
+                                  <span className="shrink-0 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[13px] font-bold">
                                     未使用
                                   </span>
                                 )}

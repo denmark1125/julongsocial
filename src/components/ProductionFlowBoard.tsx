@@ -131,7 +131,7 @@ export default function ProductionFlowBoard({
           <h3 className="text-lg font-bold serif text-[#5A5A40] flex items-center gap-2">
             <Scissors size={18} /> 製作交棒進度
           </h3>
-          <p className="text-[11px] text-gray-400">
+          <p className="text-[13px] text-gray-400">
             每支片現在球在誰手上、卡了幾天。紅色代表停太久，不用再回頭一個個問。
           </p>
         </div>
@@ -139,7 +139,7 @@ export default function ProductionFlowBoard({
           <div className="bg-white px-4 py-2 rounded-2xl border border-red-200 shadow-sm flex items-center gap-3">
             <div className="bg-red-50 p-2 rounded-lg text-red-600"><Clock size={16} /></div>
             <div>
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">卡住的片</p>
+              <p className="text-[13px] font-bold text-gray-400 uppercase tracking-wider">卡住的片</p>
               <p className="text-lg font-bold leading-none">{stuckCount} <span className="text-xs font-normal text-gray-400">支</span></p>
             </div>
           </div>
@@ -150,12 +150,12 @@ export default function ProductionFlowBoard({
           回答不了「這是哪個剪輯師的工作量」 */}
       <div className="space-y-2">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-bold text-gray-400 w-14 shrink-0">依 IP</span>
+          <span className="text-[13px] font-bold text-gray-400 w-14 shrink-0">依 IP</span>
           <button
             onClick={() => setVendorFilter('all')}
             className={vendorFilter === 'all'
-              ? 'px-3 py-1 rounded-full text-[11px] font-bold bg-[#5A5A40] text-white'
-              : 'px-3 py-1 rounded-full text-[11px] font-bold bg-white border border-black/5 text-gray-500 hover:text-[#5A5A40]'}
+              ? 'px-3 py-1 rounded-full text-[13px] font-bold bg-[#5A5A40] text-white'
+              : 'px-3 py-1 rounded-full text-[13px] font-bold bg-white border border-black/5 text-gray-500 hover:text-[#5A5A40]'}
           >
             全部
           </button>
@@ -164,20 +164,20 @@ export default function ProductionFlowBoard({
               key={v.id}
               onClick={() => setVendorFilter(v.id!)}
               className={vendorFilter === v.id
-                ? 'px-3 py-1 rounded-full text-[11px] font-bold bg-[#5A5A40] text-white'
-                : 'px-3 py-1 rounded-full text-[11px] font-bold bg-white border border-black/5 text-gray-500 hover:text-[#5A5A40]'}
+                ? 'px-3 py-1 rounded-full text-[13px] font-bold bg-[#5A5A40] text-white'
+                : 'px-3 py-1 rounded-full text-[13px] font-bold bg-white border border-black/5 text-gray-500 hover:text-[#5A5A40]'}
             >
               {v.name}
             </button>
           ))}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-bold text-gray-400 w-14 shrink-0">依剪輯師</span>
+          <span className="text-[13px] font-bold text-gray-400 w-14 shrink-0">依剪輯師</span>
           <button
             onClick={() => setEditorFilter('all')}
             className={editorFilter === 'all'
-              ? 'px-3 py-1 rounded-full text-[11px] font-bold bg-[#5A5A40] text-white'
-              : 'px-3 py-1 rounded-full text-[11px] font-bold bg-white border border-black/5 text-gray-500 hover:text-[#5A5A40]'}
+              ? 'px-3 py-1 rounded-full text-[13px] font-bold bg-[#5A5A40] text-white'
+              : 'px-3 py-1 rounded-full text-[13px] font-bold bg-white border border-black/5 text-gray-500 hover:text-[#5A5A40]'}
           >
             全部
           </button>
@@ -186,8 +186,8 @@ export default function ProductionFlowBoard({
               key={eid}
               onClick={() => setEditorFilter(eid)}
               className={editorFilter === eid
-                ? 'px-3 py-1 rounded-full text-[11px] font-bold bg-[#5A5A40] text-white'
-                : 'px-3 py-1 rounded-full text-[11px] font-bold bg-white border border-black/5 text-gray-500 hover:text-[#5A5A40]'}
+                ? 'px-3 py-1 rounded-full text-[13px] font-bold bg-[#5A5A40] text-white'
+                : 'px-3 py-1 rounded-full text-[13px] font-bold bg-white border border-black/5 text-gray-500 hover:text-[#5A5A40]'}
             >
               {editorName(eid)}
             </button>
@@ -206,16 +206,16 @@ export default function ProductionFlowBoard({
                 <h4 className={`text-xs font-bold flex items-center gap-2 ${tone.head}`}>
                   <span className={`w-1.5 h-1.5 rounded-full ${tone.dot}`} />
                   {FLOW_STAGE_LABEL[col.stage]}
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-black/5 text-gray-500">
+                  <span className="text-[13px] font-bold px-1.5 py-0.5 rounded-full bg-black/5 text-gray-500">
                     {col.items.length}
                   </span>
                 </h4>
-                <p className="text-[10px] text-gray-400 mt-1">球在 {FLOW_OWNER_LABEL[owner]}</p>
+                <p className="text-[13px] text-gray-400 mt-1">球在 {FLOW_OWNER_LABEL[owner]}</p>
               </div>
 
               <div className="divide-y divide-black/5 flex-1">
                 {col.items.length === 0 ? (
-                  <div className="p-6 text-center text-gray-300 italic text-[11px]">—</div>
+                  <div className="p-6 text-center text-gray-300 italic text-[13px]">—</div>
                 ) : (
                   col.items.map(a => {
                     const due = getFlowDueInfo(a, posts);
@@ -224,7 +224,7 @@ export default function ProductionFlowBoard({
                     return (
                       <div key={a.id} className="p-3 space-y-1.5">
                         <div className="flex items-start justify-between gap-2">
-                          <span className="text-[11px] font-bold text-[#5A5A40]">
+                          <span className="text-[13px] font-bold text-[#5A5A40]">
                             {vendorMap.get(a.vendorId)?.name || '未知IP'}
                           </span>
                           <button
@@ -238,7 +238,7 @@ export default function ProductionFlowBoard({
                           </button>
                         </div>
 
-                        <p className="text-[11px] text-gray-600 leading-snug break-words">{a.title}</p>
+                        <p className="text-[13px] text-gray-600 leading-snug break-words">{a.title}</p>
 
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="inline-flex items-center gap-1 text-[9.5px] text-gray-400">
@@ -277,7 +277,7 @@ export default function ProductionFlowBoard({
                                 ? advance(a, 'ready', '業主已通過，這支已上傳過雲端，直接可排程')
                                 : advance(a, 'to_upload', '已記錄業主通過，等剪輯師上傳雲端')}
                               disabled={busyId === a.id}
-                              className="flex-1 flex items-center justify-center gap-1 bg-green-600 text-white px-2 py-1.5 rounded-lg text-[10px] font-bold hover:bg-green-700 transition-all disabled:opacity-50"
+                              className="flex-1 flex items-center justify-center gap-1 bg-green-600 text-white px-2 py-1.5 rounded-lg text-[13px] font-bold hover:bg-green-700 transition-all disabled:opacity-50"
                             >
                               <ThumbsUp size={10} /> 業主通過
                             </button>

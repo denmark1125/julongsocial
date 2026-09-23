@@ -268,7 +268,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
               {isSidebarOpen && (
                 <div className="flex-1 min-w-0 mr-2">
                   <p className="text-sm font-medium truncate">{userProfile?.displayName || user.email}</p>
-                  <p className="text-[10px] font-bold text-[#5A5A40] uppercase tracking-wider">
+                  <p className="text-[13px] font-bold text-[#5A5A40] uppercase tracking-wider">
                     {userProfile?.role === 'engineer' ? '工程師' : userProfile?.role === 'manager' ? '主管' : userProfile?.role === 'editor' ? '剪輯師' : '員工'}
                   </p>
                 </div>
@@ -418,7 +418,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
                     >
                       <div className="p-4 border-b border-black/5 bg-[#F5F5F0]/50 flex justify-between items-center">
                         <h3 className="font-bold text-sm">通知中心</h3>
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                        <span className="text-[13px] font-bold text-gray-400 uppercase tracking-wider">
                           {notifications.length} 則提醒
                         </span>
                       </div>
@@ -437,8 +437,8 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-xs font-bold text-gray-900 mb-0.5">{noti.title}</p>
-                              <p className="text-[10px] text-gray-500 line-clamp-2 mb-1">{noti.content}</p>
-                              <p className="text-[8px] text-gray-400 flex items-center">
+                              <p className="text-[13px] text-gray-500 line-clamp-2 mb-1">{noti.content}</p>
+                              <p className="text-[13px] text-gray-400 flex items-center">
                                 <Clock size={8} className="mr-1" />
                                 {format(parseISO(noti.time), 'MM/dd HH:mm')}
                               </p>
@@ -457,7 +457,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
                         <div className="p-3 bg-gray-50 text-center">
                           <button 
                             onClick={() => setIsNotiOpen(false)}
-                            className="text-[10px] font-bold text-[#5A5A40] hover:underline"
+                            className="text-[13px] font-bold text-[#5A5A40] hover:underline"
                           >
                             關閉視窗
                           </button>
