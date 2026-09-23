@@ -55,9 +55,9 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
   const [slotMoves, setSlotMoves] = useState<PlannedSlotMove[]>([]);
   const [shootBookings, setShootBookings] = useState<ShootBooking[]>([]);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
-  const [viewMode, setViewMode] = useState<'calendar' | 'list'>(() =>
-    typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches ? 'list' : 'calendar'
-  );
+  // 一律先開月曆。曾經改成「手機自動進清單」，但月曆的價值就是一眼看完整個月，
+  // 自動跳掉等於把那個價值拿走；要清單自己切，切換鈕永遠在。
+  const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
   const [selectedVendorId, setSelectedVendorId] = useState<string>('all');
 
@@ -293,8 +293,8 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
 
   return (
     <div className="readability-surface bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden flex flex-col h-full min-h-0">
-      <div className="p-4 sm:p-6 flex flex-col xl:flex-row items-center justify-between border-b border-black/5 gap-4 bg-white sticky top-0 z-20">
-        <div className="flex flex-wrap gap-3 items-center justify-between w-full xl:w-auto">
+      <div className="p-4 sm:p-6 flex flex-col sm:flex-row items-center justify-between border-b border-black/5 gap-4 bg-white sticky top-0 z-20">
+        <div className="flex flex-wrap gap-3 items-center justify-between w-full sm:w-auto">
           <div className="flex flex-wrap items-center gap-3">
             <h3 className="text-xl font-bold serif">{format(currentDate, 'yyyy年 MM月')}</h3>
             <button 
@@ -337,7 +337,7 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-3 items-center justify-between w-full xl:w-auto space-x-2">
+        <div className="flex flex-wrap gap-3 items-center justify-between w-full sm:w-auto space-x-2">
           <div className="flex space-x-1">
             <button 
               aria-label="上個月"
@@ -455,7 +455,7 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                             ? `點一下用這個時段建立貼文${slot.isMoved ? `（原訂 ${slot.fromDate}）` : ''}`
                             : undefined}
                           className={clsx(
-                            "group/habit relative text-sm p-2 pr-7 rounded bg-orange-50 text-orange-700 border cursor-grab active:cursor-grabbing transition-colors",
+                            "group/habit relative text-xs leading-tight p-1 pr-6 rounded bg-orange-50 text-orange-700 border cursor-grab active:cursor-grabbing transition-colors",
                             slot.isMoved ? "border-orange-300 border-dashed" : "border-orange-100"
                           )}
                         >
@@ -472,7 +472,7 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                             <span className="font-bold shrink-0" title={slot.isMoved ? `已挪動（原訂 ${slot.fromDate}）` : undefined}>
                               {slot.isMoved ? '↪ ' : ''}{slot.time}
                             </span>
-                            <span className="text-[13px] opacity-70 truncate shrink">
+                            <span className="text-[11px] opacity-70 truncate shrink">
                               {slot.habit.contentTypes.map(t => t === 'post' ? '圖文' : '影片').join('/')}
                             </span>
                           </div>
@@ -483,9 +483,9 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                               dismissSlot(slot);
                             }}
                             aria-label={`刪除 ${slot.vendorName} ${slot.time} 預排`}
-                            className="absolute right-1 top-1 p-0.5 flex sm:invisible sm:group-hover/habit:visible sm:group-focus-within/habit:visible items-center justify-center hover:bg-orange-200 rounded-lg transition-colors"
+                            className="absolute right-0.5 top-0.5 p-0.5 flex sm:invisible sm:group-hover/habit:visible sm:group-focus-within/habit:visible items-center justify-center hover:bg-orange-200 rounded-lg transition-colors"
                           >
-                            <X size={14} />
+                            <X size={11} />
                           </button>
                         </div>
                       ))}
@@ -501,7 +501,7 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                             onDragEnd={handleDragEnd}
                             onClick={() => setSelectedPost(post)}
                             className={clsx(
-                              "text-sm p-2 rounded border flex flex-col leading-normal mb-1 cursor-pointer hover:shadow-md transition-all",
+                              "text-xs p-1 rounded border flex flex-col leading-tight mb-1 cursor-pointer hover:shadow-md transition-all",
                               post.status === 'published' ? "bg-green-50 text-green-700 border-green-100" : 
                               post.status === 'scheduled' ? "bg-blue-50 text-blue-700 border-blue-100" : 
                               post.status === 'pending' ? "bg-orange-50 text-orange-700 border-orange-100" :
@@ -511,13 +511,13 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                             {/* 同上：三行固定（時間／廠商／標題），每行單行截斷，卡片高度才會一致 */}
                             <div className="flex items-center gap-1">
                               <span className="font-bold flex-shrink-0">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'HH:mm') : '-'}</span>
-                              <span className="flex items-center gap-0.5 opacity-70 flex-shrink-0 text-[13px]">
+                              <span className="flex items-center gap-0.5 opacity-70 flex-shrink-0 text-[11px]">
                                 {post.contentType === 'post' ? <ImageIcon size={13} /> : <Video size={13} />}
                                 {post.contentType === 'post' ? '圖文' : '影片'}
                               </span>
                             </div>
                             <div className="truncate font-bold" title={vendor?.name}>{vendor?.name}</div>
-                            <div className="truncate opacity-90 text-[13px]" title={post.title}>{post.title}</div>
+                            <div className="truncate opacity-90 text-[11px]" title={post.title}>{post.title}</div>
                           </div>
                         );
                       })}
