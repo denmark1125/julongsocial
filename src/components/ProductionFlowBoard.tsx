@@ -13,6 +13,7 @@ import {
   FLOW_STAGE_OWNER,
   FLOW_OWNER_LABEL,
 } from '../types';
+import { useLiveCollection } from '../lib/liveData';
 import { buildFlowUpdate, getClientApprovalTarget, getFlowDaysStuck, getFlowDueInfo, isFlowStale, sortFlowColumn } from '../lib/assetFlow';
 import { getWorkingEditorId } from '../lib/editorBilling';
 import { Scissors, UserCheck, PenLine, Clock, Flame, CalendarClock, ThumbsUp } from 'lucide-react';
@@ -54,16 +55,11 @@ export default function ProductionFlowBoard({
   posts: Post[];
   me: UserProfile | null;
 }) {
-  const [editors, setEditors] = useState<Editor[]>([]);
+  // 共用即時資料層：整個 session 只訂閱一次，切分頁不再重讀
+  const editors = useLiveCollection<Editor>('editors');
   const [vendorFilter, setVendorFilter] = useState<string>('all');
   const [editorFilter, setEditorFilter] = useState<string>('all');
   const [busyId, setBusyId] = useState<string | null>(null);
-
-  useEffect(() => {
-    return onSnapshot(collection(db, 'editors'), (s) =>
-      setEditors(s.docs.map(d => ({ id: d.id, ...d.data() } as Editor)))
-    );
-  }, []);
 
   const vendorMap = new Map(vendors.map(v => [v.id, v]));
   // 素材可以逐支覆寫剪輯師，沒填的才回退到廠商的負責剪輯師（跟素材資料庫同一套判斷）

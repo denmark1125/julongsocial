@@ -5,6 +5,7 @@ import {
   Asset, DURATION_TIER_LABEL, DurationTier, EDITOR_FEE_BY_TIER,
   Editor, EditorInvoice, Vendor,
 } from '../types';
+import { useLiveCollection } from '../lib/liveData';
 import {
   billingMonthOptions, getAssetFee, getBillableEditorId, getBillingMonth,
   groupByVendor, isBillable, isLegacyNeverUploaded, monthLabel, needsLegacyReview,
@@ -21,9 +22,10 @@ const money = (n: number) => `$${n.toLocaleString()}`;
 const UNASSIGNED = '__unassigned__';
 
 export default function EditorPayables() {
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [editors, setEditors] = useState<Editor[]>([]);
+  // 共用即時資料層：整個 session 只訂閱一次，切分頁不再重讀
+  const vendors = useLiveCollection<Vendor>('vendors');
+  const assets = useLiveCollection<Asset>('assets');
+  const editors = useLiveCollection<Editor>('editors');
   const [invoices, setInvoices] = useState<EditorInvoice[]>([]);
   const [month, setMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -33,13 +35,8 @@ export default function EditorPayables() {
   const [feeCustom, setFeeCustom] = useState('');
 
   useEffect(() => {
+    // editorInvoices 只有這一頁用，留在原地（不進共用資料層）
     const unsubs = [
-      onSnapshot(collection(db, 'vendors'), s =>
-        setVendors(s.docs.map(d => ({ id: d.id, ...d.data() } as Vendor)))),
-      onSnapshot(collection(db, 'assets'), s =>
-        setAssets(s.docs.map(d => ({ id: d.id, ...d.data() } as Asset)))),
-      onSnapshot(collection(db, 'editors'), s =>
-        setEditors(s.docs.map(d => ({ id: d.id, ...d.data() } as Editor)))),
       onSnapshot(
         collection(db, 'editorInvoices'),
         s => setInvoices(s.docs.map(d => ({ id: d.id, ...d.data() } as EditorInvoice))),

@@ -26,6 +26,7 @@ import Logo from './components/Logo';
 import { Toaster } from 'react-hot-toast';
 import { LogIn, Mail, Lock, User as UserIcon } from 'lucide-react';
 import { UserProfile, UserRole } from './types';
+import { disposeAllLive } from './lib/liveData';
 import toast from 'react-hot-toast';
 import { PASSWORD_SUFFIX, ADMIN_USERNAME, ADMIN_EMAIL, INITIAL_ADMIN_REAL_EMAIL } from './constants';
 
@@ -102,6 +103,9 @@ export default function App() {
       } else {
         setUser(null);
         setUserProfile(null);
+        // 登出要把共用的即時訂閱全部關掉：不關的話舊監聽會繼續燒讀取量，
+        // 而且下一個登入的人會先看到上一個人的資料。
+        disposeAllLive();
       }
       setLoading(false);
     });

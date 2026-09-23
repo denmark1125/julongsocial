@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect , useMemo } from 'react';
 import { 
   collection, 
   query, 
@@ -14,6 +14,7 @@ import { db, auth } from '../firebase';
 import { isClientApproved } from '../lib/assetFlow';
 import { listPlannedSlots } from '../lib/plannedSlots';
 import { Post, Vendor, PostStatus, Asset, PlannedSlotMove, ShootBooking, getVendorDefaultPlatforms, platformOptionsFor } from '../types';
+import { useLiveCollection } from '../lib/liveData';
 import type { PostPrefill } from './CalendarView';
 import { 
   Plus, 
@@ -61,14 +62,21 @@ interface PostManagementProps {
 }
 
 export default function PostManagement({ prefill, onPrefillConsumed }: PostManagementProps = {}) {
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [assets, setAssets] = useState<Asset[]>([]);
+  // 共用即時資料層：整個 session 只訂閱一次，切分頁不再重讀。
+  // ⚠️ posts 原本是 `orderBy('createdAt','desc')`，改成前端排序；
+  //    實查過 327 篇貼文全部都有 createdAt（規則裡它是選填的，所以特地查過）。
+  const rawPosts = useLiveCollection<Post>('posts');
+  const posts = useMemo(
+    () => [...rawPosts].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')),
+    [rawPosts]
+  );
+  const vendors = useLiveCollection<Vendor>('vendors');
+  const assets = useLiveCollection<Asset>('assets');
   // 判斷素材還能不能用要看貼文現況（掛在草稿的仍算可用、掛的貼文被刪掉的自動放回），先建索引避免每個 option 都掃一次
   const postIndex = React.useMemo(() => buildPostIndex(posts), [posts]);
-  const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
-  const [slotMoves, setSlotMoves] = useState<PlannedSlotMove[]>([]);
-  const [shootBookings, setShootBookings] = useState<ShootBooking[]>([]);
+  const dismissedHabits = useLiveCollection<DismissedHabit>('dismissedHabits');
+  const slotMoves = useLiveCollection<PlannedSlotMove>('plannedSlotMoves');
+  const shootBookings = useLiveCollection<ShootBooking>('shootBookings');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
@@ -176,45 +184,6 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
     updated.setHours(hours, 0, 0, 0);
     setFormData({ ...formData, scheduledAt: format(updated, "yyyy-MM-dd'T'HH:mm") });
   };
-
-  useEffect(() => {
-    const vQuery = query(collection(db, 'vendors'));
-    const vUnsubscribe = onSnapshot(vQuery, (snapshot) => {
-      setVendors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Vendor)));
-    });
-
-    const pQuery = query(collection(db, 'posts'), orderBy('createdAt', 'desc'));
-    const pUnsubscribe = onSnapshot(pQuery, (snapshot) => {
-      setPosts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Post)));
-    });
-
-    const aUnsubscribe = onSnapshot(collection(db, 'assets'), (snapshot) => {
-      setAssets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
-    });
-
-    const dUnsubscribe = onSnapshot(collection(db, 'dismissedHabits'), (snapshot) => {
-      setDismissedHabits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DismissedHabit)));
-    });
-
-    // 建議發布時間要跟社群日曆看到的預排一致，所以連被挪過的時段也要讀
-    const mUnsubscribe = onSnapshot(collection(db, 'plannedSlotMoves'), (snapshot) => {
-      setSlotMoves(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlannedSlotMove)));
-    });
-
-    // 上片排程表要回答「這格的料哪來」，預約拍攝是三個來源之一
-    const sbUnsubscribe = onSnapshot(collection(db, 'shootBookings'), (snapshot) => {
-      setShootBookings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ShootBooking)));
-    });
-
-    return () => {
-      vUnsubscribe();
-      pUnsubscribe();
-      aUnsubscribe();
-      dUnsubscribe();
-      mUnsubscribe();
-      sbUnsubscribe();
-    };
-  }, []);
 
   const handleCopyContent = (content: string) => {
     if (!content) {

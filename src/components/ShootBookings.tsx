@@ -10,6 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Vendor, Asset, Post, ShootBooking, BookingReason, UserProfile, DeficitEntry } from '../types';
+import { useLiveCollection } from '../lib/liveData';
 import { getContractTargets, getDeficitBreakdown, getEffectiveMonthlyTarget, getOwedVideoCount, getAvailableVideoAssets, hasVideoTrackingScope, isVendorTrackedInMonth, getDeliveredVideosInMonth } from '../lib/vendorStatus';
 import { Film, Plus, Check, CalendarClock, AlertTriangle, Pencil, X, Trash2 } from 'lucide-react';
 import ProductionFlowBoard from './ProductionFlowBoard';
@@ -39,10 +40,11 @@ function currentMonthDefault(): string {
 }
 
 export default function ShootBookings() {
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [bookings, setBookings] = useState<ShootBooking[]>([]);
+  // 共用即時資料層：整個 session 只訂閱一次，切分頁不再重讀
+  const vendors = useLiveCollection<Vendor>('vendors');
+  const assets = useLiveCollection<Asset>('assets');
+  const posts = useLiveCollection<Post>('posts');
+  const bookings = useLiveCollection<ShootBooking>('shootBookings');
   const [me, setMe] = useState<UserProfile | null>(null);
 
   const [openPanel, setOpenPanel] = useState<{ vendorId: string; type: PanelType } | null>(null);
@@ -55,14 +57,6 @@ export default function ShootBookings() {
   const [deficitMonth, setDeficitMonth] = useState(currentMonthDefault());
   const [deficitOwed, setDeficitOwed] = useState(1);
   const [deficitNote, setDeficitNote] = useState('');
-
-  useEffect(() => {
-    const vU = onSnapshot(collection(db, 'vendors'), (s) => setVendors(s.docs.map(d => ({ id: d.id, ...d.data() } as Vendor))));
-    const aU = onSnapshot(collection(db, 'assets'), (s) => setAssets(s.docs.map(d => ({ id: d.id, ...d.data() } as Asset))));
-    const pU = onSnapshot(collection(db, 'posts'), (s) => setPosts(s.docs.map(d => ({ id: d.id, ...d.data() } as Post))));
-    const bU = onSnapshot(query(collection(db, 'shootBookings')), (s) => setBookings(s.docs.map(d => ({ id: d.id, ...d.data() } as ShootBooking))));
-    return () => { vU(); aU(); pU(); bU(); };
-  }, []);
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;

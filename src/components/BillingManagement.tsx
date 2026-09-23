@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Vendor, BillingContract, BillingRecord, BillingService } from '../types';
+import { useLiveCollection } from '../lib/liveData';
 import { visibleVendors } from '../lib/vendorStatus';
 import EditorPayables from './EditorPayables';
 import { format, parseISO, startOfMonth, endOfMonth, addMonths, subMonths, isSameMonth, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
@@ -48,9 +49,10 @@ function cn(...inputs: ClassValue[]) {
 const DEFAULT_SERVICE: BillingService = { name: '短影音代操 (8支/月)', price: 30000, unit: '月' };
 
 export default function BillingManagement() {
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [contracts, setContracts] = useState<BillingContract[]>([]);
-  const [records, setRecords] = useState<BillingRecord[]>([]);
+  // 共用即時資料層：整個 session 只訂閱一次，切分頁不再重讀
+  const vendors = useLiveCollection<Vendor>('vendors');
+  const contracts = useLiveCollection<BillingContract>('billingContracts');
+  const records = useLiveCollection<BillingRecord>('billingRecords');
   const [loading, setLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -71,27 +73,6 @@ export default function BillingManagement() {
   const [startDate, setStartDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(addMonths(new Date(), 12), 'yyyy-MM-dd'));
   const [notes, setNotes] = useState('');
-
-  useEffect(() => {
-    const vUnsubscribe = onSnapshot(collection(db, 'vendors'), (snapshot) => {
-      setVendors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Vendor)));
-    });
-
-    const cUnsubscribe = onSnapshot(collection(db, 'billingContracts'), (snapshot) => {
-      setContracts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BillingContract)));
-    });
-
-    const rUnsubscribe = onSnapshot(collection(db, 'billingRecords'), (snapshot) => {
-      setRecords(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BillingRecord)));
-    });
-
-    setLoading(false);
-    return () => {
-      vUnsubscribe();
-      cUnsubscribe();
-      rUnsubscribe();
-    };
-  }, []);
 
   // Auto-generate records for current month when contracts or records change
   useEffect(() => {

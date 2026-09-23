@@ -29,6 +29,7 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { UserProfile, Post, Vendor, Asset, DismissedHabit } from '../types';
+import { useLiveCollection } from '../lib/liveData';
 import { trackedVendors, getVideoStockAlert, getOwedVideoCount, getAvailableVideoAssets, hasVideoTrackingScope } from '../lib/vendorStatus';
 import { format, parseISO, isBefore, addDays, isAfter, getDay, isSameDay, subDays } from 'date-fns';
 import Logo from './Logo';
@@ -51,10 +52,6 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isNotiOpen, setIsNotiOpen] = useState(false);
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
   const [lastReadNoti, setLastReadNoti] = useState<string>(localStorage.getItem('lastReadNoti') || new Date(0).toISOString());
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
@@ -62,28 +59,11 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
   // 且一旦規則生效，未範圍限定的 collection() 查詢對 editor 角色會直接 permission-denied 把整個殼弄壞——完全跳過。
   const isEditor = userProfile?.role === 'editor';
 
-  useEffect(() => {
-    if (isEditor) return;
-    const vUnsubscribe = onSnapshot(collection(db, 'vendors'), (snapshot) => {
-      setVendors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Vendor)));
-    });
-    const pUnsubscribe = onSnapshot(collection(db, 'posts'), (snapshot) => {
-      setPosts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Post)));
-    });
-    const aUnsubscribe = onSnapshot(collection(db, 'assets'), (snapshot) => {
-      setAssets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
-    });
-    const dUnsubscribe = onSnapshot(collection(db, 'dismissedHabits'), (snapshot) => {
-      setDismissedHabits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DismissedHabit)));
-    });
-
-    return () => {
-      vUnsubscribe();
-      pUnsubscribe();
-      aUnsubscribe();
-      dUnsubscribe();
-    };
-  }, [isEditor]);
+  // 共用即時資料層：整個 session 只訂閱一次，切分頁不再重讀
+  const posts = useLiveCollection<Post>('posts', !isEditor);
+  const vendors = useLiveCollection<Vendor>('vendors', !isEditor);
+  const assets = useLiveCollection<Asset>('assets', !isEditor);
+  const dismissedHabits = useLiveCollection<DismissedHabit>('dismissedHabits', !isEditor);
 
   // Notification Logic（剪輯師沒有鈴鐺，直接回空清單，不跑任何公司全域計算）
   const notifications = isEditor ? [] : (() => {

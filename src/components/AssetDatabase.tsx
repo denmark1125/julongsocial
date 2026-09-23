@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { format } from 'date-fns';
 import {
   collection,
@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking, UserProfile, deriveFlowStage } from '../types';
+import { useLiveCollection } from '../lib/liveData';
 import { visibleVendors, trackedVendors, buildPostIndex, getDisplayAssetStatus } from '../lib/vendorStatus';
 import { buildFlowUpdate, buildSubmitUndoUpdate, getClientApprovalTarget, isClientApproved } from '../lib/assetFlow';
 import { getWorkingEditorId, canReassignEditor } from '../lib/editorBilling';
@@ -69,8 +70,17 @@ const handleFirestoreError = (error: unknown, operationType: OperationType, path
 };
 
 export default function AssetDatabase() {
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [posts, setPosts] = useState<Post[]>([]);
+  // 共用即時資料層：整個 session 只訂閱一次，切分頁不再重讀。
+  // ⚠️ 原本是 `orderBy('createdAt','desc')`，現在改成前端排序。
+  //    實查過 464 支素材全部都有 createdAt，所以結果一致；
+  //    而且更穩—— Firestore 的 orderBy 會把「沒有那個欄位」的文件整個排除，
+  //    以後真的出現缺欄位的素材，舊寫法會讓它在畫面上静静消失。
+  const rawAssets = useLiveCollection<Asset>('assets');
+  const assets = useMemo(
+    () => [...rawAssets].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')),
+    [rawAssets]
+  );
+  const posts = useLiveCollection<Post>('posts');
   const [reviewNotes, setReviewNotes] = useState<Record<string, { text: string; updatedAt: string; updatedByName: string }>>({});
   const [noteAsset, setNoteAsset] = useState<Asset | null>(null);
   const [noteDraft, setNoteDraft] = useState('');
@@ -87,8 +97,8 @@ export default function AssetDatabase() {
   // 直接讀 status 會讓它永遠掛著已使用的灰底、篩選也撈不到，使用者眼中那支片就等於報廢了。
   const postIndex = React.useMemo(() => buildPostIndex(posts), [posts]);
   const effStatus = (a: Pick<Asset, 'status' | 'usedInPostId'>) => getDisplayAssetStatus(a, postIndex);
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [editors, setEditors] = useState<Editor[]>([]);
+  const vendors = useLiveCollection<Vendor>('vendors');
+  const editors = useLiveCollection<Editor>('editors');
   const [isAdding, setIsAdding] = useState(false);
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [isTaskListOpen, setIsTaskListOpen] = useState(false);
@@ -133,34 +143,13 @@ export default function AssetDatabase() {
   }, []);
 
   useEffect(() => {
-    const vUnsubscribe = onSnapshot(collection(db, 'vendors'), (snapshot) => {
-      setVendors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Vendor)));
-    });
-
-    const eUnsubscribe = onSnapshot(collection(db, 'editors'), (snapshot) => {
-      setEditors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Editor)));
-    });
-
-    const pUnsubscribe = onSnapshot(collection(db, 'posts'), (snapshot) => {
-      setPosts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Post)));
-    });
-
+    // assetReviewNotes 只有這一頁用，留在原地（不進共用資料層）
     const notesUnsubscribe = onSnapshot(collection(db, 'assetReviewNotes'), (snapshot) => {
       setReviewNotes(Object.fromEntries(snapshot.docs.map(note => [note.id, note.data() as { text: string; updatedAt: string; updatedByName: string }])));
     }, (error) => handleFirestoreError(error, OperationType.LIST, 'assetReviewNotes'));
 
-    const q = query(collection(db, 'assets'), orderBy('createdAt', 'desc'));
-    const aUnsubscribe = onSnapshot(q, (snapshot) => {
-      setAssets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'assets');
-    });
-
     return () => {
-      vUnsubscribe();
-      pUnsubscribe();
       notesUnsubscribe();
-      aUnsubscribe();
     };
   }, []);
 

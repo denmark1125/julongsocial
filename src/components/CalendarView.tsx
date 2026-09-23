@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Post, Vendor, Asset, DismissedHabit, PlannedSlotMove, ShootBooking } from '../types';
+import { useLiveCollection } from '../lib/liveData';
 import { visibleVendors, trackedVendors } from '../lib/vendorStatus';
 import { listPlannedSlots, groupSlotsByDay, PlannedSlot } from '../lib/plannedSlots';
 import PostDetailModal from './PostDetailModal';
@@ -48,54 +49,19 @@ interface CalendarViewProps {
 
 export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
-  const [slotMoves, setSlotMoves] = useState<PlannedSlotMove[]>([]);
-  const [shootBookings, setShootBookings] = useState<ShootBooking[]>([]);
+  // 共用即時資料層：整個 session 只訂閱一次，切分頁不再重讀（見 'lib/liveData'）
+  const posts = useLiveCollection<Post>('posts');
+  const vendors = useLiveCollection<Vendor>('vendors');
+  const assets = useLiveCollection<Asset>('assets');
+  const dismissedHabits = useLiveCollection<DismissedHabit>('dismissedHabits');
+  const slotMoves = useLiveCollection<PlannedSlotMove>('plannedSlotMoves');
+  const shootBookings = useLiveCollection<ShootBooking>('shootBookings');
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   // 一律先開月曆。曾經改成「手機自動進清單」，但月曆的價值就是一眼看完整個月，
   // 自動跳掉等於把那個價值拿走；要清單自己切，切換鈕永遠在。
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
   const [selectedVendorId, setSelectedVendorId] = useState<string>('all');
-
-  useEffect(() => {
-    const vUnsubscribe = onSnapshot(collection(db, 'vendors'), (snapshot) => {
-      setVendors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Vendor)));
-    });
-
-    const pUnsubscribe = onSnapshot(collection(db, 'posts'), (snapshot) => {
-      setPosts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Post)));
-    });
-
-    const aUnsubscribe = onSnapshot(collection(db, 'assets'), (snapshot) => {
-      setAssets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
-    });
-
-    const dUnsubscribe = onSnapshot(collection(db, 'dismissedHabits'), (snapshot) => {
-      setDismissedHabits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DismissedHabit)));
-    });
-
-    const mUnsubscribe = onSnapshot(collection(db, 'plannedSlotMoves'), (snapshot) => {
-      setSlotMoves(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as PlannedSlotMove)));
-    });
-
-    // 上片排程表要回答「這格的料哪來」，預約拍攝是三個來源之一（另兩個是成片庫存與待剪素材）
-    const sbUnsubscribe = onSnapshot(collection(db, 'shootBookings'), (snapshot) => {
-      setShootBookings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ShootBooking)));
-    });
-
-    return () => {
-      vUnsubscribe();
-      pUnsubscribe();
-      aUnsubscribe();
-      dUnsubscribe();
-      mUnsubscribe();
-      sbUnsubscribe();
-    };
-  }, []);
 
   /**
    * 把某一次預排挪到別天。

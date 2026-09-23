@@ -9,6 +9,7 @@ import {
 import { getAuth } from 'firebase/auth';
 import { db } from '../firebase';
 import { Post, Vendor, Asset, DismissedHabit, BillingRecord, BillingContract, ShootBooking, UserRole } from '../types';
+import { useLiveCollection } from '../lib/liveData';
 import { visibleVendors, trackedVendors, getVideoStockAlert, getOwedVideoCount, getDeficitBreakdown, getAvailableVideoAssets, hasVideoTrackingScope, LOW_STOCK_RUNWAY_DAYS } from '../lib/vendorStatus';
 import { 
   format, 
@@ -56,13 +57,14 @@ import {
 import EditReminderExportModal from './EditReminderExportModal';
 
 export default function Dashboard({ setActiveTab, currentUserRole }: { setActiveTab: (tab: string) => void; currentUserRole?: UserRole }) {
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [assets, setAssets] = useState<Asset[]>([]);
-  const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
-  const [billingRecords, setBillingRecords] = useState<BillingRecord[]>([]);
-  const [contracts, setContracts] = useState<BillingContract[]>([]);
-  const [bookings, setBookings] = useState<ShootBooking[]>([]);
+  // 共用即時資料層：這幾份整個 session 只訂閱一次，切分頁不再重讀（見 'lib/liveData'）
+  const posts = useLiveCollection<Post>('posts');
+  const vendors = useLiveCollection<Vendor>('vendors');
+  const assets = useLiveCollection<Asset>('assets');
+  const dismissedHabits = useLiveCollection<DismissedHabit>('dismissedHabits');
+  const billingRecords = useLiveCollection<BillingRecord>('billingRecords');
+  const contracts = useLiveCollection<BillingContract>('billingContracts');
+  const bookings = useLiveCollection<ShootBooking>('shootBookings');
   const [isEditReminderModalOpen, setIsEditReminderModalOpen] = useState(false);
   const [isTestingPush, setIsTestingPush] = useState(false);
 
@@ -95,45 +97,6 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
     }
   };
 
-  useEffect(() => {
-    const vUnsubscribe = onSnapshot(collection(db, 'vendors'), (snapshot) => {
-      setVendors(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Vendor)));
-    });
-
-    const pUnsubscribe = onSnapshot(collection(db, 'posts'), (snapshot) => {
-      setPosts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Post)));
-    });
-
-    const aUnsubscribe = onSnapshot(collection(db, 'assets'), (snapshot) => {
-      setAssets(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Asset)));
-    });
-
-    const dUnsubscribe = onSnapshot(collection(db, 'dismissedHabits'), (snapshot) => {
-      setDismissedHabits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DismissedHabit)));
-    });
-
-    const brUnsubscribe = onSnapshot(collection(db, 'billingRecords'), (snapshot) => {
-      setBillingRecords(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BillingRecord)));
-    });
-
-    const cUnsubscribe = onSnapshot(collection(db, 'billingContracts'), (snapshot) => {
-      setContracts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BillingContract)));
-    });
-
-    const bkUnsubscribe = onSnapshot(collection(db, 'shootBookings'), (snapshot) => {
-      setBookings(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ShootBooking)));
-    });
-
-    return () => {
-      vUnsubscribe();
-      pUnsubscribe();
-      aUnsubscribe();
-      dUnsubscribe();
-      brUnsubscribe();
-      cUnsubscribe();
-      bkUnsubscribe();
-    };
-  }, []);
 
   const stats = [
     { label: '合作廠商', value: visibleVendors(vendors).length, icon: PartnerIcon, color: 'text-[#5A5A40]', bg: 'bg-[#5A5A40]/10' },
