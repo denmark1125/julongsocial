@@ -444,6 +444,71 @@ export interface FlowLogEntry {
   note?: string; // 例如業主退回原因
 }
 
+/**
+ * 透過系統傳進公司 Drive 的一個檔案。
+ *
+ * 為什麼是獨立的 collection 而不是掛在 Asset 上，三個理由：
+ *   ① 毛片是在 Asset 存在**之前**就上傳的（一次拍攝幾十個片段，對應 0 或 1 支素材）
+ *   ② 一支素材日後會有多個成片（v1、業主退回後的 v2）
+ *   ③ 未來的腳本／文件小檔直接用 kind:'doc' 沿用同一張表，架構不用動
+ *
+ * ⚠️ 一律由 server.ts 用 admin SDK 寫入，前端只讀不寫（見 firestore.rules）。
+ */
+export type UploadKind = 'raw' | 'final' | 'doc';
+
+export interface AssetUpload {
+  id?: string;
+  kind: UploadKind;
+  /** 預留：日後若把毛片改存別的地方（B2／R2），不用改這張表的結構 */
+  storage: 'drive';
+  vendorId: string;
+  /**
+   * IP 名稱快照。理由跟 Asset.vendorName 一樣：讀得到這筆紀錄的人不一定讀得到 vendor 文件，
+   * 沒有快照畫面就會顯示「未知 IP」。
+   */
+  vendorName?: string;
+  assetId?: string;
+  /** 同一次「整批上傳」共用一個 batchId，事後要一起看或一起撤銷時用得到 */
+  batchId?: string;
+
+  driveFileId: string;
+  driveFolderId: string;
+  webViewLink?: string;
+  md5Checksum?: string;
+
+  fileName: string;
+  sizeBytes: number;
+  mimeType: string;
+
+  /** ★ 逐支備註（例如「腳本第三段要改」）。整批上傳時也是一列一個。 */
+  note?: string;
+  /** YYYY-MM-DD。決定歸到哪個月的資料夾，用拍攝日不是上傳日。 */
+  shotAt?: string;
+
+  uploadedByUid: string;
+  uploadedByName?: string;
+  createdAt: string;
+}
+
+/**
+ * Drive 資料夾的對照表。
+ * 文件 id 是可推導的字串（v1_{vendorId}_{kind}_{YYYY-MM}），所以永遠只要一次 getDoc，
+ * 不需要 query、不需要索引。
+ *
+ * ⚠️ 執行期一律用 folderId，**絕不用名稱去 Drive 查** —— 名稱只是給人看的。
+ */
+export interface DriveFolderRef {
+  id?: string;
+  folderId: string;
+  /** 人看的完整路徑，純粹除錯用 */
+  path: string;
+  vendorId: string;
+  kind: 'raw' | 'final';
+  /** YYYY-MM */
+  month: string;
+  createdAt: string;
+}
+
 export interface Asset {
   id?: string;
   vendorId: string;

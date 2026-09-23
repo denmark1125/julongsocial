@@ -538,5 +538,30 @@ service cloud.firestore {
       allow update: if isManager();
       allow delete: if isAdmin();
     }
+
+    // ── 以下三個 collection 是「透過系統把檔案傳進公司 Drive」用的 ───────────────
+    //
+    // 三個都是 allow write: if false —— **一律由 server.ts 用 admin SDK 寫入**。
+    // 這是刻意的：Drive 的 fileId／容量／歸檔位置都要先向 Google 驗證過才能寫，
+    // 前端說什麼都不算數。少了這條，任何人都能自己塞一筆「我上傳了」進來。
+
+    // 上傳紀錄。本輪剪輯師不碰 Drive，所以直接擋掉 —— 等成片也進系統時，
+    // 再照 editorCanAccessAsset() 的形狀補上逐片判斷，不要在這裡先寫一個猜的。
+    match /assetUploads/{uploadId} {
+      allow read: if isAuthenticated() && !isEditorRole();
+      allow write: if false;
+    }
+
+    // Drive 資料夾對照表（vendorId + 月份 → folderId）
+    match /driveFolders/{key} {
+      allow read: if isAuthenticated() && !isEditorRole();
+      allow write: if false;
+    }
+
+    // 系統層設定，目前只有 drive 這一筆（存根資料夾 id）
+    match /appConfig/{docId} {
+      allow read: if isManager();
+      allow write: if false;
+    }
   }
 }

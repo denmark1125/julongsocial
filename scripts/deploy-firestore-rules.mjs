@@ -33,6 +33,12 @@ const MUST_CONTAIN = [
   'touchesEditorAssignment',
   'vendorSecrets',
   'internalUnlockingInvoice',
+  // 2026-09-23 加入：Drive 上傳的三個 collection。這三個都是 allow write: if false，
+  // 舊檔裡沒有它們 —— 不小心送舊檔上去的話，這三張表就變成「沒有規則」而全面拒絕，
+  // 畫面會突然讀不到上傳紀錄，而且不會有任何錯誤訊息。
+  'assetUploads',
+  'driveFolders',
+  'appConfig',
 ];
 
 function fail(msg) {
