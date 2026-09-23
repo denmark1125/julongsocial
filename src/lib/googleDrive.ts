@@ -149,6 +149,58 @@ export async function ensureFolder(name: string, parentId?: string): Promise<str
   return created.id;
 }
 
+/** 檔名消毒：Drive 不擋這些字，但 Windows／macOS 下載後會出問題，而且路徑會很難讀。 */
+export function sanitizeFileName(name: string): string {
+  const cleaned = name
+    .replace(/[/\\:*?"<>|]/g, '_')
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .trim();
+  if (cleaned.length <= 120) return cleaned || '未命名檔案';
+  // 截斷但保留副檔名 —— 砍掉副檔名的話 Drive 與播放器都認不出檔案類型
+  const dot = cleaned.lastIndexOf('.');
+  const ext = dot > 0 && cleaned.length - dot <= 10 ? cleaned.slice(dot) : '';
+  return cleaned.slice(0, 120 - ext.length) + ext;
+}
+
+/**
+ * 某個 IP、某個月、毛片或成片的資料夾路徑，一次建到底。
+ *
+ * 資料夾名帶 vendorId 前 6 碼：IP 會改名、也可能撞名，帶 id 才能人工對得回來。
+ * ⚠️ 依「拍攝日」歸月，不是上傳日 —— 補傳三個月前的毛片要進三個月前那一格。
+ */
+export async function ensureUploadFolder(opts: {
+  rootFolderId: string;
+  vendorId: string;
+  vendorName: string;
+  kind: 'raw' | 'final';
+  month: string;           // YYYY-MM
+}): Promise<{ folderId: string; path: string }> {
+  const { rootFolderId, vendorId, vendorName, kind, month } = opts;
+  const vendorFolder = `${vendorName}_${vendorId.slice(0, 6)}`;
+  const kindFolder = kind === 'raw' ? '01_毛片' : '02_成片';
+
+  const vId = await ensureFolder(vendorFolder, rootFolderId);
+  const kId = await ensureFolder(kindFolder, vId);
+  const mId = await ensureFolder(month, kId);
+  return { folderId: mId, path: `${vendorFolder}/${kindFolder}/${month}` };
+}
+
+/**
+ * 永久刪除一個檔案。**不是丟垃圾桶** —— 垃圾桶的空間仍然算在配額裡，
+ * 要等 30 天或手動清空才會真的釋放。測試檔與作廢的上傳都該用這支。
+ */
+export async function deleteFilePermanently(fileId: string): Promise<void> {
+  const token = await getAccessToken();
+  const res = await fetch(`${DRIVE_API}/files/${encodeURIComponent(fileId)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok && res.status !== 404) {
+    const b: any = await res.json().catch(() => ({}));
+    throw new Error(`刪除 ${fileId} 失敗（${res.status}）：${b?.error?.message || ''}`);
+  }
+}
+
 export interface DriveFileInfo {
   id: string;
   name: string;

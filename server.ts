@@ -16,7 +16,7 @@ import { fileURLToPath } from "url";
 import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVideoTrackingScope, getDeficitBreakdown } from "./src/lib/vendorStatus.js";
 // 交棒狀態的判定要跟前端同一份，不然推播說的「目前狀態」會跟畫面上不一致
 import { deriveFlowStage, FLOW_STAGE_LABEL } from "./src/types.js";
-import { isDriveConfigured, getQuota, ensureFolder, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
+import { isDriveConfigured, getQuota, ensureFolder, ensureUploadFolder, sanitizeFileName, getFile, getAccessToken, deleteFilePermanently, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
 
 dotenv.config();
 
@@ -184,6 +184,132 @@ app.post("/api/admin/drive-bootstrap", async (req, res) => {
     if (e?.httpStatus) return sendAuthError(res, e);
     console.error("drive-bootstrap failed:", e?.message);
     return res.status(502).json({ error: e?.message || "初始化 Drive 失敗" });
+  }
+});
+
+/** 剩這麼多以下就不給開新的上傳。系統不能有「安靜地把硬碟塞爆」這個選項。 */
+const DRIVE_MIN_FREE_BYTES = 50 * 1024 ** 3;
+
+async function getRootFolderId(): Promise<string> {
+  const snap = await adminDb.collection("appConfig").doc("drive").get();
+  const id = snap.data()?.rootFolderId;
+  if (!id) throw Object.assign(new Error("Drive 尚未初始化，請先呼叫 /api/admin/drive-bootstrap"), { httpStatus: 409 });
+  return id;
+}
+
+/**
+ * 上傳前要的東西：目標資料夾、一顆短效的 access token（給 Google Picker 用）、還有容量。
+ *
+ * ⚠️ **一定要擋掉剪輯師。** 這顆 token 是 drive.file 範圍，拿到它就看得到我們建立的
+ *    所有檔案（所有 IP 的毛片成片），對外包來說權限太大。本輪剪輯師完全不碰 Drive。
+ */
+app.post("/api/drive/upload-context", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    const me = await requireUser(req);
+    if (me.role === 'editor') return res.status(403).json({ error: "剪輯師無法使用系統上傳" });
+
+    const { vendorId, kind = 'raw', shotAt } = req.body || {};
+    if (!vendorId) return res.status(400).json({ error: "缺少 vendorId" });
+    if (kind !== 'raw' && kind !== 'final') return res.status(400).json({ error: "kind 只能是 raw 或 final" });
+
+    const vSnap = await adminDb.collection("vendors").doc(vendorId).get();
+    if (!vSnap.exists) return res.status(404).json({ error: "找不到這個 IP" });
+    const vendorName = vSnap.data()?.name || vendorId;
+
+    // 容量預檢擋在最前面：與其讓人傳到一半被 Google 打回票，不如現在就說清楚。
+    // Picker 的錯誤是 Google 自己顯示的，我們攔不到。
+    const quota = await getQuota();
+    if (quota.freeBytes < DRIVE_MIN_FREE_BYTES) {
+      return res.status(507).json({
+        error: "DRIVE_QUOTA_LOW",
+        message: `公司雲端硬碟只剩 ${Math.round(quota.freeBytes / 1024 ** 3)} GB，已暫停上傳以免塞爆。請先清理或擴充容量。`,
+        freeGB: Math.round(quota.freeBytes / 1024 ** 3 * 10) / 10,
+      });
+    }
+
+    // 依「拍攝日」歸月，不是上傳日 —— 補傳三個月前的毛片要進三個月前那一格
+    const month = (shotAt && /^\d{4}-\d{2}/.test(shotAt) ? shotAt : new Date().toISOString()).slice(0, 7);
+    const rootFolderId = await getRootFolderId();
+    const { folderId, path: folderPath } = await ensureUploadFolder({ rootFolderId, vendorId, vendorName, kind, month });
+
+    // 可推導的 doc id ⇒ 之後永遠只要一次 getDoc，不需要查詢也不需要索引
+    await adminDb.collection("driveFolders").doc(`v1_${vendorId}_${kind}_${month}`).set({
+      folderId, path: folderPath, vendorId, kind, month, createdAt: new Date().toISOString(),
+    }, { merge: true });
+
+    const accessToken = await getAccessToken();
+    return res.json({
+      folderId, folderPath, vendorName, month, accessToken,
+      freeGB: Math.round(quota.freeBytes / 1024 ** 3 * 10) / 10,
+    });
+  } catch (e: any) {
+    if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("drive/upload-context failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "準備上傳失敗" });
+  }
+});
+
+/**
+ * 上傳完成後登記。
+ *
+ * ⚠️ **不相信前端回報的任何東西。** 每一個 fileId 都用 files.get 向 Google 確認過：
+ *    檔案真的存在、真的在我們指定的資料夾裡、而且是我們的 app 建的。
+ *    少了這道，任何登入者都能自己塞一筆「我上傳了」進來。
+ */
+app.post("/api/drive/record-uploads", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    const me = await requireUser(req);
+    if (me.role === 'editor') return res.status(403).json({ error: "剪輯師無法使用系統上傳" });
+
+    const { vendorId, kind = 'raw', folderId, batchId, files } = req.body || {};
+    if (!vendorId || !folderId || !Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ error: "缺少 vendorId / folderId / files" });
+    }
+    if (files.length > 50) return res.status(400).json({ error: "一次最多登記 50 個檔案" });
+
+    const vSnap = await adminDb.collection("vendors").doc(vendorId).get();
+    const vendorName = vSnap.data()?.name || vendorId;
+    const now = new Date().toISOString();
+    const recorded: any[] = [];
+    const rejected: any[] = [];
+
+    for (const f of files) {
+      try {
+        const info = await getFile(f.driveFileId);
+        if (!info.parents?.includes(folderId)) {
+          rejected.push({ driveFileId: f.driveFileId, reason: "不在指定的資料夾裡" });
+          continue;
+        }
+        const doc = adminDb.collection("assetUploads").doc();
+        await doc.set({
+          kind, storage: 'drive',
+          vendorId, vendorName,
+          assetId: f.assetId || null,
+          batchId: batchId || null,
+          driveFileId: info.id, driveFolderId: folderId,
+          webViewLink: info.webViewLink || null,
+          md5Checksum: info.md5Checksum || null,
+          fileName: info.name, sizeBytes: info.sizeBytes, mimeType: info.mimeType,
+          note: f.note || null,
+          shotAt: f.shotAt || null,
+          uploadedByUid: me.uid,
+          uploadedByName: me.displayName || me.email || null,
+          createdAt: now,
+        });
+        recorded.push({ id: doc.id, driveFileId: info.id, fileName: info.name, sizeBytes: info.sizeBytes });
+      } catch (err: any) {
+        rejected.push({ driveFileId: f.driveFileId, reason: err?.message || "查不到這個檔案" });
+      }
+    }
+    return res.json({ recorded, rejected });
+  } catch (e: any) {
+    if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("drive/record-uploads failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "登記上傳失敗" });
   }
 });
 
