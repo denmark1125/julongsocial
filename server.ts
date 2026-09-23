@@ -16,6 +16,7 @@ import { fileURLToPath } from "url";
 import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVideoTrackingScope, getDeficitBreakdown } from "./src/lib/vendorStatus.js";
 // 交棒狀態的判定要跟前端同一份，不然推播說的「目前狀態」會跟畫面上不一致
 import { deriveFlowStage, FLOW_STAGE_LABEL } from "./src/types.js";
+import { isDriveConfigured, getQuota, ensureFolder, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
 
 dotenv.config();
 
@@ -73,6 +74,118 @@ app.use(express.json({
   }
 }));
 app.use(cookieParser());
+
+type AuthedRole = 'engineer' | 'manager' | 'employee' | 'editor';
+interface AuthedUser {
+  uid: string;
+  email?: string;
+  role: AuthedRole;
+  displayName?: string;
+  linkedEditorId?: string;
+  assignedVendorIds?: string[];
+}
+
+/**
+ * 從請求裡認出是誰。
+ *
+ * 沿用這個專案既有的慣例：**idToken 放在 request body**（前端所有呼叫點都是這形狀，
+ * 混用兩套只會製造 bug）；同時也接受 Authorization header，給沒有 body 的 GET 用。
+ *
+ * ⚠️ admin SDK 會繞過 firestore.rules，所以角色判斷一定要在這裡自己做，不能靠規則兜底。
+ */
+async function requireUser(req: any): Promise<AuthedUser> {
+  if (!adminAuth || !adminDb) throw Object.assign(new Error("Firebase Admin 尚未初始化"), { httpStatus: 500 });
+  const raw = req.body?.idToken || String(req.headers?.authorization || '').replace(/^Bearer /, '');
+  if (!raw) throw Object.assign(new Error("缺少身分憑證"), { httpStatus: 401 });
+
+  let decoded: any;
+  try {
+    decoded = await adminAuth.verifyIdToken(raw);
+  } catch {
+    throw Object.assign(new Error("身分憑證無效或已過期"), { httpStatus: 401 });
+  }
+  const snap = await adminDb.collection("users").doc(decoded.uid).get();
+  const d = snap.data() || {};
+  return {
+    uid: decoded.uid,
+    email: decoded.email,
+    role: (d.role as AuthedRole) || 'employee',
+    displayName: d.displayName || d.username,
+    linkedEditorId: d.linkedEditorId || '',
+    assignedVendorIds: d.assignedVendorIds || [],
+  };
+}
+
+function sendAuthError(res: any, e: any) {
+  const status = e?.httpStatus || 500;
+  return res.status(status).json({ error: e?.message || "驗證失敗" });
+}
+
+/** Drive 沒設定時回 503，而不是讓路由整個炸掉 */
+function requireDriveConfigured(res: any): boolean {
+  if (isDriveConfigured()) return true;
+  res.status(503).json({ error: "Drive 尚未設定（伺服器缺少 GOOGLE_OAUTH_* 環境變數）" });
+  return false;
+}
+
+/**
+ * 查公司 Drive 還剩多少。manager 以上才看得到。
+ * 這支同時是「授權這條鏈通不通」的健康檢查：回得出 accountEmail 就代表 refresh token 還有效。
+ */
+app.get("/api/drive/quota", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    const me = await requireUser(req);
+    if (me.role !== 'engineer' && me.role !== 'manager') {
+      return res.status(403).json({ error: "只有管理者可以查看雲端容量" });
+    }
+    const q = await getQuota();
+    const GB = (n: number) => Math.round(n / 1024 ** 3 * 10) / 10;
+    return res.json({
+      accountEmail: q.accountEmail,
+      limitGB: GB(q.limitBytes),
+      usageGB: GB(q.usageBytes),
+      freeGB: GB(q.freeBytes),
+      trashGB: GB(q.trashBytes),
+      usagePct: q.limitBytes ? Math.round(q.usageBytes / q.limitBytes * 100) : 0,
+    });
+  } catch (e: any) {
+    if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("drive/quota failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "讀取 Drive 失敗" });
+  }
+});
+
+/**
+ * 一次性：建立 Drive 的根資料夾，把 id 記在 appConfig/drive。
+ *
+ * ⚠️ 根資料夾**必須由 API 自己建**。scope 是 `drive.file`，看不到「不是我們建的」資料夾，
+ *    所以不能在設定裡填一個現成資料夾的 ID —— 填了也讀不到。
+ * 重複呼叫是安全的：ensureFolder 找得到同名的就直接沿用。
+ */
+app.post("/api/admin/drive-bootstrap", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    const me = await requireUser(req);
+    if (me.role !== 'engineer') return res.status(403).json({ error: "只有工程師可以初始化 Drive" });
+
+    const rootName = req.body?.rootName || "聚浪社群系統";
+    const rootFolderId = await ensureFolder(rootName);
+    await adminDb.collection("appConfig").doc("drive").set({
+      rootFolderId, rootName,
+      createdAt: new Date().toISOString(),
+      createdByUid: me.uid,
+    }, { merge: true });
+
+    return res.json({ rootFolderId, rootName });
+  } catch (e: any) {
+    if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("drive-bootstrap failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "初始化 Drive 失敗" });
+  }
+});
 
 // Health Check
 app.get("/api/health", (req, res) => {
