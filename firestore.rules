@@ -258,7 +258,13 @@ service cloud.firestore {
              (!('legacySettlementSource' in data) || data.legacySettlementSource is string) &&
              (!('legacyReviewedAt' in data) || data.legacyReviewedAt is string) &&
              (!('legacyReviewedByUid' in data) || data.legacyReviewedByUid is string) &&
-             (!('isUrgent' in data) || data.isUrgent is bool);
+             (!('isUrgent' in data) || data.isUrgent is bool) &&
+             // 上傳毛片時寫入：這支片在 Drive 的資料夾、整體剪輯方向、每個片段的短標籤。
+             // clipNotes 是刻意的反正規化 —— 權威紀錄在 assetUploads，但那張表擋住剪輯師讀，
+             // 而他們正是要看這些字的人（理由同 vendorName 快照）。
+             (!('driveFolderId' in data) || data.driveFolderId is string) &&
+             (!('editingBrief' in data) || data.editingBrief is string) &&
+             (!('clipNotes' in data) || data.clipNotes is list);
     }
 
     function isValidDismissedHabit(data) {

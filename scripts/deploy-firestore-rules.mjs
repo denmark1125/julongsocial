@@ -39,6 +39,9 @@ const MUST_CONTAIN = [
   'assetUploads',
   'driveFolders',
   'appConfig',
+  // 2026-09-24 加入：素材的剪輯需求。少了這行型別檢查，寫得進去但規則等於沒把關，
+  // 而且代表送上去的是不含這次改動的舊檔。
+  'editingBrief',
 ];
 
 function fail(msg) {
