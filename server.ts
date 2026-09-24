@@ -473,7 +473,15 @@ app.post("/api/drive/commit-groups", async (req, res) => {
           vendorId,
           vendorName,
           editorId: '',
-          category: '未分類',
+          category: String(g.category || '').trim() || '未分類',
+          // 整支片的剪輯方向，以及每個片段的短標籤。
+          // clipNotes 是刻意的反正規化：權威紀錄在 assetUploads，但規則擋住剪輯師讀那張表，
+          // 而他們正是要看這些字的人（理由同 vendorName 快照）。
+          editingBrief: String(g.brief || '').trim(),
+          clipNotes: checked.map((c: any) => ({
+            fileName: c.info.name,
+            note: c.note || '',
+          })),
           type: 'video',
           stage: 'raw',
           filmingDate: shotAt || now.slice(0, 10),

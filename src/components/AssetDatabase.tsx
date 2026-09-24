@@ -20,6 +20,8 @@ import { visibleVendors, trackedVendors, buildPostIndex, getDisplayAssetStatus }
 import { buildFlowUpdate, buildSubmitUndoUpdate, getClientApprovalTarget, isClientApproved } from '../lib/assetFlow';
 import { getWorkingEditorId, canReassignEditor } from '../lib/editorBilling';
 import { isPickerConfigured } from '../lib/drivePicker';
+import { ASSET_CATEGORIES, ASSET_CATEGORY_DATALIST_ID } from '../lib/assetCategories';
+import EditingBrief from './EditingBrief';
 import RawFootageUpload from './RawFootageUpload';
 import { 
   Video, 
@@ -136,7 +138,6 @@ export default function AssetDatabase() {
     filmingDate: new Date().toISOString().split('T')[0]
   });
 
-  const defaultCategories = ['宣傳', '教學', '生活', '活動', '訪談', '開箱', '圖文', '資訊'];
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -994,7 +995,9 @@ export default function AssetDatabase() {
                   "px-3 py-1 rounded-full text-[13px] font-bold text-white uppercase tracking-wider",
                   asset.stage === 'raw' ? "bg-[#8B7355]" : effStatus(asset) === 'used' ? "bg-gray-400" : "bg-[#5A5A40]"
                 )}>
-                  {asset.stage === 'raw' ? '原始素材' : (asset.category || '未分類')}
+                  {/* 原始素材本來一律顯示「原始素材」，但上傳毛片時已經可以選分類了，
+                      選了卻看不到會讓人以為沒生效。有分類就顯示分類。 */}
+                  {asset.category || (asset.stage === 'raw' ? '原始素材' : '未分類')}
                 </span>
               </div>
               <div className="absolute top-4 right-4">
@@ -1050,6 +1053,9 @@ export default function AssetDatabase() {
                   "font-bold leading-tight line-clamp-2",
                   effStatus(asset) === 'used' ? "text-sm text-gray-500" : "text-lg"
                 )}>{asset.title}</h4>
+                {/* 剪輯需求。刻意跟下面琥珀色的「審片備註」分開：
+                    那是「為什麼還沒審」，這是「要怎麼剪」，兩件不同的事。 */}
+                <EditingBrief brief={asset.editingBrief} clipNotes={asset.clipNotes} />
                 {reviewNotes[asset.id!] && (
                   <button
                     type="button"
@@ -1326,14 +1332,14 @@ export default function AssetDatabase() {
                 <div className="relative">
                   <input 
                     type="text"
-                    list="asset-categories"
+                    list={ASSET_CATEGORY_DATALIST_ID}
                     className="w-full px-5 py-3 bg-[#F5F5F0] rounded-2xl border-none focus:ring-2 focus:ring-[#5A5A40]"
                     placeholder="輸入或選擇類型..."
                     value={newAsset.category}
                     onChange={(e) => setNewAsset({...newAsset, category: e.target.value})}
                   />
-                  <datalist id="asset-categories">
-                    {defaultCategories.map(t => <option key={t} value={t} />)}
+                  <datalist id={ASSET_CATEGORY_DATALIST_ID}>
+                    {ASSET_CATEGORIES.map(t => <option key={t} value={t} />)}
                   </datalist>
                 </div>
               </div>

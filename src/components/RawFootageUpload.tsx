@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { auth } from '../firebase';
 import { Vendor } from '../types';
 import { visibleVendors } from '../lib/vendorStatus';
+import { ASSET_CATEGORIES, ASSET_CATEGORY_DATALIST_ID } from '../lib/assetCategories';
 import {
   openUploadPicker, openFolderPicker, getPickerApiKey, PickedFile,
 } from '../lib/drivePicker';
@@ -45,6 +46,10 @@ interface Group {
   folderId?: string;
   path?: string;
   files: PickedFile[];
+  /** 素材分類。跟建檔畫面一樣是建議值不是列舉，可以自由輸入 */
+  category: string;
+  /** 這支片整體怎麼剪。剪輯師的卡片上會看到這段 */
+  brief: string;
 }
 
 const fmtSize = (bytes: number) => {
@@ -59,7 +64,11 @@ const defaultBatchName = (shotAt: string) => {
   return y && m && d ? `${y}／${m}${d}` : '';
 };
 
-const newGroup = (): Group => ({ key: `g${Date.now()}${Math.random().toString(36).slice(2, 6)}`, name: '', files: [] });
+// 一次拍攝多半是同一個題材，所以新的一組沿用上一組的分類，少打幾次
+const newGroup = (category = ''): Group => ({
+  key: `g${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
+  name: '', files: [], category, brief: '',
+});
 
 export default function RawFootageUpload({
   vendors, onClose, canSetFolder, defaultVendorId, defaultShotAt,
@@ -174,7 +183,9 @@ export default function RawFootageUpload({
   };
 
   const removeGroup = (key: string) => {
-    setGroups(prev => (prev.length === 1 ? [newGroup()] : prev.filter(g => g.key !== key)));
+    setGroups(prev => (prev.length === 1
+      ? [newGroup(prev[0].category)]
+      : prev.filter(g => g.key !== key)));
   };
 
   const handleCommit = async () => {
@@ -188,6 +199,8 @@ export default function RawFootageUpload({
         groups: used.map(g => ({
           name: g.name.trim(),
           groupFolderId: g.folderId,
+          category: g.category,
+          brief: g.brief,
           files: g.files.map(f => ({ driveFileId: f.id, note: notes[f.id] || '' })),
         })),
       });
@@ -221,6 +234,10 @@ export default function RawFootageUpload({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        <datalist id={ASSET_CATEGORY_DATALIST_ID}>
+          {ASSET_CATEGORIES.map(c => <option key={c} value={c} />)}
+        </datalist>
 
         <div className="px-6 py-5 overflow-y-auto space-y-5">
           {done ? (
@@ -344,6 +361,30 @@ export default function RawFootageUpload({
                         </p>
                       )}
 
+                      <div className="flex flex-wrap items-start gap-3">
+                        <div className="w-full sm:w-44">
+                          <label className="block text-xs font-medium text-slate-600 mb-1">分類</label>
+                          {/* 跟建檔畫面同一套：可以選也可以自己打，不要改成 select */}
+                          <input
+                            value={g.category}
+                            onChange={e => patch(g.key, { category: e.target.value })}
+                            list={ASSET_CATEGORY_DATALIST_ID}
+                            placeholder="輸入或選擇"
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                          />
+                        </div>
+                        <div className="flex-1 min-w-[14rem]">
+                          <label className="block text-xs font-medium text-slate-600 mb-1">剪輯需求（整支片的方向）</label>
+                          <textarea
+                            value={g.brief}
+                            onChange={e => patch(g.key, { brief: e.target.value })}
+                            rows={2}
+                            placeholder="例如：針對中秋檔期，顏色要黃色調"
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
+                          />
+                        </div>
+                      </div>
+
                       {g.files.map(f => (
                         <div key={f.id} className="bg-slate-50 rounded-lg p-3 space-y-2">
                           <div className="flex items-start justify-between gap-3">
@@ -353,7 +394,7 @@ export default function RawFootageUpload({
                           <input
                             value={notes[f.id] || ''}
                             onChange={e => setNotes(prev => ({ ...prev, [f.id]: e.target.value }))}
-                            placeholder="這段要怎麼剪、腳本要改什麼（可不填）"
+                            placeholder="這段是什麼（例如：大口吃、浮誇）"
                             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
                           />
                         </div>
@@ -363,7 +404,7 @@ export default function RawFootageUpload({
                 })}
 
                 <button
-                  onClick={() => setGroups(prev => [...prev, newGroup()])}
+                  onClick={() => setGroups(prev => [...prev, newGroup(prev[prev.length - 1]?.category || '')])}
                   className="w-full py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-600 hover:border-blue-400 hover:text-blue-600 flex items-center justify-center gap-1.5"
                 >
                   <Plus className="w-4 h-4" /> 再多一支素材

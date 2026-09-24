@@ -557,6 +557,20 @@ export interface Asset {
    * ⚠️ 一律用 id 不用資料夾名稱：名稱會被改，而且每個 IP 底下都有一個叫「剪輯」的。
    */
   driveFolderId?: string;
+  /**
+   * 這支素材整體的剪輯方向，例如「針對中秋檔期，顏色要黃色調」。上傳毛片時填。
+   * ⚠️ 剪輯師讀得到（卡片上會顯示），所以措辭是「這支片的資訊」不是派工指令。
+   */
+  editingBrief?: string;
+  /**
+   * 每個毛片片段一個短標籤，例如 [{ fileName: 'C0031.MP4', note: '大口吃' }]。
+   *
+   * **刻意的反正規化**：權威紀錄在 assetUploads，但規則擋住剪輯師讀那張表
+   *（`assetUploads` 是 `!isEditorRole()`），而他們正是要看這些字的人。
+   * 理由跟 vendorName 快照一樣：讀得到這支素材的人不一定讀得到另一份文件。
+   * 1–5 筆的小陣列，跟著 asset 一起讀，不需要動任何規則的讀取範圍。
+   */
+  clipNotes?: { fileName: string; note: string }[];
   type: AssetType;
   stage: 'raw' | 'finished';
   filmingDate?: string;

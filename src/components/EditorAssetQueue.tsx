@@ -16,6 +16,7 @@ import {
   sortFlowColumn,
 } from '../lib/assetFlow';
 import { visibleVendors } from '../lib/vendorStatus';
+import EditingBrief from './EditingBrief';
 import {
   Scissors, Film, CheckCircle2, UploadCloud, Clock, Flame,
   CalendarClock, Check, ChevronDown, ChevronRight, PackageCheck, Search, X,
@@ -185,7 +186,7 @@ function ClientBadge({ asset }: { asset: Asset }) {
   return null;
 }
 
-function AssetCard({
+export function AssetCard({
   asset, vendorName, posts, busy, onAdvance, onUpload, onUndoSubmit, onUndoUpload, showClientBadge,
   selected, onToggleSelect,
 }: {
@@ -234,6 +235,9 @@ function AssetCard({
           {showClientBadge && <ClientBadge asset={asset} />}
         </div>
         <p className="text-base text-gray-600 truncate mt-0.5">{asset.title}</p>
+        {/* 這支片的資訊，不是派工單 —— 措辭一律陳述，不要出現祈使句。
+            沒填的舊素材整塊不渲染，卡片維持原本的樣子。 */}
+        <EditingBrief brief={asset.editingBrief} clipNotes={asset.clipNotes} />
 
         {/* 每個標籤都 nowrap：中文沒有詞界，不鎖的話手機上會在「停留 12 天」中間斷成兩行留孤字。
             要換行就整個標籤換下一行。 */}
