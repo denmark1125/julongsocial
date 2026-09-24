@@ -6,19 +6,20 @@ import {
   openUploadPicker, openFolderPicker, getPickerApiKey, PickedFile,
 } from '../lib/drivePicker';
 import {
-  X, UploadCloud, FolderOpen, Loader2, CheckCircle2, AlertTriangle, Plus, Trash2,
+  X, UploadCloud, FolderOpen, Loader2, CheckCircle2, AlertTriangle, Plus, Trash2, FilePlus2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 /**
  * 毛片上傳：一次拍攝帶回來的片段，分成幾支素材各自歸檔。
  *
- * 流程：選 IP 與拍攝日 → 一次把整批傳進「拍攝批次」資料夾 → 回來分組命名
- * → 每組建一個資料夾、把該組檔案搬進去、並在 ERP 建一支素材。
+ * 流程跟同事現在手動在 Drive 做的事一模一樣：
+ *   選 IP → 拍攝日（自動帶出日期資料夾）→ 幫這支素材取名字 → 選它的片段 → 再多一支…
+ *   → 最後一次建立所有素材
  *
- * 為什麼是「先全部傳、再分組」而不是「一組一組傳」：
- * 搬檔是 metadata 操作、不重傳位元組，所以分組可以事後做；
- * 這樣使用者只要開一次 Picker，而不是五組開五次。
+ * ⚠️ **名字一定要打在選檔案之前。** 相機檔名（C0031.MP4、DJI_0104.MOV）不帶任何資訊，
+ *    如果先把整批傳上去再回來分組，畫面上只剩一排看不懂的名字，沒有人分得出哪幾支
+ *    屬於哪一支素材。**選檔案的那一刻是唯一知道分組的時刻**，離開就沒了。
  *
  * ⚠️ 資料夾結構是**你們既有的**，不是系統自己造的：
  *      自媒體IP代操/{IP}/剪輯/2026／0131/超好吃的金磚/
@@ -37,19 +38,13 @@ interface Props {
   defaultShotAt?: string;
 }
 
-interface UploadContext {
-  batchFolderId: string;
-  batchName: string;
-  vendorName: string;
-  rootFolderName: string;
-  accessToken: string;
-  appId: string;
-  freeGB: number;
-}
-
 interface Group {
   key: string;
   name: string;
+  /** 建好之後才有。有值就代表資料夾已經在 Drive 上了，名字不能再改 */
+  folderId?: string;
+  path?: string;
+  files: PickedFile[];
 }
 
 const fmtSize = (bytes: number) => {
@@ -64,6 +59,8 @@ const defaultBatchName = (shotAt: string) => {
   return y && m && d ? `${y}／${m}${d}` : '';
 };
 
+const newGroup = (): Group => ({ key: `g${Date.now()}${Math.random().toString(36).slice(2, 6)}`, name: '', files: [] });
+
 export default function RawFootageUpload({
   vendors, onClose, canSetFolder, defaultVendorId, defaultShotAt,
 }: Props) {
@@ -71,11 +68,10 @@ export default function RawFootageUpload({
   const [vendorId, setVendorId] = useState(defaultVendorId || '');
   const [shotAt, setShotAt] = useState(defaultShotAt || today);
   const [batchName, setBatchName] = useState(defaultBatchName(defaultShotAt || today));
+  const [busyKey, setBusyKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [ctx, setCtx] = useState<UploadContext | null>(null);
-  const [files, setFiles] = useState<PickedFile[]>([]);
-  const [groups, setGroups] = useState<Group[]>([{ key: 'g1', name: '' }]);
-  const [assign, setAssign] = useState<Record<string, string>>({});
+  const [freeGB, setFreeGB] = useState<number | null>(null);
+  const [groups, setGroups] = useState<Group[]>([newGroup()]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [done, setDone] = useState<{ created: any[]; failed: any[] } | null>(null);
 
@@ -85,6 +81,13 @@ export default function RawFootageUpload({
   );
   const vendor = vendors.find(v => v.id === vendorId);
   const folderReady = Boolean(vendor?.rawFootageFolderId);
+
+  // 只要有任何一組已經建了資料夾，上面那三個欄位就不能再動 —— 改了路徑就對不上了
+  const lockHeader = groups.some(g => g.folderId);
+  const uploadedCount = groups.reduce((n, g) => n + g.files.length, 0);
+
+  const patch = (key: string, next: Partial<Group>) =>
+    setGroups(prev => prev.map(g => (g.key === key ? { ...g, ...next } : g)));
 
   const callApi = async (path: string, body: Record<string, unknown>) => {
     const idToken = await auth.currentUser?.getIdToken();
@@ -108,13 +111,13 @@ export default function RawFootageUpload({
     if (!vendorId) { toast.error('請先選 IP'); return; }
     setBusy(true);
     try {
-      // 借 upload-context 拿 token 會被「還沒指定資料夾」擋住，所以走 quota 那支拿不到 token；
-      // 這裡改用一支不需要資料夾的輕量呼叫：後端的 set-vendor-folder 前置資訊。
-      const auth0 = await callApi('/api/drive/picker-auth', {});
+      // 這一步發生在「還沒有資料夾」的時候，所以不能走 group-folder（會被 409 擋住），
+      // 要用一支不需要資料夾就能拿 token 的路由，否則是雞生蛋的死結。
+      const cred = await callApi('/api/drive/picker-auth', {});
       const picked = await openFolderPicker({
-        accessToken: auth0.accessToken,
+        accessToken: cred.accessToken,
         apiKey: getPickerApiKey(),
-        appId: auth0.appId,
+        appId: cred.appId,
         title: `選擇「${vendor?.name || ''}」的毛片資料夾`,
       });
       if (!picked) return;
@@ -127,33 +130,38 @@ export default function RawFootageUpload({
     }
   };
 
-  const handleUpload = async () => {
-    if (!vendorId) { toast.error('請先選 IP'); return; }
-    setBusy(true);
+  /** 某一支素材：建好它的資料夾，然後開 Picker 把片段直接傳進去 */
+  const handlePickFiles = async (g: Group) => {
+    if (!g.name.trim()) { toast.error('請先幫這支素材取名字'); return; }
+    setBusyKey(g.key);
     try {
-      const context: UploadContext = await callApi('/api/drive/upload-context', {
-        vendorId, shotAt, batchName: batchName || undefined,
+      // 每次都重新要一次：這支路由是冪等的（資料夾已存在就直接沿用），
+      // 而且順便拿到沒過期的 token 與最新容量。「再加片段」也走同一條路。
+      const cred = await callApi('/api/drive/group-folder', {
+        vendorId, shotAt,
+        // ⚠️ 一律送字串。空字串在後端代表「不要日期資料夾」，
+        //    跟「沒帶這個欄位＝用預設日期名」是兩件事，不能用 || undefined 吃掉。
+        batchName,
+        groupName: g.name.trim(),
       });
-      setCtx(context);
+
+      if (cred.freeGB !== undefined) setFreeGB(cred.freeGB);
+      patch(g.key, { folderId: cred.groupFolderId, path: cred.path });
 
       const picked = await openUploadPicker({
-        folderId: context.batchFolderId,
-        accessToken: context.accessToken,
+        folderId: cred.groupFolderId,
+        accessToken: cred.accessToken,
         apiKey: getPickerApiKey(),
-        appId: context.appId,
+        appId: cred.appId,
         multiple: true,
-        title: `上傳到 ${context.rootFolderName}／${context.batchName}`,
+        title: `上傳到 ${cred.path}`,
       });
 
       // 空陣列＝使用者自己取消，不是錯誤，不要跳紅字
       if (picked.length === 0) return;
-      const fresh = picked.filter(f => !files.some(x => x.id === f.id));
-      setFiles(prev => [...prev, ...fresh]);
-      setAssign(prev => {
-        const next = { ...prev };
-        fresh.forEach(f => { next[f.id] = groups[0].key; });
-        return next;
-      });
+      setGroups(prev => prev.map(x => x.key === g.key
+        ? { ...x, files: [...x.files, ...picked.filter(f => !x.files.some(o => o.id === f.id))] }
+        : x));
     } catch (e: any) {
       if (e?.code === 'VENDOR_FOLDER_UNSET') {
         toast.error(e.message + (canSetFolder ? '請先按上面的「指定資料夾」。' : '請找工程師指定。'));
@@ -161,48 +169,31 @@ export default function RawFootageUpload({
         toast.error(e?.message || '上傳失敗');
       }
     } finally {
-      setBusy(false);
+      setBusyKey(null);
     }
   };
 
-  const addGroup = () => {
-    const key = `g${Date.now()}`;
-    setGroups(prev => [...prev, { key, name: '' }]);
-  };
-
   const removeGroup = (key: string) => {
-    if (groups.length === 1) return;
-    const fallback = groups.find(g => g.key !== key)!.key;
-    setAssign(prev => Object.fromEntries(
-      Object.entries(prev).map(([fid, gk]) => [fid, gk === key ? fallback : gk])
-    ));
-    setGroups(prev => prev.filter(g => g.key !== key));
+    setGroups(prev => (prev.length === 1 ? [newGroup()] : prev.filter(g => g.key !== key)));
   };
 
   const handleCommit = async () => {
-    if (!ctx) return;
-    const used = groups
-      .map(g => ({ ...g, items: files.filter(f => assign[f.id] === g.key) }))
-      .filter(g => g.items.length > 0);
-
-    if (used.length === 0) { toast.error('每一支素材至少要有一個片段'); return; }
-    const unnamed = used.filter(g => !g.name.trim());
-    if (unnamed.length) { toast.error('每一組都要取名字（會變成素材標題與資料夾名稱）'); return; }
+    const used = groups.filter(g => g.folderId && g.files.length > 0);
+    if (used.length === 0) { toast.error('至少要有一支素材傳了片段'); return; }
 
     setBusy(true);
     try {
       const data = await callApi('/api/drive/commit-groups', {
-        vendorId,
-        batchFolderId: ctx.batchFolderId,
-        shotAt,
+        vendorId, shotAt,
         groups: used.map(g => ({
           name: g.name.trim(),
-          files: g.items.map(f => ({ driveFileId: f.id, note: notes[f.id] || '' })),
+          groupFolderId: g.folderId,
+          files: g.files.map(f => ({ driveFileId: f.id, note: notes[f.id] || '' })),
         })),
       });
       setDone(data);
       if (data.failed?.length) {
-        toast.error(`${data.created?.length || 0} 支建好了，${data.failed.length} 組失敗`);
+        toast.error(`${data.created?.length || 0} 支建好了，${data.failed.length} 支失敗`);
       } else {
         toast.success(`已建立 ${data.created?.length || 0} 支素材`);
       }
@@ -213,8 +204,10 @@ export default function RawFootageUpload({
     }
   };
 
-  const totalBytes = files.reduce((s, f) => s + f.sizeBytes, 0);
-  const lockHeader = files.length > 0;
+  const pathHint = () => {
+    const root = vendor?.rawFootageFolderName || '';
+    return [root, batchName, '素材名稱'].filter(Boolean).join('／');
+  };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -243,7 +236,7 @@ export default function RawFootageUpload({
               </ul>
               {done.failed.length > 0 && (
                 <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  <p className="font-medium mb-1">這幾組沒有成功，檔案還留在批次資料夾裡：</p>
+                  <p className="font-medium mb-1">這幾支沒有成功，檔案還在雲端資料夾裡：</p>
                   <ul className="space-y-1">
                     {done.failed.map((f: any, i: number) => <li key={i}>・{f.name}：{f.reason}</li>)}
                   </ul>
@@ -257,7 +250,7 @@ export default function RawFootageUpload({
                   <label className="block text-sm font-medium text-slate-700 mb-1">IP</label>
                   <select
                     value={vendorId}
-                    onChange={e => { setVendorId(e.target.value); setCtx(null); }}
+                    onChange={e => setVendorId(e.target.value)}
                     disabled={lockHeader}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-base disabled:bg-slate-100"
                   >
@@ -270,137 +263,118 @@ export default function RawFootageUpload({
                   <input
                     type="date"
                     value={shotAt}
-                    onChange={e => {
-                      setShotAt(e.target.value);
-                      setBatchName(defaultBatchName(e.target.value));
-                      setCtx(null);
-                    }}
+                    onChange={e => { setShotAt(e.target.value); setBatchName(defaultBatchName(e.target.value)); }}
                     disabled={lockHeader}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-base disabled:bg-slate-100"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">批次資料夾名稱</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">日期資料夾</label>
                   <input
                     value={batchName}
-                    onChange={e => { setBatchName(e.target.value); setCtx(null); }}
+                    onChange={e => setBatchName(e.target.value)}
                     disabled={lockHeader}
-                    placeholder="2026／0924"
+                    placeholder="留空＝不分日期"
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-base disabled:bg-slate-100"
                   />
                 </div>
               </div>
 
               {vendorId && (
-                <div className="flex flex-wrap items-center justify-between gap-3 text-sm bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-sm bg-slate-50 border border-slate-200 rounded-lg px-4 py-3">
                   <span className="flex items-center gap-1.5 text-slate-700">
-                    <FolderOpen className="w-4 h-4 text-amber-500" />
+                    <FolderOpen className="w-4 h-4 text-amber-500 shrink-0" />
                     {folderReady
-                      ? <span>毛片放在 <span className="font-medium">{vendor?.rawFootageFolderName}</span>／{batchName}</span>
+                      ? <span>會建在 <span className="font-medium">{pathHint()}</span></span>
                       : <span className="text-amber-700">這個 IP 還沒指定毛片資料夾</span>}
                   </span>
-                  {ctx && (
-                    <span className={ctx.freeGB < 200 ? 'text-red-600 font-medium' : 'text-slate-500'}>
-                      雲端剩餘 {ctx.freeGB} GB
-                    </span>
-                  )}
-                  {!lockHeader && canSetFolder && (
-                    <button onClick={handlePickFolder} disabled={busy} className="text-blue-600 hover:underline disabled:opacity-50">
-                      {folderReady ? '換一個資料夾' : '指定資料夾'}
-                    </button>
-                  )}
+                  <span className="flex items-center gap-3">
+                    {freeGB !== null && (
+                      <span className={freeGB < 200 ? 'text-red-600 font-medium whitespace-nowrap' : 'text-slate-500 whitespace-nowrap'}>
+                        雲端剩餘 {freeGB} GB
+                      </span>
+                    )}
+                    {!lockHeader && canSetFolder && (
+                      <button onClick={handlePickFolder} disabled={busy} className="text-blue-600 hover:underline disabled:opacity-50 whitespace-nowrap">
+                        {folderReady ? '換一個資料夾' : '指定資料夾'}
+                      </button>
+                    )}
+                  </span>
                 </div>
               )}
 
-              {files.length === 0 ? (
-                <button
-                  onClick={handleUpload}
-                  disabled={busy || !vendorId || !folderReady}
-                  className="w-full py-4 border-2 border-dashed border-slate-300 rounded-xl text-slate-600 hover:border-blue-400 hover:text-blue-600 disabled:opacity-50 disabled:hover:border-slate-300 flex items-center justify-center gap-2 font-medium"
-                >
-                  {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : <UploadCloud className="w-5 h-5" />}
-                  {busy ? '準備中…' : '選擇這次拍攝的所有片段'}
-                </button>
-              ) : (
-                <div className="space-y-4">
-                  <div className="space-y-1">
-                    {/* ⚠️ 兩段都 nowrap：中文沒有詞界，這行在手機上會從「分成幾支素／材就建幾組」
-                        中間斷開。寧可讓按鈕自己掉一行，也不要把詞斷掉。 */}
-                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                      <p className="text-sm text-slate-700 whitespace-nowrap">
-                        已上傳 {files.length} 個片段{totalBytes > 0 && `（${fmtSize(totalBytes)}）`}
-                      </p>
-                      <button onClick={handleUpload} disabled={busy} className="text-sm text-blue-600 hover:underline disabled:opacity-50 whitespace-nowrap">
-                        再加片段
-                      </button>
-                    </div>
-                    <p className="text-sm text-slate-500">分成幾支素材，就建幾組</p>
-                  </div>
-
-                  {groups.map((g, gi) => {
-                    const items = files.filter(f => assign[f.id] === g.key);
-                    return (
-                      <div key={g.key} className="border border-slate-200 rounded-xl p-4 space-y-3">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-slate-500 shrink-0">第 {gi + 1} 支</span>
-                          <input
-                            value={g.name}
-                            onChange={e => setGroups(prev => prev.map(x => x.key === g.key ? { ...x, name: e.target.value } : x))}
-                            placeholder="素材名稱，例如：超好吃的金磚"
-                            className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-base"
-                          />
-                          {groups.length > 1 && (
-                            <button onClick={() => removeGroup(g.key)} className="text-slate-400 hover:text-red-600 shrink-0" aria-label="刪掉這一組">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-
-                        {items.length === 0 ? (
-                          <p className="text-sm text-slate-400">還沒有片段分到這一組</p>
-                        ) : items.map(f => (
-                          <div key={f.id} className="bg-slate-50 rounded-lg p-3 space-y-2">
-                            <div className="flex items-start justify-between gap-3">
-                              <span className="text-sm text-slate-800 break-all">{f.name}</span>
-                              <span className="text-xs text-slate-500 shrink-0 pt-0.5">{fmtSize(f.sizeBytes)}</span>
-                            </div>
-                            <div className="flex flex-col sm:flex-row gap-2">
-                              <input
-                                value={notes[f.id] || ''}
-                                onChange={e => setNotes(prev => ({ ...prev, [f.id]: e.target.value }))}
-                                placeholder="這段要怎麼剪、腳本要改什麼（可不填）"
-                                className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
-                              />
-                              {/* 只有一組時這個選單沒有任何用處，不要佔位 */}
-                              {groups.length > 1 && (
-                                <select
-                                  value={assign[f.id]}
-                                  onChange={e => setAssign(prev => ({ ...prev, [f.id]: e.target.value }))}
-                                  className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white sm:w-48"
-                                >
-                                  {groups.map((x, i) => (
-                                    <option key={x.key} value={x.key}>
-                                      第 {i + 1} 支{x.name ? `：${x.name}` : ''}
-                                    </option>
-                                  ))}
-                                </select>
-                              )}
-                            </div>
-                          </div>
-                        ))}
+              <div className="space-y-3">
+                {groups.map((g, gi) => {
+                  const locked = Boolean(g.folderId);
+                  const thisBusy = busyKey === g.key;
+                  return (
+                    <div key={g.key} className="border border-slate-200 rounded-xl p-4 space-y-3">
+                      {/* ⚠️ 手機上名稱欄會被按鈕擠成「荔妃的命」。給輸入框一個最小寬度，
+                          寬度不夠時讓按鈕自己換到下一行，而不是壓縮輸入框。 */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium text-slate-500 shrink-0 whitespace-nowrap">第 {gi + 1} 支</span>
+                        <input
+                          value={g.name}
+                          onChange={e => patch(g.key, { name: e.target.value })}
+                          // ⚠️ 資料夾建了就不能改名：改了畫面叫 A、Drive 叫 B，之後對不回來。
+                          //    要改只能把整組刪掉重來。
+                          disabled={locked}
+                          placeholder="素材名稱，例如：超好吃的金磚"
+                          className="flex-1 min-w-[12rem] px-3 py-2 border border-slate-300 rounded-lg text-base disabled:bg-slate-100 disabled:text-slate-600"
+                        />
+                        <button
+                          onClick={() => handlePickFiles(g)}
+                          disabled={!g.name.trim() || !folderReady || thisBusy}
+                          className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40 flex items-center gap-1.5 shrink-0 whitespace-nowrap"
+                        >
+                          {thisBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FilePlus2 className="w-4 h-4" />}
+                          {g.files.length > 0 ? '再加片段' : '選檔案'}
+                        </button>
+                        {(groups.length > 1 || g.files.length > 0) && (
+                          <button onClick={() => removeGroup(g.key)} className="text-slate-400 hover:text-red-600 shrink-0" aria-label="刪掉這一支">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
-                    );
-                  })}
 
-                  <button onClick={addGroup} className="w-full py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-600 hover:border-blue-400 hover:text-blue-600 flex items-center justify-center gap-1.5">
-                    <Plus className="w-4 h-4" /> 再多一支素材
-                  </button>
+                      {locked && (
+                        <p className="text-xs text-slate-500">
+                          已建資料夾 {g.path}
+                          {g.files.length === 0 && '（還沒傳片段）'}
+                        </p>
+                      )}
 
-                  <p className="text-xs text-amber-700 flex items-start gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                    <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
-                    片段已經在雲端的批次資料夾了，但還沒分組、也還沒建素材。現在關掉，這批就要靠人工整理。
-                  </p>
-                </div>
+                      {g.files.map(f => (
+                        <div key={f.id} className="bg-slate-50 rounded-lg p-3 space-y-2">
+                          <div className="flex items-start justify-between gap-3">
+                            <span className="text-sm text-slate-800 break-all">{f.name}</span>
+                            <span className="text-xs text-slate-500 shrink-0 pt-0.5">{fmtSize(f.sizeBytes)}</span>
+                          </div>
+                          <input
+                            value={notes[f.id] || ''}
+                            onChange={e => setNotes(prev => ({ ...prev, [f.id]: e.target.value }))}
+                            placeholder="這段要怎麼剪、腳本要改什麼（可不填）"
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+
+                <button
+                  onClick={() => setGroups(prev => [...prev, newGroup()])}
+                  className="w-full py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-600 hover:border-blue-400 hover:text-blue-600 flex items-center justify-center gap-1.5"
+                >
+                  <Plus className="w-4 h-4" /> 再多一支素材
+                </button>
+              </div>
+
+              {uploadedCount > 0 && (
+                <p className="text-xs text-amber-700 flex items-start gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-px" />
+                  片段已經傳到雲端了，但還沒建成素材。現在關掉，這批就只存在於 Drive、系統裡查不到。
+                </p>
               )}
             </>
           )}
@@ -410,14 +384,14 @@ export default function RawFootageUpload({
           <button onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">
             {done ? '關閉' : '取消'}
           </button>
-          {files.length > 0 && !done && (
+          {uploadedCount > 0 && !done && (
             <button
               onClick={handleCommit}
               disabled={busy}
               className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 font-medium"
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-              建立素材並歸檔
+              建立素材
             </button>
           )}
         </div>

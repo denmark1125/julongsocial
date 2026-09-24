@@ -19,6 +19,7 @@ import { useLiveCollection } from '../lib/liveData';
 import { visibleVendors, trackedVendors, buildPostIndex, getDisplayAssetStatus } from '../lib/vendorStatus';
 import { buildFlowUpdate, buildSubmitUndoUpdate, getClientApprovalTarget, isClientApproved } from '../lib/assetFlow';
 import { getWorkingEditorId, canReassignEditor } from '../lib/editorBilling';
+import { isPickerConfigured } from '../lib/drivePicker';
 import RawFootageUpload from './RawFootageUpload';
 import { 
   Video, 
@@ -650,8 +651,12 @@ export default function AssetDatabase() {
           <p className="text-sm text-gray-500">管理各廠商的影片與貼文素材庫存</p>
         </div>
         <div className="flex flex-wrap gap-4 w-full sm:w-auto">
-          {/* P3 驗證期間只開給工程師：先拿真檔確認分類與登記都對了，再開放給其他同事。 */}
-          {me?.role === 'engineer' && (
+          {/* 同事（employee）也要能上傳毛片 —— 他們才是這個功能的主要使用者。
+              只有剪輯師不行：那顆 Drive token 看得到我們建立的所有檔案，對外包權限太大，
+              後端也會再擋一次。
+              ⚠️ 金鑰沒設就整顆不顯示（正式站尚未設 VITE_GOOGLE_PICKER_API_KEY，
+              所以在那裡這個功能是暗的），免得人按了才看到錯誤。 */}
+          {me?.role && me.role !== 'editor' && isPickerConfigured() && (
             <button
               onClick={() => setIsUploadingRaw(true)}
               className="bg-white text-[#5A5A40] px-4 py-2 rounded-2xl border border-black/5 shadow-sm font-bold flex items-center space-x-2 hover:bg-gray-50 transition-colors"

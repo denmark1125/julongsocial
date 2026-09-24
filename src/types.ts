@@ -548,6 +548,15 @@ export interface Asset {
   recognizedMonth?: string;
   title: string;
   url?: string;
+  /**
+   * 這支素材在 Drive 上那一組毛片資料夾的 id（由「上傳毛片」建立時寫入）。
+   *
+   * 為什麼不只靠 `url`：`url` 是給人點的（存的是資料夾 webViewLink，所有既有畫面
+   * 自動就有連結），但它是字串、會被人編輯，不能拿來當資料關聯的依據。
+   * 孤兒對帳、日後「成片一鍵送客戶」都要拿 id 去比對。
+   * ⚠️ 一律用 id 不用資料夾名稱：名稱會被改，而且每個 IP 底下都有一個叫「剪輯」的。
+   */
+  driveFolderId?: string;
   type: AssetType;
   stage: 'raw' | 'finished';
   filmingDate?: string;

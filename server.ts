@@ -238,11 +238,15 @@ app.post("/api/drive/set-vendor-folder", async (req, res) => {
     if (me.role !== 'engineer' && me.role !== 'manager') {
       return res.status(403).json({ error: "只有工程師或管理者可以設定資料夾" });
     }
+    // vendorId 是選填：廠商還在建檔中（文件還不存在）的時候，這支只負責「驗這個資料夾
+    // 我們存取得到嗎」，驗過後由前端連同廠商資料一起存。有帶 vendorId 才直接寫回。
     const { vendorId, folderId } = req.body || {};
-    if (!vendorId || !folderId) return res.status(400).json({ error: "缺少 vendorId / folderId" });
+    if (!folderId) return res.status(400).json({ error: "缺少 folderId" });
 
-    const vSnap = await adminDb.collection("vendors").doc(vendorId).get();
-    if (!vSnap.exists) return res.status(404).json({ error: "找不到這個 IP" });
+    if (vendorId) {
+      const vSnap = await adminDb.collection("vendors").doc(vendorId).get();
+      if (!vSnap.exists) return res.status(404).json({ error: "找不到這個 IP" });
+    }
 
     // 真的去問 Google 一次。挑錯東西現在就要擋下來，不要等到第一次上傳才炸在使用者臉上。
     let info;
@@ -262,12 +266,14 @@ app.post("/api/drive/set-vendor-folder", async (req, res) => {
       return res.status(400).json({ error: "選到的不是資料夾" });
     }
 
-    await adminDb.collection("vendors").doc(vendorId).set({
-      rawFootageFolderId: info.id,
-      rawFootageFolderName: info.name,
-    }, { merge: true });
+    if (vendorId) {
+      await adminDb.collection("vendors").doc(vendorId).set({
+        rawFootageFolderId: info.id,
+        rawFootageFolderName: info.name,
+      }, { merge: true });
+    }
 
-    return res.json({ folderId: info.id, folderName: info.name });
+    return res.json({ folderId: info.id, folderName: info.name, saved: Boolean(vendorId) });
   } catch (e: any) {
     if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
     if (e?.httpStatus) return sendAuthError(res, e);
@@ -284,19 +290,29 @@ function defaultBatchName(shotAt?: string): string {
 }
 
 /**
- * 上傳前要的東西：拍攝批次資料夾、一顆短效的 access token（給 Google Picker 用）、還有容量。
+ * 某一組毛片的目標資料夾 ＋ 一顆短效 token（給 Google Picker 用）。
+ *
+ * 一組＝一支素材＝一個資料夾（例如「超好吃的金磚」底下 1–5 個片段）。
+ * 路徑是 {IP 的毛片根}/{拍攝批次}/{素材名稱}，批次那層可以不要。
+ *
+ * ⚠️ 為什麼是「先命名、再選檔案」而不是「先全部傳、回來分組」：
+ *    相機檔名（C0031.MP4、DJI_0104.MOV）不帶任何資訊。整批傳完之後畫面上只剩一排
+ *    無意義的名字，沒有人分得出哪幾支屬於哪一支素材，要分還得一支支點開看。
+ *    **選檔案的那一刻是唯一知道分組的時刻**，所以資料夾必須在上傳前就建好。
  *
  * ⚠️ **一定要擋掉剪輯師。** 這顆 token 是 drive.file 範圍，拿到它就看得到我們建立的
  *    所有檔案（所有 IP 的毛片成片），對外包來說權限太大。本輪剪輯師完全不碰 Drive。
  */
-app.post("/api/drive/upload-context", async (req, res) => {
+app.post("/api/drive/group-folder", async (req, res) => {
   if (!requireDriveConfigured(res)) return;
   try {
     const me = await requireUser(req);
     if (me.role === 'editor') return res.status(403).json({ error: "剪輯師無法使用系統上傳" });
 
-    const { vendorId, shotAt, batchName } = req.body || {};
+    const { vendorId, shotAt, batchName, groupName } = req.body || {};
     if (!vendorId) return res.status(400).json({ error: "缺少 vendorId" });
+    const group = sanitizeFileName(String(groupName || '').trim());
+    if (!group) return res.status(400).json({ error: "請先幫這支素材取名字" });
 
     const vSnap = await adminDb.collection("vendors").doc(vendorId).get();
     if (!vSnap.exists) return res.status(404).json({ error: "找不到這個 IP" });
@@ -323,21 +339,31 @@ app.post("/api/drive/upload-context", async (req, res) => {
       });
     }
 
-    const name = sanitizeFileName(String(batchName || defaultBatchName(shotAt)));
-    const batchFolderId = await ensureBatchFolder({ rawRootFolderId, batchName: name });
+    // 批次（日期）資料夾是**選配**。你們的實際結構兩種都有：
+    //   又生農場／祥濱  剪輯/2026／0131/素材名稱/     ← 有日期層
+    //   彭彭            剪輯/01毛片備份/素材名稱/      ← 沒有日期層
+    // 前端傳空字串＝不要這一層，素材資料夾直接建在該 IP 的毛片根底下。
+    // ⚠️ 空字串與「沒帶這個欄位」意思不同：沒帶＝用預設日期名。
+    const wantsBatch = !(typeof batchName === 'string' && batchName.trim() === '');
+    const batch = wantsBatch ? sanitizeFileName(String(batchName || defaultBatchName(shotAt))) : '';
+    const parentId = wantsBatch
+      ? await ensureBatchFolder({ rawRootFolderId, batchName: batch })
+      : rawRootFolderId;
 
-    // 可推導的 doc id ⇒ 之後永遠只要一次 getDoc，不需要查詢也不需要索引
-    await adminDb.collection("driveFolders").doc(`v2_${vendorId}_raw_${name}`).set({
-      folderId: batchFolderId,
-      path: `${vendor.rawFootageFolderName || ''}/${name}`,
-      vendorId, kind: 'raw', batchName: name, createdAt: new Date().toISOString(),
+    const groupFolderId = await ensureFolder(group, parentId);
+    const path = [vendor.rawFootageFolderName || '', batch, group].filter(Boolean).join('/');
+
+    // 可推導的 doc id ⇒ 之後永遠只要一次 getDoc，不需要查詢也不需要索引。
+    // 這張表同時是孤兒對帳的依據：這裡有紀錄、assetUploads 卻沒有，就是傳了沒登記。
+    await adminDb.collection("driveFolders").doc(`v3_${vendorId}_raw_${batch || 'root'}_${group}`).set({
+      folderId: groupFolderId, parentFolderId: parentId, path,
+      vendorId, kind: 'raw', batchName: batch, groupName: group,
+      createdAt: new Date().toISOString(), createdByUid: me.uid,
     }, { merge: true });
 
-    const accessToken = await getAccessToken();
     return res.json({
-      batchFolderId, batchName: name, vendorName,
-      rootFolderName: vendor.rawFootageFolderName || '',
-      accessToken,
+      groupFolderId, groupName: group, batchName: batch, path, vendorName,
+      accessToken: await getAccessToken(),
       // Picker 在 drive.file 範圍下要知道是哪個 Cloud 專案在存取檔案，
       // 那就是 client ID 最前面那串專案編號。從既有環境變數推導，不另開一個。
       appId: (process.env.GOOGLE_OAUTH_CLIENT_ID || '').split('-')[0],
@@ -346,7 +372,7 @@ app.post("/api/drive/upload-context", async (req, res) => {
   } catch (e: any) {
     if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
     if (e?.httpStatus) return sendAuthError(res, e);
-    console.error("drive/upload-context failed:", e?.message);
+    console.error("drive/group-folder failed:", e?.message);
     return res.status(502).json({ error: e?.message || "準備上傳失敗" });
   }
 });
@@ -379,15 +405,18 @@ async function autoResolveShootBooking(vendorId: string): Promise<void> {
 }
 
 /**
- * 分組收尾：把這次傳上去的檔案依分組搬進各自的素材資料夾，並在 ERP 建立對應素材。
+ * 收尾：把這次上傳的每一組登記成 ERP 的一支素材。
  *
- * 一組＝一支素材＝一個資料夾（例如「超好吃的金磚」底下 1–5 個片段）。
- * 一次拍攝帶回 10 個片段、分成 5 組，就是 5 個資料夾、5 筆素材。
+ * 檔案在 Picker 上傳時就已經落在正確的資料夾了（前端先打 group-folder 拿到 id 才開 Picker），
+ * 所以**這裡不搬檔**，只做三件事：向 Google 確認檔案真的在、建素材、寫 assetUploads。
  *
- * ⚠️ **搬檔不重傳位元組**（files.update 的 addParents/removeParents 是 metadata 操作），
- *    所以先整批傳進批次夾、再分組搬進去，比讓使用者開五次 Picker 好得多。
- * ⚠️ **不相信前端給的任何東西。** 每個 fileId 都向 Google 確認過存在、而且確實來自
- *    這次的批次夾（ensureFileParent 的 expectedParent），否則任何登入者都能把別的檔案搬進來。
+ * ERP 與資料夾的連動有三層，缺一不可：
+ *   素材 → 資料夾（給人點）  asset.url ＝ 資料夾 webViewLink，既有「素材連結」UI 自動生效
+ *   素材 → 資料夾（給程式）  asset.driveFolderId，不依賴會被人編輯的網址字串
+ *   資料夾 → 素材            assetUploads 每個片段一筆，帶 assetId / groupFolderId
+ *
+ * ⚠️ **不相信前端給的任何東西。** 每個 fileId 都用 ensureFileParent 向 Google 確認過
+ *    存在、而且確實在這一組的資料夾裡，否則任何登入者都能塞一筆「我上傳了」進來。
  * ⚠️ admin SDK 會繞過 firestore.rules，所以角色判斷一定要在這裡自己做。
  */
 app.post("/api/drive/commit-groups", async (req, res) => {
@@ -396,13 +425,13 @@ app.post("/api/drive/commit-groups", async (req, res) => {
     const me = await requireUser(req);
     if (me.role === 'editor') return res.status(403).json({ error: "剪輯師無法使用系統上傳" });
 
-    const { vendorId, batchFolderId, shotAt, groups } = req.body || {};
-    if (!vendorId || !batchFolderId || !Array.isArray(groups) || groups.length === 0) {
-      return res.status(400).json({ error: "缺少 vendorId / batchFolderId / groups" });
+    const { vendorId, shotAt, groups } = req.body || {};
+    if (!vendorId || !Array.isArray(groups) || groups.length === 0) {
+      return res.status(400).json({ error: "缺少 vendorId / groups" });
     }
-    if (groups.length > 30) return res.status(400).json({ error: "一次最多 30 組" });
+    if (groups.length > 30) return res.status(400).json({ error: "一次最多 30 支素材" });
     const fileCount = groups.reduce((n: number, g: any) => n + (g.files?.length || 0), 0);
-    if (fileCount === 0) return res.status(400).json({ error: "每一組都要有檔案" });
+    if (fileCount === 0) return res.status(400).json({ error: "每一支素材至少要有一個片段" });
     if (fileCount > 100) return res.status(400).json({ error: "一次最多 100 個檔案" });
 
     const vSnap = await adminDb.collection("vendors").doc(vendorId).get();
@@ -415,18 +444,20 @@ app.post("/api/drive/commit-groups", async (req, res) => {
 
     for (const g of groups) {
       const groupName = sanitizeFileName(String(g.name || '').trim());
-      if (!groupName) { failed.push({ name: g.name, reason: "這一組沒有取名字" }); continue; }
+      const groupFolderId = String(g.groupFolderId || '');
+      if (!groupName || !groupFolderId) {
+        failed.push({ name: g.name || '(未命名)', reason: "這一組沒有名字或沒有資料夾" }); continue;
+      }
       if (!Array.isArray(g.files) || g.files.length === 0) {
         failed.push({ name: groupName, reason: "這一組沒有檔案" }); continue;
       }
       try {
-        const groupFolderId = await ensureFolder(groupName, batchFolderId);
-
-        const movedFiles: any[] = [];
+        const checked: any[] = [];
         for (const f of g.files) {
-          // expectedParent＝批次夾：確認這個檔案真的是這次傳上來的
-          const info = await ensureFileParent(f.driveFileId, groupFolderId, batchFolderId);
-          movedFiles.push({ info, note: f.note || null });
+          // 檔案本來就該在這個資料夾裡；ensureFileParent 是冪等的，
+          // 在對的位置就只做一次 getFile，等於「向 Google 確認它真的存在且在這裡」。
+          const info = await ensureFileParent(f.driveFileId, groupFolderId, groupFolderId);
+          checked.push({ info, note: f.note || null });
         }
 
         // 素材建檔。欄位刻意跟畫面上人工建檔（handleAddAsset）一字不差，
@@ -435,8 +466,10 @@ app.post("/api/drive/commit-groups", async (req, res) => {
         const assetRef = adminDb.collection("assets").doc();
         await assetRef.set({
           title: groupName,
-          // 素材連結直接指向那一組的資料夾，點進去就是全部片段
+          // 給人點的連結：點進去就是那一組的全部片段
           url: folderInfo.webViewLink || '',
+          // 給程式用的外鍵：網址被改掉也還在，孤兒對帳與日後送客戶都靠它
+          driveFolderId: groupFolderId,
           vendorId,
           vendorName,
           editorId: '',
@@ -450,19 +483,19 @@ app.post("/api/drive/commit-groups", async (req, res) => {
           createdBy: me.uid,
         });
 
-        for (const m of movedFiles) {
+        for (const c of checked) {
           await adminDb.collection("assetUploads").doc().set({
             kind: 'raw', storage: 'drive',
             vendorId, vendorName,
             assetId: assetRef.id,
-            batchId: batchFolderId,
-            batchFolderId,
+            batchId: groupFolderId,
+            batchFolderId: folderInfo.parents?.[0] || null,
             groupName, groupFolderId,
-            driveFileId: m.info.id, driveFolderId: groupFolderId,
-            webViewLink: m.info.webViewLink || null,
-            md5Checksum: m.info.md5Checksum || null,
-            fileName: m.info.name, sizeBytes: m.info.sizeBytes, mimeType: m.info.mimeType,
-            note: m.note,
+            driveFileId: c.info.id, driveFolderId: groupFolderId,
+            webViewLink: c.info.webViewLink || null,
+            md5Checksum: c.info.md5Checksum || null,
+            fileName: c.info.name, sizeBytes: c.info.sizeBytes, mimeType: c.info.mimeType,
+            note: c.note,
             shotAt: shotAt || null,
             uploadedByUid: me.uid,
             uploadedByName: me.displayName || me.email || null,
@@ -473,7 +506,7 @@ app.post("/api/drive/commit-groups", async (req, res) => {
         // 拍攝預約核銷：跟畫面上人工建檔的行為一致，一支素材算一次交件
         await autoResolveShootBooking(vendorId);
 
-        created.push({ assetId: assetRef.id, name: groupName, fileCount: movedFiles.length });
+        created.push({ assetId: assetRef.id, name: groupName, fileCount: checked.length });
       } catch (err: any) {
         failed.push({ name: groupName, reason: err?.message || "這一組處理失敗" });
       }
@@ -484,7 +517,7 @@ app.post("/api/drive/commit-groups", async (req, res) => {
     if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
     if (e?.httpStatus) return sendAuthError(res, e);
     console.error("drive/commit-groups failed:", e?.message);
-    return res.status(502).json({ error: e?.message || "分組登記失敗" });
+    return res.status(502).json({ error: e?.message || "登記失敗" });
   }
 });
 

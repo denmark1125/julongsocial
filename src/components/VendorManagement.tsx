@@ -14,6 +14,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Vendor, SocialAccount, OperationType, Editor, PauseRecord, UserProfile, VendorTargetChange, VendorSecrets, socialAccountKey, platformOptionsFor, platformsFromHabits } from '../types';
+import { openFolderPicker, getPickerApiKey, isPickerConfigured } from '../lib/drivePicker';
 import { Plus, Trash2, Edit2, ExternalLink, Shield, X, Eye, EyeOff, Users, ChevronDown, ChevronUp, Settings2, Snowflake, RotateCcw, PowerOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { clsx, type ClassValue } from 'clsx';
@@ -71,7 +72,70 @@ export default function VendorManagement() {
     editorName: '',
     selfPublishing: false,
     defaultPlatforms: { video: [] as string[], post: [] as string[] },
+    // 這個 IP 的毛片放在雲端哪裡。⚠️ 只能用 Google Picker 指，不能手打路徑或貼網址：
+    // 授權範圍是 drive.file，看不到「不是這個 app 建立的」資料夾，貼進來也讀不到（404）。
+    rawFootageFolderId: '',
+    rawFootageFolderName: '',
   });
+  // 指定資料夾只開給 engineer/manager（後端也會再擋一次）
+  const [myRole, setMyRole] = useState<string>('');
+  const [pickingFolder, setPickingFolder] = useState(false);
+
+  /**
+   * 指定這個 IP 的毛片資料夾。
+   *
+   * ⚠️ 只能用 Google Picker 挑，**不能讓人打路徑或貼網址**：授權範圍是 drive.file，
+   *    看不到「不是這個 app 建立的」資料夾，貼進來的 id 一律 404。
+   * ⚠️ 要挑**毛片實際放的那一層**（剪輯／剪輯_謝／2 剪輯／毛片區），不要挑 IP 的最上層。
+   *    挑上層的話系統看不到裡面既有的「剪輯」，會再建一個同名的出來，變成兩個剪輯資料夾。
+   * 廠商還在建檔中（還沒有 id）時，後端只驗證不寫入，值跟著廠商資料一起存。
+   */
+  const handlePickRawFolder = async () => {
+    setPickingFolder(true);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error('認證已過期，請重新登入');
+      const call = async (path: string, body: any) => {
+        const r = await fetch(path, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken, ...body }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.message || d?.error || `伺服器回 ${r.status}`);
+        return d;
+      };
+      const cred = await call('/api/drive/picker-auth', {});
+      const picked = await openFolderPicker({
+        accessToken: cred.accessToken,
+        apiKey: getPickerApiKey(),
+        appId: cred.appId,
+        title: `選擇「${formData.name || '這個 IP'}」的毛片資料夾`,
+      });
+      if (!picked) return;
+      // 有 id 就順便寫回（編輯既有廠商）；沒有就只驗證，等按儲存時一起寫
+      const saved = await call('/api/drive/set-vendor-folder', {
+        vendorId: editingVendor?.id, folderId: picked.id,
+      });
+      setFormData(prev => ({
+        ...prev,
+        rawFootageFolderId: saved.folderId,
+        rawFootageFolderName: saved.folderName,
+      }));
+      toast.success(saved.saved ? `已指定：${saved.folderName}` : `已選擇：${saved.folderName}（按儲存後生效）`);
+    } catch (e: any) {
+      toast.error(e?.message || '指定資料夾失敗');
+    } finally {
+      setPickingFolder(false);
+    }
+  };
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    return onSnapshot(doc(db, 'users', uid), snap => {
+      if (snap.exists()) setMyRole((snap.data() as UserProfile).role || '');
+    });
+  }, []);
 
   useEffect(() => {
     const uq = query(collection(db, 'users'));
@@ -372,6 +436,8 @@ export default function VendorManagement() {
         editorName: '',
         selfPublishing: false,
         defaultPlatforms: { video: [], post: [] },
+        rawFootageFolderId: '',
+        rawFootageFolderName: '',
       });
     } catch (error) {
       toast.error('儲存失敗');
@@ -591,6 +657,8 @@ export default function VendorManagement() {
                       editorId: vendor.editorId || '',
                       editorName: vendor.editorName || '',
                       selfPublishing: vendor.selfPublishing || false,
+                      rawFootageFolderId: vendor.rawFootageFolderId || '',
+                      rawFootageFolderName: vendor.rawFootageFolderName || '',
                       // 還沒在這張卡上明確設定的，先帶入「發布習慣」裡已經設好的平台：
                       // 老闆原本就在那裡設過，打開來應該是已經勾好的狀態，不是一張空表。
                       // 按下儲存就會變成這張卡上的正式設定，之後不再依賴發布習慣。
@@ -844,6 +912,31 @@ export default function VendorManagement() {
                     ))}
                   </select>
                 </div>
+
+                {isPickerConfigured() && (myRole === 'engineer' || myRole === 'manager') && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">毛片雲端資料夾</label>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="text-sm text-gray-600">
+                        {formData.rawFootageFolderName
+                          ? <>目前：<span className="font-medium text-[#5A5A40]">{formData.rawFootageFolderName}</span></>
+                          : <span className="text-amber-700">尚未指定，同事無法上傳毛片</span>}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handlePickRawFolder}
+                        disabled={pickingFolder}
+                        className="px-3 py-1.5 rounded-xl bg-[#F5F5F0] text-[#5A5A40] text-sm font-medium hover:bg-[#EAEAE0] disabled:opacity-50"
+                      >
+                        {pickingFolder ? '開啟中…' : (formData.rawFootageFolderName ? '換一個' : '指定資料夾')}
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-2">
+                      指到毛片實際放的那一層（剪輯／剪輯_謝／毛片區），不要指 IP 最上層。
+                      之後同事上傳時，系統會自動在它底下建日期與素材資料夾，不用再進雲端硬碟。
+                    </p>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">藏鏡人</label>
