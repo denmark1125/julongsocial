@@ -299,6 +299,11 @@ export default function RawFootageUpload({
                       ? <span>毛片放在 <span className="font-medium">{vendor?.rawFootageFolderName}</span>／{batchName}</span>
                       : <span className="text-amber-700">這個 IP 還沒指定毛片資料夾</span>}
                   </span>
+                  {ctx && (
+                    <span className={ctx.freeGB < 200 ? 'text-red-600 font-medium' : 'text-slate-500'}>
+                      雲端剩餘 {ctx.freeGB} GB
+                    </span>
+                  )}
                   {!lockHeader && canSetFolder && (
                     <button onClick={handlePickFolder} disabled={busy} className="text-blue-600 hover:underline disabled:opacity-50">
                       {folderReady ? '換一個資料夾' : '指定資料夾'}
@@ -318,14 +323,18 @@ export default function RawFootageUpload({
                 </button>
               ) : (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-slate-700">
-                      已上傳 {files.length} 個片段{totalBytes > 0 && `（${fmtSize(totalBytes)}）`}，
-                      分成幾支素材就建幾組
-                    </p>
-                    <button onClick={handleUpload} disabled={busy} className="text-sm text-blue-600 hover:underline disabled:opacity-50">
-                      再加片段
-                    </button>
+                  <div className="space-y-1">
+                    {/* ⚠️ 兩段都 nowrap：中文沒有詞界，這行在手機上會從「分成幾支素／材就建幾組」
+                        中間斷開。寧可讓按鈕自己掉一行，也不要把詞斷掉。 */}
+                    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                      <p className="text-sm text-slate-700 whitespace-nowrap">
+                        已上傳 {files.length} 個片段{totalBytes > 0 && `（${fmtSize(totalBytes)}）`}
+                      </p>
+                      <button onClick={handleUpload} disabled={busy} className="text-sm text-blue-600 hover:underline disabled:opacity-50 whitespace-nowrap">
+                        再加片段
+                      </button>
+                    </div>
+                    <p className="text-sm text-slate-500">分成幾支素材，就建幾組</p>
                   </div>
 
                   {groups.map((g, gi) => {
@@ -362,17 +371,20 @@ export default function RawFootageUpload({
                                 placeholder="這段要怎麼剪、腳本要改什麼（可不填）"
                                 className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
                               />
-                              <select
-                                value={assign[f.id]}
-                                onChange={e => setAssign(prev => ({ ...prev, [f.id]: e.target.value }))}
-                                className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white sm:w-40"
-                              >
-                                {groups.map((x, i) => (
-                                  <option key={x.key} value={x.key}>
-                                    移到第 {i + 1} 支{x.name ? `：${x.name}` : ''}
-                                  </option>
-                                ))}
-                              </select>
+                              {/* 只有一組時這個選單沒有任何用處，不要佔位 */}
+                              {groups.length > 1 && (
+                                <select
+                                  value={assign[f.id]}
+                                  onChange={e => setAssign(prev => ({ ...prev, [f.id]: e.target.value }))}
+                                  className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white sm:w-48"
+                                >
+                                  {groups.map((x, i) => (
+                                    <option key={x.key} value={x.key}>
+                                      第 {i + 1} 支{x.name ? `：${x.name}` : ''}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
                             </div>
                           </div>
                         ))}
