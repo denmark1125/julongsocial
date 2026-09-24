@@ -339,6 +339,11 @@ export interface Vendor {
   manualDeficitUpdatedAt?: string;  // 舊版校正時間，同上，只在沒有 deficitEntries 時作為自動累加的起算月份
   editorId?: string;
   editorName?: string; // Keep for display/fallback
+  // 這個 IP 的毛片根資料夾（例如 自媒體IP代操/又生農場/剪輯）。
+  // ⚠️ 只能由人用 Google Picker 指一次，**不能靠名稱去找**：我們的授權範圍是 drive.file，
+  //    看不到「不是這個 app 建立的」資料夾，用名稱查會回 404。指過一次之後才進得去。
+  rawFootageFolderId?: string;
+  rawFootageFolderName?: string;  // 只為了讓畫面顯示人看得懂的名字，判斷一律用 id
   selfPublishing?: boolean; // Vendor publishes by themselves
   defaultPlatforms?: VendorDefaultPlatforms; // 這個 IP 預設的發布平台（依內容形式分開），新增貼文時自動帶入；見 VendorDefaultPlatforms
   status?: 'active' | 'paused' | 'ended'; // 不填視同 active
@@ -482,8 +487,15 @@ export interface AssetUpload {
 
   /** ★ 逐支備註（例如「腳本第三段要改」）。整批上傳時也是一列一個。 */
   note?: string;
-  /** YYYY-MM-DD。決定歸到哪個月的資料夾，用拍攝日不是上傳日。 */
+  /** YYYY-MM-DD。決定歸到哪個拍攝批次資料夾，用拍攝日不是上傳日。 */
   shotAt?: string;
+
+  /** 這支檔案屬於哪一組毛片（＝ERP 的一支素材），例如「超好吃的金磚」 */
+  groupName?: string;
+  /** 該組的資料夾 id。檔案最終落在這裡，不是批次夾 */
+  groupFolderId?: string;
+  /** 拍攝批次夾 id，例如「2026／0131」那層 */
+  batchFolderId?: string;
 
   uploadedByUid: string;
   uploadedByName?: string;

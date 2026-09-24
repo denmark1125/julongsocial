@@ -9,9 +9,10 @@
  *   不能在設定裡填一個現成資料夾的 ID（填了也讀不到）。
  *
  * ⚠️ 位元組永遠不經過我們的後端。Vercel function 的 request body 上限是 4.5 MB，
- *    而毛片動輒幾十 GB。上傳一律由瀏覽器端的 Google Picker 直接送到 Google
- *    （實測過：Drive 的 resumable 續傳端點不回 CORS 標頭，瀏覽器直接 PUT 會被擋，
- *     所以也不能自己寫上傳器）。這支只處理 metadata：建資料夾、查檔案、查容量。
+ *    而毛片動輒幾十 GB。上傳一律由瀏覽器端的 Google Picker 直接送到 Google。
+ *    **不要改回「瀏覽器自己打 resumable 端點」** —— 2026-09-23 用真的 session URL 實測：
+ *    位元組送得出去，但回應不帶 CORS 標頭，所以 fileId 讀不回來、308 續傳位置也讀不到，
+ *    等於沒有進度、沒有續傳、也不知道成功與否。這支只處理 metadata：建資料夾、搬檔、查容量。
  */
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -163,26 +164,23 @@ export function sanitizeFileName(name: string): string {
 }
 
 /**
- * 某個 IP、某個月、毛片或成片的資料夾路徑，一次建到底。
+ * 拍攝批次資料夾（例如「2026／0131」），建在**該 IP 自己既有的毛片根底下**。
  *
- * 資料夾名帶 vendorId 前 6 碼：IP 會改名、也可能撞名，帶 id 才能人工對得回來。
- * ⚠️ 依「拍攝日」歸月，不是上傳日 —— 補傳三個月前的毛片要進三個月前那一格。
+ * ⚠️ 不要再自己造一棵樹。實際結構每個 IP 都不一樣：
+ *      自媒體IP代操/又生農場/剪輯/2026／0131/荔妃的命名故事/
+ *      自媒體IP代操/祥濱_縈寶/毛片區/2026／0321/3. 忙了三天三夜…/
+ *      自媒體IP代操/杜永霖/剪輯_謝/…
+ *    中間那層的名字（剪輯／剪輯_謝／2 剪輯／毛片區）是各家歷史習慣，猜不出來，
+ *    所以 rootFolderId 一律由人用 Picker 指一次存進 vendors，這裡只接 id。
+ *
+ * 批次名預設用拍攝日，但呼叫端可以覆寫成該 IP 既有的寫法。
  */
-export async function ensureUploadFolder(opts: {
-  rootFolderId: string;
-  vendorId: string;
-  vendorName: string;
-  kind: 'raw' | 'final';
-  month: string;           // YYYY-MM
-}): Promise<{ folderId: string; path: string }> {
-  const { rootFolderId, vendorId, vendorName, kind, month } = opts;
-  const vendorFolder = `${vendorName}_${vendorId.slice(0, 6)}`;
-  const kindFolder = kind === 'raw' ? '01_毛片' : '02_成片';
-
-  const vId = await ensureFolder(vendorFolder, rootFolderId);
-  const kId = await ensureFolder(kindFolder, vId);
-  const mId = await ensureFolder(month, kId);
-  return { folderId: mId, path: `${vendorFolder}/${kindFolder}/${month}` };
+export async function ensureBatchFolder(opts: {
+  /** vendors/{id}.rawFootageFolderId —— 那個 IP 的毛片根 */
+  rawRootFolderId: string;
+  batchName: string;
+}): Promise<string> {
+  return ensureFolder(opts.batchName, opts.rawRootFolderId);
 }
 
 /**
@@ -217,6 +215,40 @@ export async function getFile(fileId: string): Promise<DriveFileInfo> {
   const f = await driveFetch(
     `/files/${encodeURIComponent(fileId)}?fields=id,name,size,mimeType,webViewLink,md5Checksum,parents,appProperties`
   );
+  return {
+    id: f.id, name: f.name, sizeBytes: Number(f.size || 0), mimeType: f.mimeType,
+    webViewLink: f.webViewLink, md5Checksum: f.md5Checksum,
+    parents: f.parents, appProperties: f.appProperties,
+  };
+}
+
+/**
+ * 把檔案搬進指定資料夾（已經在那裡就什麼都不做）。
+ *
+ * ⚠️ 這是 metadata 操作，**不會重傳位元組** —— 幾 GB 的毛片也是瞬間完成。
+ *    分組就是靠這支：整批先傳進批次夾，再依分組搬進各自的素材夾。
+ * ⚠️ Google 2020 起不支援一個檔案掛多個父資料夾，所以 addParents 一定要搭配 removeParents。
+ *
+ * `expectedParent` 是防線：**不要相信前端給的 fileId**。帶了它就會確認這個檔案
+ * 真的來自這次上傳的批次夾，否則任何登入者都能把我們看得到的別的檔案搬進來。
+ */
+export async function ensureFileParent(fileId: string, folderId: string, expectedParent?: string): Promise<DriveFileInfo> {
+  const current = await getFile(fileId);
+  if (expectedParent && !current.parents?.includes(expectedParent) && !current.parents?.includes(folderId)) {
+    throw new Error('這個檔案不在這次上傳的資料夾裡');
+  }
+  if (current.parents?.length === 1 && current.parents[0] === folderId) return current;
+
+  const query = new URLSearchParams({
+    addParents: folderId,
+    fields: 'id,name,size,mimeType,webViewLink,md5Checksum,parents,appProperties',
+  });
+  if (current.parents?.length) query.set('removeParents', current.parents.join(','));
+  const f = await driveFetch(`/files/${encodeURIComponent(fileId)}?${query.toString()}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
   return {
     id: f.id, name: f.name, sizeBytes: Number(f.size || 0), mimeType: f.mimeType,
     webViewLink: f.webViewLink, md5Checksum: f.md5Checksum,

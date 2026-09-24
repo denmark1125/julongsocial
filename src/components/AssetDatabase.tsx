@@ -19,6 +19,7 @@ import { useLiveCollection } from '../lib/liveData';
 import { visibleVendors, trackedVendors, buildPostIndex, getDisplayAssetStatus } from '../lib/vendorStatus';
 import { buildFlowUpdate, buildSubmitUndoUpdate, getClientApprovalTarget, isClientApproved } from '../lib/assetFlow';
 import { getWorkingEditorId, canReassignEditor } from '../lib/editorBilling';
+import RawFootageUpload from './RawFootageUpload';
 import { 
   Video, 
   Plus, 
@@ -42,7 +43,8 @@ import {
   Ban,
   RotateCcw,
   MessageSquareText,
-  Flame
+  Flame,
+  UploadCloud
 } from 'lucide-react';
 import { toJpeg } from 'html-to-image';
 import download from 'downloadjs';
@@ -100,6 +102,7 @@ export default function AssetDatabase() {
   const vendors = useLiveCollection<Vendor>('vendors');
   const editors = useLiveCollection<Editor>('editors');
   const [isAdding, setIsAdding] = useState(false);
+  const [isUploadingRaw, setIsUploadingRaw] = useState(false);
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [isTaskListOpen, setIsTaskListOpen] = useState(false);
   const [exportMode, setExportMode] = useState<'editor' | 'vendor'>('editor');
@@ -647,7 +650,17 @@ export default function AssetDatabase() {
           <p className="text-sm text-gray-500">管理各廠商的影片與貼文素材庫存</p>
         </div>
         <div className="flex flex-wrap gap-4 w-full sm:w-auto">
-          <button 
+          {/* P3 驗證期間只開給工程師：先拿真檔確認分類與登記都對了，再開放給其他同事。 */}
+          {me?.role === 'engineer' && (
+            <button
+              onClick={() => setIsUploadingRaw(true)}
+              className="bg-white text-[#5A5A40] px-4 py-2 rounded-2xl border border-black/5 shadow-sm font-bold flex items-center space-x-2 hover:bg-gray-50 transition-colors"
+            >
+              <UploadCloud size={18} />
+              <span>上傳毛片</span>
+            </button>
+          )}
+          <button
             onClick={() => setIsTaskListOpen(true)}
             className="bg-white text-[#5A5A40] px-4 py-2 rounded-2xl border border-black/5 shadow-sm font-bold flex items-center space-x-2 hover:bg-gray-50 transition-colors"
           >
@@ -1186,6 +1199,14 @@ export default function AssetDatabase() {
       </div>
     </div>
   </div>
+
+      {isUploadingRaw && (
+        <RawFootageUpload
+          vendors={vendors}
+          canSetFolder={me?.role === 'engineer' || me?.role === 'manager'}
+          onClose={() => setIsUploadingRaw(false)}
+        />
+      )}
 
       {/* Add Asset Modal */}
       {isAdding && (
