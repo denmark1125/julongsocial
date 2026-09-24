@@ -14,20 +14,24 @@ export default function EditingBrief({
   clipNotes,
 }: {
   brief?: string;
-  clipNotes?: { fileName: string; note: string }[];
+  clipNotes?: { fileName: string; note: string; kind?: 'raw' | 'broll' }[];
 }) {
-  const labelled = (clipNotes || []).filter(c => c.note?.trim());
-  if (!brief?.trim() && labelled.length === 0) return null;
+  const all = clipNotes || [];
+  const raw = all.filter(c => c.kind !== 'broll');
+  const broll = all.filter(c => c.kind === 'broll');
+  const labelled = raw.filter(c => c.note?.trim());
+  if (!brief?.trim() && labelled.length === 0 && broll.length === 0) return null;
 
   return (
     <div className="mt-2 rounded-xl bg-sky-50/70 px-3 py-2">
       {brief?.trim() && (
         <p className="text-[13px] leading-relaxed text-sky-900 whitespace-pre-wrap">{brief}</p>
       )}
-      {labelled.length > 0 && (
+      {(raw.length > 0 || broll.length > 0) && (
         <p className="mt-1 text-[13px] text-sky-700/80">
-          {clipNotes!.length} 個片段
+          {raw.length} 個片段
           {labelled.map((c, i) => `　${i + 1}.${c.note}`).join('')}
+          {broll.length > 0 && `　＋${broll.length} 個 B-roll`}
         </p>
       )}
     </div>

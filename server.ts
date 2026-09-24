@@ -17,6 +17,7 @@ import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVide
 // 交棒狀態的判定要跟前端同一份，不然推播說的「目前狀態」會跟畫面上不一致
 import { deriveFlowStage, FLOW_STAGE_LABEL } from "./src/types.js";
 import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFileName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
+import { BROLL_FOLDER_NAME } from "./src/lib/driveNaming.js";
 
 dotenv.config();
 
@@ -309,7 +310,7 @@ app.post("/api/drive/group-folder", async (req, res) => {
     const me = await requireUser(req);
     if (me.role === 'editor') return res.status(403).json({ error: "剪輯師無法使用系統上傳" });
 
-    const { vendorId, shotAt, batchName, groupName } = req.body || {};
+    const { vendorId, shotAt, batchName, groupName, sub } = req.body || {};
     if (!vendorId) return res.status(400).json({ error: "缺少 vendorId" });
     const group = sanitizeFileName(String(groupName || '').trim());
     if (!group) return res.status(400).json({ error: "請先幫這支素材取名字" });
@@ -351,18 +352,27 @@ app.post("/api/drive/group-folder", async (req, res) => {
       : rawRootFolderId;
 
     const groupFolderId = await ensureFolder(group, parentId);
-    const path = [vendor.rawFootageFolderName || '', batch, group].filter(Boolean).join('/');
+
+    // sub='broll'：補充畫面放在這支素材資料夾底下再一層。
+    // 祥濱既有的就是這個寫法，名稱由 driveNaming.ts 統一（前後端共用同一個字串）。
+    const targetId = sub === 'broll'
+      ? await ensureFolder(BROLL_FOLDER_NAME, groupFolderId)
+      : groupFolderId;
+    const path = [vendor.rawFootageFolderName || '', batch, group, sub === 'broll' ? BROLL_FOLDER_NAME : '']
+      .filter(Boolean).join('/');
 
     // 可推導的 doc id ⇒ 之後永遠只要一次 getDoc，不需要查詢也不需要索引。
     // 這張表同時是孤兒對帳的依據：這裡有紀錄、assetUploads 卻沒有，就是傳了沒登記。
-    await adminDb.collection("driveFolders").doc(`v3_${vendorId}_raw_${batch || 'root'}_${group}`).set({
-      folderId: groupFolderId, parentFolderId: parentId, path,
-      vendorId, kind: 'raw', batchName: batch, groupName: group,
-      createdAt: new Date().toISOString(), createdByUid: me.uid,
-    }, { merge: true });
+    await adminDb.collection("driveFolders")
+      .doc(`v3_${vendorId}_${sub === 'broll' ? 'broll' : 'raw'}_${batch || 'root'}_${group}`).set({
+        folderId: targetId, parentFolderId: parentId, path,
+        vendorId, kind: sub === 'broll' ? 'broll' : 'raw', batchName: batch, groupName: group,
+        createdAt: new Date().toISOString(), createdByUid: me.uid,
+      }, { merge: true });
 
     return res.json({
-      groupFolderId, groupName: group, batchName: batch, path, vendorName,
+      // groupFolderId 就是這次要傳進去的那一層：sub='broll' 時是 B-roll 子資料夾
+      groupFolderId: targetId, groupName: group, batchName: batch, path, vendorName,
       accessToken: await getAccessToken(),
       // Picker 在 drive.file 範圍下要知道是哪個 Cloud 專案在存取檔案，
       // 那就是 client ID 最前面那串專案編號。從既有環境變數推導，不另開一個。
@@ -430,7 +440,7 @@ app.post("/api/drive/commit-groups", async (req, res) => {
       return res.status(400).json({ error: "缺少 vendorId / groups" });
     }
     if (groups.length > 30) return res.status(400).json({ error: "一次最多 30 支素材" });
-    const fileCount = groups.reduce((n: number, g: any) => n + (g.files?.length || 0), 0);
+    const fileCount = groups.reduce((n: number, g: any) => n + (g.files?.length || 0) + (g.brollFiles?.length || 0), 0);
     if (fileCount === 0) return res.status(400).json({ error: "每一支素材至少要有一個片段" });
     if (fileCount > 100) return res.status(400).json({ error: "一次最多 100 個檔案" });
 
@@ -457,7 +467,19 @@ app.post("/api/drive/commit-groups", async (req, res) => {
           // 檔案本來就該在這個資料夾裡；ensureFileParent 是冪等的，
           // 在對的位置就只做一次 getFile，等於「向 Google 確認它真的存在且在這裡」。
           const info = await ensureFileParent(f.driveFileId, groupFolderId, groupFolderId);
-          checked.push({ info, note: f.note || null });
+          checked.push({ info, note: f.note || null, kind: 'raw' as const });
+        }
+
+        // B-roll：補充畫面，放在這支素材底下的 B-roll 子資料夾。
+        // ⚠️ **刻意不另外建 Asset** —— 它不是交付品，產成素材會變成幽靈庫存，
+        //    還會跑進剪輯師待辦清單與欠片計算。只歸檔、只留上傳紀錄。
+        const brollList = Array.isArray(g.brollFiles) ? g.brollFiles : [];
+        if (brollList.length) {
+          const brollFolderId = await ensureFolder(BROLL_FOLDER_NAME, groupFolderId);
+          for (const f of brollList) {
+            const info = await ensureFileParent(f.driveFileId, brollFolderId, brollFolderId);
+            checked.push({ info, note: f.note || null, kind: 'broll' as const });
+          }
         }
 
         // 素材建檔。欄位刻意跟畫面上人工建檔（handleAddAsset）一字不差，
@@ -481,6 +503,7 @@ app.post("/api/drive/commit-groups", async (req, res) => {
           clipNotes: checked.map((c: any) => ({
             fileName: c.info.name,
             note: c.note || '',
+            kind: c.kind,
           })),
           type: 'video',
           stage: 'raw',
@@ -492,14 +515,17 @@ app.post("/api/drive/commit-groups", async (req, res) => {
         });
 
         for (const c of checked) {
+          // ⚠️ driveFolderId 要用檔案**實際所在**的資料夾，B-roll 在子資料夾裡。
+          //    寫成 groupFolderId 的話日後對帳會找錯地方。
+          const actualFolderId = c.info.parents?.[0] || groupFolderId;
           await adminDb.collection("assetUploads").doc().set({
-            kind: 'raw', storage: 'drive',
+            kind: c.kind, storage: 'drive',
             vendorId, vendorName,
             assetId: assetRef.id,
             batchId: groupFolderId,
             batchFolderId: folderInfo.parents?.[0] || null,
             groupName, groupFolderId,
-            driveFileId: c.info.id, driveFolderId: groupFolderId,
+            driveFileId: c.info.id, driveFolderId: actualFolderId,
             webViewLink: c.info.webViewLink || null,
             md5Checksum: c.info.md5Checksum || null,
             fileName: c.info.name, sizeBytes: c.info.sizeBytes, mimeType: c.info.mimeType,
@@ -514,7 +540,11 @@ app.post("/api/drive/commit-groups", async (req, res) => {
         // 拍攝預約核銷：跟畫面上人工建檔的行為一致，一支素材算一次交件
         await autoResolveShootBooking(vendorId);
 
-        created.push({ assetId: assetRef.id, name: groupName, fileCount: checked.length });
+        created.push({
+          assetId: assetRef.id, name: groupName,
+          fileCount: checked.filter((c: any) => c.kind === 'raw').length,
+          brollCount: checked.filter((c: any) => c.kind === 'broll').length,
+        });
       } catch (err: any) {
         failed.push({ name: groupName, reason: err?.message || "這一組處理失敗" });
       }

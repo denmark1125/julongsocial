@@ -459,7 +459,9 @@ export interface FlowLogEntry {
  *
  * ⚠️ 一律由 server.ts 用 admin SDK 寫入，前端只讀不寫（見 firestore.rules）。
  */
-export type UploadKind = 'raw' | 'final' | 'doc';
+/** broll＝補充畫面。**刻意不在 ERP 產生素材**：它不是交付品，
+ *  產成素材會變成幽靈庫存，還會跑進剪輯師待辦與欠片計算。 */
+export type UploadKind = 'raw' | 'final' | 'doc' | 'broll';
 
 export interface AssetUpload {
   id?: string;
@@ -570,7 +572,7 @@ export interface Asset {
    * 理由跟 vendorName 快照一樣：讀得到這支素材的人不一定讀得到另一份文件。
    * 1–5 筆的小陣列，跟著 asset 一起讀，不需要動任何規則的讀取範圍。
    */
-  clipNotes?: { fileName: string; note: string }[];
+  clipNotes?: { fileName: string; note: string; kind?: 'raw' | 'broll' }[];
   type: AssetType;
   stage: 'raw' | 'finished';
   filmingDate?: string;

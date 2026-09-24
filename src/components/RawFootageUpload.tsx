@@ -3,6 +3,7 @@ import { auth } from '../firebase';
 import { Vendor } from '../types';
 import { visibleVendors } from '../lib/vendorStatus';
 import { ASSET_CATEGORIES, ASSET_CATEGORY_DATALIST_ID } from '../lib/assetCategories';
+import { BROLL_FOLDER_NAME } from '../lib/driveNaming';
 import {
   openUploadPicker, openFolderPicker, getPickerApiKey, PickedFile,
 } from '../lib/drivePicker';
@@ -50,6 +51,8 @@ interface Group {
   category: string;
   /** 這支片整體怎麼剪。剪輯師的卡片上會看到這段 */
   brief: string;
+  /** 補充畫面，放在這支素材資料夾底下的 B-roll 子資料夾。不會另外變成一支素材 */
+  brollFiles: PickedFile[];
 }
 
 const fmtSize = (bytes: number) => {
@@ -67,7 +70,7 @@ const defaultBatchName = (shotAt: string) => {
 // 一次拍攝多半是同一個題材，所以新的一組沿用上一組的分類，少打幾次
 const newGroup = (category = ''): Group => ({
   key: `g${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
-  name: '', files: [], category, brief: '',
+  name: '', files: [], brollFiles: [], category, brief: '',
 });
 
 export default function RawFootageUpload({
@@ -93,7 +96,7 @@ export default function RawFootageUpload({
 
   // 只要有任何一組已經建了資料夾，上面那三個欄位就不能再動 —— 改了路徑就對不上了
   const lockHeader = groups.some(g => g.folderId);
-  const uploadedCount = groups.reduce((n, g) => n + g.files.length, 0);
+  const uploadedCount = groups.reduce((n, g) => n + g.files.length + g.brollFiles.length, 0);
 
   const patch = (key: string, next: Partial<Group>) =>
     setGroups(prev => prev.map(g => (g.key === key ? { ...g, ...next } : g)));
@@ -139,10 +142,13 @@ export default function RawFootageUpload({
     }
   };
 
-  /** 某一支素材：建好它的資料夾，然後開 Picker 把片段直接傳進去 */
-  const handlePickFiles = async (g: Group) => {
+  /**
+   * 某一支素材：建好它的資料夾，然後開 Picker 把片段直接傳進去。
+   * `sub='broll'` 時目標是該素材底下的 B-roll 子資料夾。
+   */
+  const handlePickFiles = async (g: Group, sub?: 'broll') => {
     if (!g.name.trim()) { toast.error('請先幫這支素材取名字'); return; }
-    setBusyKey(g.key);
+    setBusyKey(g.key + (sub || ''));
     try {
       // 每次都重新要一次：這支路由是冪等的（資料夾已存在就直接沿用），
       // 而且順便拿到沒過期的 token 與最新容量。「再加片段」也走同一條路。
@@ -152,10 +158,13 @@ export default function RawFootageUpload({
         //    跟「沒帶這個欄位＝用預設日期名」是兩件事，不能用 || undefined 吃掉。
         batchName,
         groupName: g.name.trim(),
+        sub,
       });
 
       if (cred.freeGB !== undefined) setFreeGB(cred.freeGB);
-      patch(g.key, { folderId: cred.groupFolderId, path: cred.path });
+      // ⚠️ 只有主片段那次才記 folderId／path：B-roll 回的是子資料夾，
+      //    記進去的話畫面會顯示成「這支素材建在 …/B-roll」，而且提交時會送錯 id。
+      if (!sub) patch(g.key, { folderId: cred.groupFolderId, path: cred.path });
 
       const picked = await openUploadPicker({
         folderId: cred.groupFolderId,
@@ -168,9 +177,14 @@ export default function RawFootageUpload({
 
       // 空陣列＝使用者自己取消，不是錯誤，不要跳紅字
       if (picked.length === 0) return;
-      setGroups(prev => prev.map(x => x.key === g.key
-        ? { ...x, files: [...x.files, ...picked.filter(f => !x.files.some(o => o.id === f.id))] }
-        : x));
+      setGroups(prev => prev.map(x => {
+        if (x.key !== g.key) return x;
+        const list = sub ? x.brollFiles : x.files;
+        const fresh = picked.filter(f => !list.some(o => o.id === f.id));
+        return sub
+          ? { ...x, brollFiles: [...x.brollFiles, ...fresh] }
+          : { ...x, files: [...x.files, ...fresh] };
+      }));
     } catch (e: any) {
       if (e?.code === 'VENDOR_FOLDER_UNSET') {
         toast.error(e.message + (canSetFolder ? '請先按上面的「指定資料夾」。' : '請找工程師指定。'));
@@ -189,7 +203,14 @@ export default function RawFootageUpload({
   };
 
   const handleCommit = async () => {
+    // ⚠️ 只有 B-roll 沒有主片段的組不送：B-roll 是補充畫面，
+    //    沒有主片段的話會建出一支空殼素材。
     const used = groups.filter(g => g.folderId && g.files.length > 0);
+    const brollOnly = groups.filter(g => g.files.length === 0 && g.brollFiles.length > 0);
+    if (brollOnly.length) {
+      toast.error(`「${brollOnly[0].name || '未命名'}」只有 B-roll 沒有主片段，請先選主片段`);
+      return;
+    }
     if (used.length === 0) { toast.error('至少要有一支素材傳了片段'); return; }
 
     setBusy(true);
@@ -202,6 +223,7 @@ export default function RawFootageUpload({
           category: g.category,
           brief: g.brief,
           files: g.files.map(f => ({ driveFileId: f.id, note: notes[f.id] || '' })),
+          brollFiles: g.brollFiles.map(f => ({ driveFileId: f.id, note: notes[f.id] || '' })),
         })),
       });
       setDone(data);
@@ -248,7 +270,7 @@ export default function RawFootageUpload({
               </p>
               <ul className="text-sm text-slate-700 space-y-1">
                 {done.created.map((c: any) => (
-                  <li key={c.assetId}>・{c.name}（{c.fileCount} 個片段）</li>
+                  <li key={c.assetId}>・{c.name}（{c.fileCount} 個片段{c.brollCount ? `，${c.brollCount} 個 B-roll` : ''}）</li>
                 ))}
               </ul>
               {done.failed.length > 0 && (
@@ -324,6 +346,7 @@ export default function RawFootageUpload({
                 {groups.map((g, gi) => {
                   const locked = Boolean(g.folderId);
                   const thisBusy = busyKey === g.key;
+                  const brollBusy = busyKey === g.key + 'broll';
                   return (
                     <div key={g.key} className="border border-slate-200 rounded-xl p-4 space-y-3">
                       {/* ⚠️ 手機上名稱欄會被按鈕擠成「荔妃的命」。給輸入框一個最小寬度，
@@ -346,6 +369,15 @@ export default function RawFootageUpload({
                         >
                           {thisBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FilePlus2 className="w-4 h-4" />}
                           {g.files.length > 0 ? '再加片段' : '選檔案'}
+                        </button>
+                        {/* 次要樣式：B-roll 是補充，不要跟主片段搶視覺 */}
+                        <button
+                          onClick={() => handlePickFiles(g, 'broll')}
+                          disabled={!g.name.trim() || !folderReady || brollBusy}
+                          className="px-3 py-2 rounded-lg border border-slate-300 text-slate-600 text-sm hover:bg-slate-50 disabled:opacity-40 flex items-center gap-1.5 shrink-0 whitespace-nowrap"
+                        >
+                          {brollBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                          {BROLL_FOLDER_NAME}
                         </button>
                         {(groups.length > 1 || g.files.length > 0) && (
                           <button onClick={() => removeGroup(g.key)} className="text-slate-400 hover:text-red-600 shrink-0" aria-label="刪掉這一支">
@@ -399,6 +431,26 @@ export default function RawFootageUpload({
                           />
                         </div>
                       ))}
+
+                      {g.brollFiles.length > 0 && (
+                        <div className="border-t border-dashed border-slate-200 pt-3 space-y-2">
+                          <p className="text-xs font-medium text-slate-500">{BROLL_FOLDER_NAME}（補充畫面，不會另外變成一支素材）</p>
+                          {g.brollFiles.map(f => (
+                            <div key={f.id} className="bg-slate-50 rounded-lg p-3 space-y-2">
+                              <div className="flex items-start justify-between gap-3">
+                                <span className="text-sm text-slate-800 break-all">{f.name}</span>
+                                <span className="text-xs text-slate-500 shrink-0 pt-0.5">{fmtSize(f.sizeBytes)}</span>
+                              </div>
+                              <input
+                                value={notes[f.id] || ''}
+                                onChange={e => setNotes(prev => ({ ...prev, [f.id]: e.target.value }))}
+                                placeholder="這段是什麼（可不填）"
+                                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
