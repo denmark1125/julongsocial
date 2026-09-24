@@ -344,6 +344,10 @@ export interface Vendor {
   //    看不到「不是這個 app 建立的」資料夾，用名稱查會回 404。指過一次之後才進得去。
   rawFootageFolderId?: string;
   rawFootageFolderName?: string;  // 只為了讓畫面顯示人看得懂的名字，判斷一律用 id
+  // 這個 IP 跨場次共用的 B-roll 素材庫（例如佐禾的「01-Broll下層素材庫」）。
+  // 跟毛片根同樣的限制：命名各家不同、猜不出來，只能由人用 Picker 指一次。
+  brollFolderId?: string;
+  brollFolderName?: string;
   selfPublishing?: boolean; // Vendor publishes by themselves
   defaultPlatforms?: VendorDefaultPlatforms; // 這個 IP 預設的發布平台（依內容形式分開），新增貼文時自動帶入；見 VendorDefaultPlatforms
   status?: 'active' | 'paused' | 'ended'; // 不填視同 active

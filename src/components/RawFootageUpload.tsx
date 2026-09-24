@@ -4,6 +4,7 @@ import { Vendor } from '../types';
 import { visibleVendors } from '../lib/vendorStatus';
 import { ASSET_CATEGORIES, ASSET_CATEGORY_DATALIST_ID } from '../lib/assetCategories';
 import { BROLL_FOLDER_NAME } from '../lib/driveNaming';
+import BrollLibraryUpload from './BrollLibraryUpload';
 import {
   openUploadPicker, openFolderPicker, getPickerApiKey, PickedFile,
 } from '../lib/drivePicker';
@@ -86,6 +87,11 @@ export default function RawFootageUpload({
   const [groups, setGroups] = useState<Group[]>([newGroup()]);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [done, setDone] = useState<{ created: any[]; failed: any[] } | null>(null);
+  // 毛片 vs 這個 IP 共用的 B-roll 素材庫。**兩者是不同的事**（這支片的補充畫面
+  // vs 跨場次累積的公用素材），不是同一件事的兩種做法，所以用分頁而不是設定開關。
+  const [mode, setMode] = useState<'raw' | 'library'>('raw');
+  // 共用 B-roll 分頁把送出狀態回報上來，讓按鈕跟毛片分頁一樣待在 footer
+  const [libSubmit, setLibSubmit] = useState<{ canSubmit: boolean; busy: boolean; submit: () => void } | null>(null);
 
   const options = useMemo(
     () => visibleVendors(vendors).slice().sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant')),
@@ -261,8 +267,28 @@ export default function RawFootageUpload({
           {ASSET_CATEGORIES.map(c => <option key={c} value={c} />)}
         </datalist>
 
+        <div className="px-6 pt-3 border-b border-slate-200 flex gap-1">
+          {([['raw', '毛片'], ['library', `共用 ${BROLL_FOLDER_NAME}`]] as const).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setMode(key)}
+              // 已經傳了東西還切分頁會讓人以為那批不見了，所以傳過就鎖住
+              disabled={uploadedCount > 0 || Boolean(done)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px disabled:opacity-40 ${
+                mode === key
+                  ? 'border-blue-600 text-blue-700'
+                  : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div className="px-6 py-5 overflow-y-auto space-y-5">
-          {done ? (
+          {mode === 'library' ? (
+            <BrollLibraryUpload vendors={vendors} defaultVendorId={vendorId} onSubmitStateChange={setLibSubmit} />
+          ) : done ? (
             <div className="space-y-3">
               <p className="text-base font-medium text-slate-800 flex items-center gap-2">
                 <CheckCircle2 className="w-5 h-5 text-green-600" />
@@ -477,7 +503,17 @@ export default function RawFootageUpload({
           <button onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">
             {done ? '關閉' : '取消'}
           </button>
-          {uploadedCount > 0 && !done && (
+          {mode === 'library' && libSubmit?.canSubmit && (
+            <button
+              onClick={libSubmit.submit}
+              disabled={libSubmit.busy}
+              className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 font-medium"
+            >
+              {libSubmit.busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+              登記檔案
+            </button>
+          )}
+          {mode === 'raw' && uploadedCount > 0 && !done && (
             <button
               onClick={handleCommit}
               disabled={busy}

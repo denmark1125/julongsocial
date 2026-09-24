@@ -241,8 +241,10 @@ app.post("/api/drive/set-vendor-folder", async (req, res) => {
     }
     // vendorId 是選填：廠商還在建檔中（文件還不存在）的時候，這支只負責「驗這個資料夾
     // 我們存取得到嗎」，驗過後由前端連同廠商資料一起存。有帶 vendorId 才直接寫回。
-    const { vendorId, folderId } = req.body || {};
+    // field 決定寫哪一個欄位：毛片根或共用 B-roll 素材庫。**不要為了第二個欄位複製一支路由。**
+    const { vendorId, folderId, field } = req.body || {};
     if (!folderId) return res.status(400).json({ error: "缺少 folderId" });
+    const target = field === 'broll' ? 'broll' : 'raw';
 
     if (vendorId) {
       const vSnap = await adminDb.collection("vendors").doc(vendorId).get();
@@ -268,13 +270,15 @@ app.post("/api/drive/set-vendor-folder", async (req, res) => {
     }
 
     if (vendorId) {
-      await adminDb.collection("vendors").doc(vendorId).set({
-        rawFootageFolderId: info.id,
-        rawFootageFolderName: info.name,
-      }, { merge: true });
+      await adminDb.collection("vendors").doc(vendorId).set(
+        target === 'broll'
+          ? { brollFolderId: info.id, brollFolderName: info.name }
+          : { rawFootageFolderId: info.id, rawFootageFolderName: info.name },
+        { merge: true }
+      );
     }
 
-    return res.json({ folderId: info.id, folderName: info.name, saved: Boolean(vendorId) });
+    return res.json({ folderId: info.id, folderName: info.name, field: target, saved: Boolean(vendorId) });
   } catch (e: any) {
     if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
     if (e?.httpStatus) return sendAuthError(res, e);
@@ -384,6 +388,124 @@ app.post("/api/drive/group-folder", async (req, res) => {
     if (e?.httpStatus) return sendAuthError(res, e);
     console.error("drive/group-folder failed:", e?.message);
     return res.status(502).json({ error: e?.message || "準備上傳失敗" });
+  }
+});
+
+/**
+ * 這個 IP 共用的 B-roll 素材庫：上傳目標 ＋ 一顆短效 token。
+ *
+ * 跟 group-folder 的差別：**它不屬於任何一支素材**，跨場次累積（佐禾那個 46 檔 7.96 GB
+ * 就是這種）。所以沒有日期夾、沒有素材名稱，檔案直接進人工指定的那個資料夾。
+ *
+ * ⚠️ 一樣擋掉剪輯師：token 是 drive.file 範圍，拿到就看得到我們建立的所有檔案。
+ */
+app.post("/api/drive/library-upload-target", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    const me = await requireUser(req);
+    if (me.role === 'editor') return res.status(403).json({ error: "剪輯師無法使用系統上傳" });
+
+    const { vendorId } = req.body || {};
+    if (!vendorId) return res.status(400).json({ error: "缺少 vendorId" });
+
+    const vSnap = await adminDb.collection("vendors").doc(vendorId).get();
+    if (!vSnap.exists) return res.status(404).json({ error: "找不到這個 IP" });
+    const vendor = vSnap.data() || {};
+    const vendorName = vendor.name || vendorId;
+
+    if (!vendor.brollFolderId) {
+      // 前端靠這個代碼決定要不要跳「先指定資料夾」，所以不要改這個字串
+      return res.status(409).json({
+        error: "VENDOR_BROLL_FOLDER_UNSET",
+        message: `「${vendorName}」還沒指定共用 B-roll 資料夾。`,
+      });
+    }
+
+    const quota = await getQuota();
+    if (quota.freeBytes < DRIVE_MIN_FREE_BYTES) {
+      return res.status(507).json({
+        error: "DRIVE_QUOTA_LOW",
+        message: `公司雲端硬碟只剩 ${Math.round(quota.freeBytes / 1024 ** 3)} GB，已暫停上傳以免塞爆。請先清理或擴充容量。`,
+        freeGB: Math.round(quota.freeBytes / 1024 ** 3 * 10) / 10,
+      });
+    }
+
+    return res.json({
+      folderId: vendor.brollFolderId,
+      path: vendor.brollFolderName || '',
+      vendorName,
+      accessToken: await getAccessToken(),
+      appId: (process.env.GOOGLE_OAUTH_CLIENT_ID || '').split('-')[0],
+      freeGB: Math.round(quota.freeBytes / 1024 ** 3 * 10) / 10,
+    });
+  } catch (e: any) {
+    if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("drive/library-upload-target failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "準備上傳失敗" });
+  }
+});
+
+/**
+ * 共用 B-roll 上傳收尾：只留紀錄。
+ *
+ * ⚠️ **不建 Asset、不核銷拍攝預約。** 這些檔案不是交付品，
+ *    產成素材會變成幽靈庫存，還會跑進剪輯師待辦與欠片計算。
+ */
+app.post("/api/drive/record-library-uploads", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    const me = await requireUser(req);
+    if (me.role === 'editor') return res.status(403).json({ error: "剪輯師無法使用系統上傳" });
+
+    const { vendorId, files } = req.body || {};
+    if (!vendorId || !Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ error: "缺少 vendorId / files" });
+    }
+    if (files.length > 100) return res.status(400).json({ error: "一次最多 100 個檔案" });
+
+    const vSnap = await adminDb.collection("vendors").doc(vendorId).get();
+    if (!vSnap.exists) return res.status(404).json({ error: "找不到這個 IP" });
+    const vendor = vSnap.data() || {};
+    const folderId = vendor.brollFolderId;
+    if (!folderId) return res.status(409).json({ error: "VENDOR_BROLL_FOLDER_UNSET" });
+    const vendorName = vendor.name || vendorId;
+
+    const now = new Date().toISOString();
+    const recorded: any[] = [];
+    const rejected: any[] = [];
+
+    for (const f of files) {
+      try {
+        // 不相信前端給的 fileId：向 Google 確認它存在、而且真的在這個資料夾裡
+        const info = await ensureFileParent(f.driveFileId, folderId, folderId);
+        await adminDb.collection("assetUploads").doc().set({
+          kind: 'broll', storage: 'drive',
+          vendorId, vendorName,
+          assetId: null,          // 共用素材庫不屬於任何一支素材
+          batchId: null, batchFolderId: null,
+          groupName: null, groupFolderId: null,
+          driveFileId: info.id, driveFolderId: folderId,
+          webViewLink: info.webViewLink || null,
+          md5Checksum: info.md5Checksum || null,
+          fileName: info.name, sizeBytes: info.sizeBytes, mimeType: info.mimeType,
+          note: f.note || null,
+          shotAt: null,
+          uploadedByUid: me.uid,
+          uploadedByName: me.displayName || me.email || null,
+          createdAt: now,
+        });
+        recorded.push({ fileName: info.name, sizeBytes: info.sizeBytes });
+      } catch (err: any) {
+        rejected.push({ driveFileId: f.driveFileId, reason: err?.message || "查不到這個檔案" });
+      }
+    }
+    return res.json({ recorded, rejected, folderName: vendor.brollFolderName || '' });
+  } catch (e: any) {
+    if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("drive/record-library-uploads failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "登記失敗" });
   }
 });
 

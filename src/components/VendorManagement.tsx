@@ -76,10 +76,13 @@ export default function VendorManagement() {
     // 授權範圍是 drive.file，看不到「不是這個 app 建立的」資料夾，貼進來也讀不到（404）。
     rawFootageFolderId: '',
     rawFootageFolderName: '',
+    // 跨場次共用的 B-roll 素材庫（佐禾的「01-Broll下層素材庫」就是這種）
+    brollFolderId: '',
+    brollFolderName: '',
   });
   // 指定資料夾只開給 engineer/manager（後端也會再擋一次）
   const [myRole, setMyRole] = useState<string>('');
-  const [pickingFolder, setPickingFolder] = useState(false);
+  const [pickingFolder, setPickingFolder] = useState<'raw' | 'broll' | null>(null);
 
   /**
    * 指定這個 IP 的毛片資料夾。
@@ -90,8 +93,8 @@ export default function VendorManagement() {
    *    挑上層的話系統看不到裡面既有的「剪輯」，會再建一個同名的出來，變成兩個剪輯資料夾。
    * 廠商還在建檔中（還沒有 id）時，後端只驗證不寫入，值跟著廠商資料一起存。
    */
-  const handlePickRawFolder = async () => {
-    setPickingFolder(true);
+  const handlePickRawFolder = async (field: 'raw' | 'broll' = 'raw') => {
+    setPickingFolder(field);
     try {
       const idToken = await auth.currentUser?.getIdToken();
       if (!idToken) throw new Error('認證已過期，請重新登入');
@@ -109,23 +112,23 @@ export default function VendorManagement() {
         accessToken: cred.accessToken,
         apiKey: getPickerApiKey(),
         appId: cred.appId,
-        title: `選擇「${formData.name || '這個 IP'}」的毛片資料夾`,
+        title: field === 'broll'
+          ? `選擇「${formData.name || '這個 IP'}」的共用 B-roll 資料夾`
+          : `選擇「${formData.name || '這個 IP'}」的毛片資料夾`,
       });
       if (!picked) return;
       // 有 id 就順便寫回（編輯既有廠商）；沒有就只驗證，等按儲存時一起寫
       const saved = await call('/api/drive/set-vendor-folder', {
-        vendorId: editingVendor?.id, folderId: picked.id,
+        vendorId: editingVendor?.id, folderId: picked.id, field,
       });
-      setFormData(prev => ({
-        ...prev,
-        rawFootageFolderId: saved.folderId,
-        rawFootageFolderName: saved.folderName,
-      }));
+      setFormData(prev => (field === 'broll'
+        ? { ...prev, brollFolderId: saved.folderId, brollFolderName: saved.folderName }
+        : { ...prev, rawFootageFolderId: saved.folderId, rawFootageFolderName: saved.folderName }));
       toast.success(saved.saved ? `已指定：${saved.folderName}` : `已選擇：${saved.folderName}（按儲存後生效）`);
     } catch (e: any) {
       toast.error(e?.message || '指定資料夾失敗');
     } finally {
-      setPickingFolder(false);
+      setPickingFolder(null);
     }
   };
 
@@ -438,6 +441,8 @@ export default function VendorManagement() {
         defaultPlatforms: { video: [], post: [] },
         rawFootageFolderId: '',
         rawFootageFolderName: '',
+        brollFolderId: '',
+        brollFolderName: '',
       });
     } catch (error) {
       toast.error('儲存失敗');
@@ -659,6 +664,8 @@ export default function VendorManagement() {
                       selfPublishing: vendor.selfPublishing || false,
                       rawFootageFolderId: vendor.rawFootageFolderId || '',
                       rawFootageFolderName: vendor.rawFootageFolderName || '',
+                      brollFolderId: vendor.brollFolderId || '',
+                      brollFolderName: vendor.brollFolderName || '',
                       // 還沒在這張卡上明確設定的，先帶入「發布習慣」裡已經設好的平台：
                       // 老闆原本就在那裡設過，打開來應該是已經勾好的狀態，不是一張空表。
                       // 按下儲存就會變成這張卡上的正式設定，之後不再依賴發布習慣。
@@ -914,27 +921,52 @@ export default function VendorManagement() {
                 </div>
 
                 {isPickerConfigured() && (myRole === 'engineer' || myRole === 'manager') && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">毛片雲端資料夾</label>
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <span className="text-sm text-gray-600">
-                        {formData.rawFootageFolderName
-                          ? <>目前：<span className="font-medium text-[#5A5A40]">{formData.rawFootageFolderName}</span></>
-                          : <span className="text-amber-700">尚未指定，同事無法上傳毛片</span>}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handlePickRawFolder}
-                        disabled={pickingFolder}
-                        className="px-3 py-1.5 rounded-xl bg-[#F5F5F0] text-[#5A5A40] text-sm font-medium hover:bg-[#EAEAE0] disabled:opacity-50"
-                      >
-                        {pickingFolder ? '開啟中…' : (formData.rawFootageFolderName ? '換一個' : '指定資料夾')}
-                      </button>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">毛片雲端資料夾</label>
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="text-sm text-gray-600">
+                          {formData.rawFootageFolderName
+                            ? <>目前：<span className="font-medium text-[#5A5A40]">{formData.rawFootageFolderName}</span></>
+                            : <span className="text-amber-700">尚未指定，同事無法上傳毛片</span>}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handlePickRawFolder('raw')}
+                          disabled={pickingFolder !== null}
+                          className="px-3 py-1.5 rounded-xl bg-[#F5F5F0] text-[#5A5A40] text-sm font-medium hover:bg-[#EAEAE0] disabled:opacity-50"
+                        >
+                          {pickingFolder === 'raw' ? '開啟中…' : (formData.rawFootageFolderName ? '換一個' : '指定資料夾')}
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-2">
+                        指到毛片實際放的那一層（剪輯／剪輯_謝／毛片區），不要指 IP 最上層。
+                        之後同事上傳時，系統會自動在它底下建日期與素材資料夾，不用再進雲端硬碟。
+                      </p>
                     </div>
-                    <p className="text-xs text-gray-400 mt-2">
-                      指到毛片實際放的那一層（剪輯／剪輯_謝／毛片區），不要指 IP 最上層。
-                      之後同事上傳時，系統會自動在它底下建日期與素材資料夾，不用再進雲端硬碟。
-                    </p>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">共用 B-roll 資料夾（選填）</label>
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="text-sm text-gray-600">
+                          {formData.brollFolderName
+                            ? <>目前：<span className="font-medium text-[#5A5A40]">{formData.brollFolderName}</span></>
+                            : <span className="text-gray-400">尚未指定</span>}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handlePickRawFolder('broll')}
+                          disabled={pickingFolder !== null}
+                          className="px-3 py-1.5 rounded-xl bg-[#F5F5F0] text-[#5A5A40] text-sm font-medium hover:bg-[#EAEAE0] disabled:opacity-50"
+                        >
+                          {pickingFolder === 'broll' ? '開啟中…' : (formData.brollFolderName ? '換一個' : '指定資料夾')}
+                        </button>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-2">
+                        跨場次累積、不屬於任何一支素材的補充畫面庫（例如「01-Broll下層素材庫」）。
+                        沒指定也不影響毛片上傳。
+                      </p>
+                    </div>
                   </div>
                 )}
 
