@@ -20,7 +20,7 @@ import EditingBrief from './EditingBrief';
 import {
   Scissors, Film, CheckCircle2, UploadCloud, Clock, Flame,
   CalendarClock, Check, ChevronDown, ChevronRight, PackageCheck, Search, X,
-  ArrowLeft, LayoutGrid,
+  ArrowLeft, LayoutGrid, ExternalLink,
 } from 'lucide-react';
 import { differenceInCalendarDays, format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -238,6 +238,22 @@ export function AssetCard({
         {/* 這支片的資訊，不是派工單 —— 措辭一律陳述，不要出現祈使句。
             沒填的舊素材整塊不渲染，卡片維持原本的樣子。 */}
         <EditingBrief brief={asset.editingBrief} clipNotes={asset.clipNotes} />
+
+        {/* 沒有這個連結的話，系統告訴他「有 3 個片段」之後他還是得自己去 Drive 翻資料夾 ——
+            整套自動歸檔的價值會在最後一哩斷掉。
+            ⚠️ 舊素材的 url 可能是單一檔案或任何網址，不一定是資料夾，所以文案分兩種。
+            沒有 url 就整個不渲染，舊卡片維持原樣。 */}
+        {asset.url && (
+          <a
+            href={asset.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 mt-1.5 text-[13px] font-medium text-sky-700 hover:text-sky-900 hover:underline"
+          >
+            <ExternalLink size={12} />
+            {asset.driveFolderId ? '開啟毛片資料夾' : '開啟素材連結'}
+          </a>
+        )}
 
         {/* 每個標籤都 nowrap：中文沒有詞界，不鎖的話手機上會在「停留 12 天」中間斷成兩行留孤字。
             要換行就整個標籤換下一行。 */}

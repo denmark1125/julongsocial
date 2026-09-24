@@ -616,7 +616,9 @@ app.post("/api/drive/commit-groups", async (req, res) => {
           driveFolderId: groupFolderId,
           vendorId,
           vendorName,
-          editorId: '',
+          // 空字串＝跟著 IP 的負責剪輯師走（getWorkingEditorId 的退路），
+          // 有值＝逐片指名，那位剪輯師即使沒被指派這家 IP 也看得到這一支。
+          editorId: String(g.editorId || '').trim(),
           category: String(g.category || '').trim() || '未分類',
           // 整支片的剪輯方向，以及每個片段的短標籤。
           // clipNotes 是刻意的反正規化：權威紀錄在 assetUploads，但規則擋住剪輯師讀那張表，

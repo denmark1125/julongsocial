@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { auth } from '../firebase';
-import { Vendor } from '../types';
+import { Vendor, Editor } from '../types';
 import { visibleVendors } from '../lib/vendorStatus';
 import { ASSET_CATEGORIES, ASSET_CATEGORY_DATALIST_ID } from '../lib/assetCategories';
 import { BROLL_FOLDER_NAME } from '../lib/driveNaming';
@@ -32,6 +32,7 @@ import toast from 'react-hot-toast';
 
 interface Props {
   vendors: Vendor[];
+  editors: Editor[];
   onClose: () => void;
   /** engineer / manager 才能指定 IP 的毛片根資料夾 */
   canSetFolder: boolean;
@@ -54,6 +55,11 @@ interface Group {
   brief: string;
   /** 補充畫面，放在這支素材資料夾底下的 B-roll 子資料夾。不會另外變成一支素材 */
   brollFiles: PickedFile[];
+  /**
+   * 逐支指派的剪輯師。空字串＝跟著這個 IP 的負責剪輯師走（跟人工建檔的預設一致）。
+   * ⚠️ 不要偷偷把 IP 的剪輯師複製進來：那會凍結指派，之後 IP 換人這支片不會跟著換。
+   */
+  editorId: string;
 }
 
 const fmtSize = (bytes: number) => {
@@ -71,11 +77,11 @@ const defaultBatchName = (shotAt: string) => {
 // 一次拍攝多半是同一個題材，所以新的一組沿用上一組的分類，少打幾次
 const newGroup = (category = ''): Group => ({
   key: `g${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
-  name: '', files: [], brollFiles: [], category, brief: '',
+  name: '', files: [], brollFiles: [], category, brief: '', editorId: '',
 });
 
 export default function RawFootageUpload({
-  vendors, onClose, canSetFolder, defaultVendorId, defaultShotAt,
+  vendors, editors, onClose, canSetFolder, defaultVendorId, defaultShotAt,
 }: Props) {
   const today = new Date().toISOString().split('T')[0];
   const [vendorId, setVendorId] = useState(defaultVendorId || '');
@@ -228,6 +234,7 @@ export default function RawFootageUpload({
           groupFolderId: g.folderId,
           category: g.category,
           brief: g.brief,
+          editorId: g.editorId,
           files: g.files.map(f => ({ driveFileId: f.id, note: notes[f.id] || '' })),
           brollFiles: g.brollFiles.map(f => ({ driveFileId: f.id, note: notes[f.id] || '' })),
         })),
@@ -430,6 +437,25 @@ export default function RawFootageUpload({
                             placeholder="輸入或選擇"
                             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm"
                           />
+                        </div>
+                        <div className="w-full sm:w-52">
+                          <label className="block text-xs font-medium text-slate-600 mb-1">剪輯師</label>
+                          <select
+                            value={g.editorId}
+                            onChange={e => patch(g.key, { editorId: e.target.value })}
+                            className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
+                          >
+                            <option value="">
+                              跟著 IP（{vendor?.editorName || '未設定'}）
+                            </option>
+                            {editors.map(ed => <option key={ed.id} value={ed.id}>{ed.name}</option>)}
+                          </select>
+                          {!g.editorId && !vendor?.editorId && (
+                            // 兩邊都空＝這支片不會出現在任何人的待辦裡，現在就要講
+                            <p className="text-xs text-amber-700 mt-1">
+                              這個 IP 沒有負責剪輯師，不指定的話沒有人會看到這支片
+                            </p>
+                          )}
                         </div>
                         <div className="flex-1 min-w-[14rem]">
                           <label className="block text-xs font-medium text-slate-600 mb-1">剪輯需求（整支片的方向）</label>

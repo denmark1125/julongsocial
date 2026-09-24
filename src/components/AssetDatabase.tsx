@@ -1214,6 +1214,7 @@ export default function AssetDatabase() {
       {isUploadingRaw && (
         <RawFootageUpload
           vendors={vendors}
+          editors={editors}
           canSetFolder={me?.role === 'engineer' || me?.role === 'manager'}
           onClose={() => setIsUploadingRaw(false)}
         />
