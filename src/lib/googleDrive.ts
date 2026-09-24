@@ -150,17 +150,22 @@ export async function ensureFolder(name: string, parentId?: string): Promise<str
   return created.id;
 }
 
-/** 檔名消毒：Drive 不擋這些字，但 Windows／macOS 下載後會出問題，而且路徑會很難讀。 */
-export function sanitizeFileName(name: string): string {
+/**
+ * 資料夾名稱消毒。
+ *
+ * ⚠️ **半形斜線刻意保留**：使用者要求批次資料夾寫成 `2026/0924`。Drive 不是檔案系統，
+ *    名稱裡有 `/` 完全合法。代價是「Google 雲端硬碟電腦版」同步到本機時會把它換成別的字
+ *    （Windows／macOS 都不允許檔名含 `/`），所以在電腦上看到的資料夾名會跟網頁版不一樣。
+ * ⚠️ 其餘 Windows 非法字元照樣換掉，否則下載整夾會失敗。
+ * ⚠️ **這個結果不能直接拿來當 Firestore 文件 id** —— id 裡的 `/` 會被當成子集合路徑。
+ *    要當 id 的地方自己再換掉一次（見 server.ts 的 driveFolders doc id）。
+ */
+export function sanitizeFolderName(name: string): string {
   const cleaned = name
-    .replace(/[/\\:*?"<>|]/g, '_')
+    .replace(/[\\:*?"<>|]/g, '_')
     .replace(/[\x00-\x1f\x7f]/g, '')
     .trim();
-  if (cleaned.length <= 120) return cleaned || '未命名檔案';
-  // 截斷但保留副檔名 —— 砍掉副檔名的話 Drive 與播放器都認不出檔案類型
-  const dot = cleaned.lastIndexOf('.');
-  const ext = dot > 0 && cleaned.length - dot <= 10 ? cleaned.slice(dot) : '';
-  return cleaned.slice(0, 120 - ext.length) + ext;
+  return (cleaned.slice(0, 120) || '未命名資料夾');
 }
 
 /**

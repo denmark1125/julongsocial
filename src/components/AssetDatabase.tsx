@@ -1038,10 +1038,10 @@ export default function AssetDatabase() {
                           className="underline decoration-dotted hover:text-[#5A5A40] transition-colors"
                           title="點一下改派剪輯師"
                         >
-                          {getEditorName(getEffectiveEditorId(asset))}
+                          {asset.internalEdit ? '內部剪輯' : getEditorName(getEffectiveEditorId(asset))}
                         </button>
                       ) : (
-                        <span>{getEditorName(getEffectiveEditorId(asset))}</span>
+                        <span>{asset.internalEdit ? '內部剪輯' : getEditorName(getEffectiveEditorId(asset))}</span>
                       )}
                     </div>
                   </div>

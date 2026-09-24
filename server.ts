@@ -16,7 +16,7 @@ import { fileURLToPath } from "url";
 import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVideoTrackingScope, getDeficitBreakdown } from "./src/lib/vendorStatus.js";
 // 交棒狀態的判定要跟前端同一份，不然推播說的「目前狀態」會跟畫面上不一致
 import { deriveFlowStage, FLOW_STAGE_LABEL } from "./src/types.js";
-import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFileName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
+import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFolderName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
 import { BROLL_FOLDER_NAME } from "./src/lib/driveNaming.js";
 
 dotenv.config();
@@ -287,11 +287,17 @@ app.post("/api/drive/set-vendor-folder", async (req, res) => {
   }
 });
 
-/** 批次資料夾的預設名稱。跟既有習慣一致（2026／0131），使用者仍可在畫面上改。 */
+/**
+ * 批次資料夾的預設名稱。
+ * ⚠️ 使用者指定用**半形斜線**（`2026/0924`）。既有的 126 個資料夾是全形 ／，
+ *    所以新舊會並存，這是使用者知情後的決定。
+ * ⚠️ 前端 RawFootageUpload 有一份同樣的實作，兩邊要一致，
+ *    不然會建出兩個只差一個字元的資料夾。
+ */
 function defaultBatchName(shotAt?: string): string {
   const d = shotAt && /^\d{4}-\d{2}-\d{2}$/.test(shotAt) ? shotAt : new Date().toISOString().slice(0, 10);
   const [y, m, day] = d.split('-');
-  return `${y}／${m}${day}`;
+  return `${y}/${m}${day}`;
 }
 
 /**
@@ -316,7 +322,7 @@ app.post("/api/drive/group-folder", async (req, res) => {
 
     const { vendorId, shotAt, batchName, groupName, sub } = req.body || {};
     if (!vendorId) return res.status(400).json({ error: "缺少 vendorId" });
-    const group = sanitizeFileName(String(groupName || '').trim());
+    const group = sanitizeFolderName(String(groupName || '').trim());
     if (!group) return res.status(400).json({ error: "請先幫這支素材取名字" });
 
     const vSnap = await adminDb.collection("vendors").doc(vendorId).get();
@@ -350,7 +356,7 @@ app.post("/api/drive/group-folder", async (req, res) => {
     // 前端傳空字串＝不要這一層，素材資料夾直接建在該 IP 的毛片根底下。
     // ⚠️ 空字串與「沒帶這個欄位」意思不同：沒帶＝用預設日期名。
     const wantsBatch = !(typeof batchName === 'string' && batchName.trim() === '');
-    const batch = wantsBatch ? sanitizeFileName(String(batchName || defaultBatchName(shotAt))) : '';
+    const batch = wantsBatch ? sanitizeFolderName(String(batchName || defaultBatchName(shotAt))) : '';
     const parentId = wantsBatch
       ? await ensureBatchFolder({ rawRootFolderId, batchName: batch })
       : rawRootFolderId;
@@ -362,13 +368,18 @@ app.post("/api/drive/group-folder", async (req, res) => {
     const targetId = sub === 'broll'
       ? await ensureFolder(BROLL_FOLDER_NAME, groupFolderId)
       : groupFolderId;
+    // ⚠️ 只拿來顯示（Picker 標題、畫面上的「已建資料夾」）。用 › 不用斜線：
+    //    批次名稱本身可能含半形斜線，混在一起會看不出層級。
     const path = [vendor.rawFootageFolderName || '', batch, group, sub === 'broll' ? BROLL_FOLDER_NAME : '']
-      .filter(Boolean).join('/');
+      .filter(Boolean).join(' › ');
 
     // 可推導的 doc id ⇒ 之後永遠只要一次 getDoc，不需要查詢也不需要索引。
     // 這張表同時是孤兒對帳的依據：這裡有紀錄、assetUploads 卻沒有，就是傳了沒登記。
+    // ⚠️ 文件 id 裡的 `/` 會被 Firestore 當成子集合路徑，而批次名現在可能含半形斜線
+    //（例如 2026/0924）。這裡單獨換掉，不要直接用資料夾名稱當 id。
+    const idPart = (v: string) => v.replace(/[/.]/g, '_');
     await adminDb.collection("driveFolders")
-      .doc(`v3_${vendorId}_${sub === 'broll' ? 'broll' : 'raw'}_${batch || 'root'}_${group}`).set({
+      .doc(`v3_${vendorId}_${sub === 'broll' ? 'broll' : 'raw'}_${idPart(batch) || 'root'}_${idPart(group)}`).set({
         folderId: targetId, parentFolderId: parentId, path,
         vendorId, kind: sub === 'broll' ? 'broll' : 'raw', batchName: batch, groupName: group,
         createdAt: new Date().toISOString(), createdByUid: me.uid,
@@ -575,7 +586,7 @@ app.post("/api/drive/commit-groups", async (req, res) => {
     const failed: any[] = [];
 
     for (const g of groups) {
-      const groupName = sanitizeFileName(String(g.name || '').trim());
+      const groupName = sanitizeFolderName(String(g.name || '').trim());
       const groupFolderId = String(g.groupFolderId || '');
       if (!groupName || !groupFolderId) {
         failed.push({ name: g.name || '(未命名)', reason: "這一組沒有名字或沒有資料夾" }); continue;
@@ -619,6 +630,8 @@ app.post("/api/drive/commit-groups", async (req, res) => {
           // 空字串＝跟著 IP 的負責剪輯師走（getWorkingEditorId 的退路），
           // 有值＝逐片指名，那位剪輯師即使沒被指派這家 IP 也看得到這一支。
           editorId: String(g.editorId || '').trim(),
+          // 內部自己剪：不進任何外包剪輯師的待辦（見 EditorAssetQueue 的 myVideos 過濾）
+          internalEdit: Boolean(g.internalEdit),
           category: String(g.category || '').trim() || '未分類',
           // 整支片的剪輯方向，以及每個片段的短標籤。
           // clipNotes 是刻意的反正規化：權威紀錄在 assetUploads，但規則擋住剪輯師讀那張表，

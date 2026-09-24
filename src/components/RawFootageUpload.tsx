@@ -60,6 +60,8 @@ interface Group {
    * ⚠️ 不要偷偷把 IP 的剪輯師複製進來：那會凍結指派，之後 IP 換人這支片不會跟著換。
    */
   editorId: string;
+  /** 內部自己剪，不派給外包。跟 editorId 是互斥的兩種狀態 */
+  internalEdit: boolean;
 }
 
 const fmtSize = (bytes: number) => {
@@ -68,16 +70,19 @@ const fmtSize = (bytes: number) => {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
 };
 
-/** 跟後端的 defaultBatchName 同一套寫法（2026／0131），兩邊要一致否則會建出兩個資料夾 */
+/** 跟後端的 defaultBatchName 同一套寫法（半形斜線），兩邊要一致否則會建出兩個資料夾 */
 const defaultBatchName = (shotAt: string) => {
   const [y, m, d] = shotAt.split('-');
-  return y && m && d ? `${y}／${m}${d}` : '';
+  return y && m && d ? `${y}/${m}${d}` : '';
 };
 
 // 一次拍攝多半是同一個題材，所以新的一組沿用上一組的分類，少打幾次
+/** 下拉選單裡代表「內部剪輯」的值。不是真的 editorId，送出前會轉成 internalEdit 旗標 */
+const INTERNAL = '__internal__';
+
 const newGroup = (category = ''): Group => ({
   key: `g${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
-  name: '', files: [], brollFiles: [], category, brief: '', editorId: '',
+  name: '', files: [], brollFiles: [], category, brief: '', editorId: '', internalEdit: false,
 });
 
 export default function RawFootageUpload({
@@ -235,6 +240,7 @@ export default function RawFootageUpload({
           category: g.category,
           brief: g.brief,
           editorId: g.editorId,
+          internalEdit: g.internalEdit,
           files: g.files.map(f => ({ driveFileId: f.id, note: notes[f.id] || '' })),
           brollFiles: g.brollFiles.map(f => ({ driveFileId: f.id, note: notes[f.id] || '' })),
         })),
@@ -254,7 +260,9 @@ export default function RawFootageUpload({
 
   const pathHint = () => {
     const root = vendor?.rawFootageFolderName || '';
-    return [root, batchName, '素材名稱'].filter(Boolean).join('／');
+    // ⚠️ 用 › 當分隔而不是斜線：批次資料夾名稱本身現在可能含半形斜線（2026/0924），
+    //    兩種斜線混在一起看不出哪個是分隔、哪個是名稱的一部分。
+    return [root, batchName, '素材名稱'].filter(Boolean).join(' › ');
   };
 
   return (
@@ -341,14 +349,16 @@ export default function RawFootageUpload({
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">日期資料夾</label>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">批次資料夾</label>
                   <input
                     value={batchName}
                     onChange={e => setBatchName(e.target.value)}
                     disabled={lockHeader}
-                    placeholder="留空＝不分日期"
+                    placeholder="留空＝不分批次"
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-base disabled:bg-slate-100"
                   />
+                  {/* 不一定是日期：彭彭是「01毛片備份」、佐禾是產品系列名 */}
+                  <p className="text-xs text-slate-500 mt-1">預設拍攝日，可以改成自己的名稱</p>
                 </div>
               </div>
 
@@ -441,17 +451,20 @@ export default function RawFootageUpload({
                         <div className="w-full sm:w-52">
                           <label className="block text-xs font-medium text-slate-600 mb-1">剪輯師</label>
                           <select
-                            value={g.editorId}
-                            onChange={e => patch(g.key, { editorId: e.target.value })}
+                            value={g.internalEdit ? INTERNAL : g.editorId}
+                            onChange={e => patch(g.key, e.target.value === INTERNAL
+                              ? { internalEdit: true, editorId: '' }
+                              : { internalEdit: false, editorId: e.target.value })}
                             className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
                           >
                             <option value="">
                               跟著 IP（{vendor?.editorName || '未設定'}）
                             </option>
+                            <option value={INTERNAL}>內部剪輯（不派給外包）</option>
                             {editors.map(ed => <option key={ed.id} value={ed.id}>{ed.name}</option>)}
                           </select>
-                          {!g.editorId && !vendor?.editorId && (
-                            // 兩邊都空＝這支片不會出現在任何人的待辦裡，現在就要講
+                          {!g.internalEdit && !g.editorId && !vendor?.editorId && (
+                            // 三個都空＝這支片不會出現在任何人的待辦裡，現在就要講
                             <p className="text-xs text-amber-700 mt-1">
                               這個 IP 沒有負責剪輯師，不指定的話沒有人會看到這支片
                             </p>

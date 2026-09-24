@@ -577,6 +577,16 @@ export interface Asset {
    * 1–5 筆的小陣列，跟著 asset 一起讀，不需要動任何規則的讀取範圍。
    */
   clipNotes?: { fileName: string; note: string; kind?: 'raw' | 'broll' }[];
+  /**
+   * 這支由內部自己剪，不派給外包剪輯師。
+   *
+   * ⚠️ 為什麼不能只把 editorId 留空：剪輯師工作台的過濾是
+   *    `(!myEditorId || !a.editorId || a.editorId === myEditorId)` ——
+   *    **editorId 空的片，每個被指派那家 IP 的剪輯師都看得到**。
+   *    所以要一個明確的旗標把它從所有人的待辦裡拿掉，而不是靠留空。
+   * ⚠️ 不要拿 editorId 塞一個假 id 來達成：那會污染請款與剪輯費的查詢。
+   */
+  internalEdit?: boolean;
   type: AssetType;
   stage: 'raw' | 'finished';
   filmingDate?: string;

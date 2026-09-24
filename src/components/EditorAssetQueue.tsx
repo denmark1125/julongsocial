@@ -475,6 +475,9 @@ export default function EditorAssetQueue({ userProfile, jumpToVendorId, onJumpCo
     // 作廢的片不該再出現在剪輯師的工作台，也不會進他的請款清單（見 isBillable）
     !a.voidedAt &&
     (!myEditorId || !a.editorId || a.editorId === myEditorId) &&
+    // 內部自己剪的片不進任何外包剪輯師的待辦。
+    // ⚠️ 這條一定要有：editorId 空的片本來是「每個被指派這家 IP 的人都看得到」。
+    !a.internalEdit &&
     // 封存＝業主不用這支，我們丟進暫存區。已經上傳過的仍要留著（那是他的請款依據），
     // 還沒做完就被封存的則不該再出現在他的待辦裡。
     (a.status !== 'archived' || !!a.cloudUploadedAt) &&

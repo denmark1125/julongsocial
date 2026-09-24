@@ -264,7 +264,8 @@ service cloud.firestore {
              // 而他們正是要看這些字的人（理由同 vendorName 快照）。
              (!('driveFolderId' in data) || data.driveFolderId is string) &&
              (!('editingBrief' in data) || data.editingBrief is string) &&
-             (!('clipNotes' in data) || data.clipNotes is list);
+             (!('clipNotes' in data) || data.clipNotes is list) &&
+             (!('internalEdit' in data) || data.internalEdit is bool);
     }
 
     function isValidDismissedHabit(data) {
