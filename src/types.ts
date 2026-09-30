@@ -597,6 +597,20 @@ export interface Asset {
    * ⚠️ 不要拿 editorId 塞一個假 id 來達成：那會污染請款與剪輯費的查詢。
    */
   internalEdit?: boolean;
+  /**
+   * 建了檔，但影片還在上傳（或同事根本還沒開始丟）。
+   *
+   * 「先建檔、後上傳」流程用的閘門：同事在系統填完資料就走人，檔案自己在背景丟進 Drive，
+   * 傳完回來按「檔案已就緒」清掉這個旗標，這支片才進剪輯師的待辦。
+   * 少了它，剪輯師會點進一個空資料夾。
+   *
+   * ⚠️ **預設值方向不能反**：欄位**不存在＝正常**，只有新流程會寫 true。
+   *    做成「沒有 true 就當作在等」的話，全庫四百多支既有素材會一夜之間從剪輯師工作台消失。
+   *    跟 internalEdit 同一類陷阱（見上面那段）。
+   * ⚠️ 只擋剪輯師待辦，**不進任何庫存／欠片算式** —— 片已經拍回來了，
+   *    vendorStatus.ts 一行都不要為它改。
+   */
+  awaitingFiles?: boolean;
   type: AssetType;
   stage: 'raw' | 'finished';
   filmingDate?: string;

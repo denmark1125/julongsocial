@@ -286,7 +286,10 @@ service cloud.firestore {
              (!('driveFolderId' in data) || data.driveFolderId is string) &&
              (!('editingBrief' in data) || data.editingBrief is string) &&
              (!('clipNotes' in data) || data.clipNotes is list) &&
-             (!('internalEdit' in data) || data.internalEdit is bool);
+             (!('internalEdit' in data) || data.internalEdit is bool) &&
+             // 建了檔但影片還在上傳。剪輯師清不掉它（不在 isEditorAssetUpdate 白名單），
+             // 所以「檔案就緒」一定是公司內部的人按的。
+             (!('awaitingFiles' in data) || data.awaitingFiles is bool);
     }
 
     function isValidDismissedHabit(data) {

@@ -143,6 +143,58 @@ export async function openUploadPicker(opts: PickerAuth & {
 }
 
 /**
+ * 從某個資料夾裡挑**已經上傳好的**檔案。
+ *
+ * 跟 openUploadPicker 的差別是「這裡不傳位元組」：檔案早就在雲端了，所以視窗是秒開秒關，
+ * 不用守著。「先建檔、後上傳」流程的第三步（回來補登逐片說明）就是走這支。
+ *
+ * ⚠️ 一樣受 `drive.file` 限制：同事在 Drive 自己丟進去的檔案，我們的後端本來看不到。
+ *    **人在這個視窗裡挑一次，那些檔案才進入可存取範圍**，後端才動得了它們。
+ *    這不是多餘的一步，是唯一的路。
+ * ⚠️ 挑的人必須登入**公司 Google 帳號** —— 檔案擁有者若是個人帳號，挑了後端仍然動不了。
+ *
+ * 回傳空陣列＝使用者取消（不是錯誤）。
+ */
+export async function openFolderContentPicker(opts: PickerAuth & {
+  folderId: string;
+  title?: string;
+}): Promise<PickedFile[]> {
+  await loadPicker();
+  const picker = window.google?.picker;
+  if (!picker) throw new Error('Picker 尚未就緒，請重新整理後再試');
+
+  return new Promise<PickedFile[]>((resolve, reject) => {
+    try {
+      const view = new picker.DocsView(picker.ViewId.DOCS)
+        .setParent(opts.folderId)
+        // 只挑檔案。B-roll 子資料夾要另外選，不是在這裡連資料夾一起挑走
+        .setIncludeFolders(false)
+        .setSelectFolderEnabled(false);
+
+      const b = buildBase(picker, opts, opts.title)
+        .addView(view)
+        .enableFeature(picker.Feature.MULTISELECT_ENABLED)
+        .setCallback((data: any) => {
+          if (data.action === picker.Action.PICKED) {
+            resolve((data.docs || []).map((d: any) => ({
+              id: d.id,
+              name: d.name,
+              sizeBytes: Number(d.sizeBytes || 0),
+              mimeType: d.mimeType || '',
+            })));
+          } else if (data.action === picker.Action.CANCEL) {
+            resolve([]);
+          }
+        });
+
+      b.build().setVisible(true);
+    } catch (e: any) {
+      reject(new Error(e?.message || '開啟選檔視窗失敗'));
+    }
+  });
+}
+
+/**
  * 挑一個**既有的**資料夾（每個 IP 只需要做一次）。
  *
  * ⚠️ 這是整套設計裡唯一能突破 `drive.file` 的地方：我們的授權看不到「不是這個 app

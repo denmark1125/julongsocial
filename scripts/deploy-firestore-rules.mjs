@@ -49,6 +49,9 @@ const MUST_CONTAIN = [
   // 後果是同事建不了廠商（create 仍鎖 isManager），或是能自己核准自己建的。
   'pendingApproval',
   'selfApproves',
+  // 2026-09-30 加入：先建檔、後上傳的等待旗標。少了它型別檢查會消失，
+  // 代表送的是舊檔（前端仍能運作，但規則層就沒把關了）。
+  'awaitingFiles',
 ];
 
 function fail(msg) {

@@ -8,7 +8,7 @@ import fetch from "node-fetch";
 // firebase-admin/app 等子路徑是原生ESM，不會有這個互通問題
 import { getApps, initializeApp as initializeAdminApp, cert } from "firebase-admin/app";
 import { getAuth as getAdminAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import * as crypto from "crypto";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
@@ -576,7 +576,9 @@ app.post("/api/drive/commit-groups", async (req, res) => {
     }
     if (groups.length > 30) return res.status(400).json({ error: "一次最多 30 支素材" });
     const fileCount = groups.reduce((n: number, g: any) => n + (g.files?.length || 0) + (g.brollFiles?.length || 0), 0);
-    if (fileCount === 0) return res.status(400).json({ error: "每一支素材至少要有一個片段" });
+    // ⚠️ 刻意**不再**要求「至少要有一個片段」。2026-09-30 同事棄坑的真因是被迫守著上傳視窗，
+    //    所以改成建檔與上傳可以分開：0 個檔案＝只建資料夾與素材，檔案之後自己丟進 Drive，
+    //    素材先標 awaitingFiles 不進剪輯師待辦。
     if (fileCount > 100) return res.status(400).json({ error: "一次最多 100 個檔案" });
 
     const vSnap = await adminDb.collection("vendors").doc(vendorId).get();
@@ -593,12 +595,11 @@ app.post("/api/drive/commit-groups", async (req, res) => {
       if (!groupName || !groupFolderId) {
         failed.push({ name: g.name || '(未命名)', reason: "這一組沒有名字或沒有資料夾" }); continue;
       }
-      if (!Array.isArray(g.files) || g.files.length === 0) {
-        failed.push({ name: groupName, reason: "這一組沒有檔案" }); continue;
-      }
+      // 0 個檔案是合法的：先建檔、檔案之後自己丟（見上面 fileCount 那段）
+      const rawList = Array.isArray(g.files) ? g.files : [];
       try {
         const checked: any[] = [];
-        for (const f of g.files) {
+        for (const f of rawList) {
           // 檔案本來就該在這個資料夾裡；ensureFileParent 是冪等的，
           // 在對的位置就只做一次 getFile，等於「向 Google 確認它真的存在且在這裡」。
           const info = await ensureFileParent(f.driveFileId, groupFolderId, groupFolderId);
@@ -638,6 +639,11 @@ app.post("/api/drive/commit-groups", async (req, res) => {
           // 整支片的剪輯方向，以及每個片段的短標籤。
           // clipNotes 是刻意的反正規化：權威紀錄在 assetUploads，但規則擋住剪輯師讀那張表，
           // 而他們正是要看這些字的人（理由同 vendorName 快照）。
+          // 建了檔但還沒有任何片段＝同事等一下才會把影片丟進 Drive。
+          // 這支片先不要進剪輯師待辦，否則他點進去是一個空資料夾。
+          // ⚠️ 有檔案時**不要寫 false**，直接不帶這個欄位 —— 讓「欄位不存在＝正常」這件事
+          //    對所有既有素材與新素材都成立，判斷端才只需要看 truthy。
+          ...(checked.length === 0 ? { awaitingFiles: true } : {}),
           editingBrief: String(g.brief || '').trim(),
           clipNotes: checked.map((c: any) => ({
             fileName: c.info.name,
@@ -683,6 +689,9 @@ app.post("/api/drive/commit-groups", async (req, res) => {
           assetId: assetRef.id, name: groupName,
           fileCount: checked.filter((c: any) => c.kind === 'raw').length,
           brollCount: checked.filter((c: any) => c.kind === 'broll').length,
+          // 「先建檔、後上傳」的人就是靠這個連結把影片丟進去，一定要回給前端
+          folderUrl: folderInfo.webViewLink || '',
+          awaitingFiles: checked.length === 0,
         });
       } catch (err: any) {
         failed.push({ name: groupName, reason: err?.message || "這一組處理失敗" });
@@ -695,6 +704,148 @@ app.post("/api/drive/commit-groups", async (req, res) => {
     if (e?.httpStatus) return sendAuthError(res, e);
     console.error("drive/commit-groups failed:", e?.message);
     return res.status(502).json({ error: e?.message || "登記失敗" });
+  }
+});
+
+/**
+ * 「掛上檔案」要用的短效憑證。
+ *
+ * ⚠️ 刻意不重用 picker-auth：那支是給「指定 IP 毛片根目錄」用的，限 manager/engineer，
+ *    而掛檔案是小編日常工作。把 picker-auth 放寬會連帶讓一般同事能改 IP 的根目錄。
+ */
+app.post("/api/drive/asset-picker-auth", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    const me = await requireUser(req);
+    if (me.role === 'editor') return res.status(403).json({ error: "剪輯師無法使用系統上傳" });
+
+    const { assetId } = req.body || {};
+    if (!assetId) return res.status(400).json({ error: "缺少 assetId" });
+    const aSnap = await adminDb.collection("assets").doc(String(assetId)).get();
+    if (!aSnap.exists) return res.status(404).json({ error: "找不到這支素材" });
+    const folderId = String(aSnap.data()?.driveFolderId || '');
+    if (!folderId) {
+      return res.status(409).json({
+        error: "ASSET_FOLDER_UNSET",
+        message: "這支素材沒有雲端資料夾（多半是以前人工建檔的），請改用上傳毛片流程。",
+      });
+    }
+    return res.json({
+      folderId,
+      accessToken: await getAccessToken(),
+      appId: (process.env.GOOGLE_OAUTH_CLIENT_ID || '').split('-')[0],
+    });
+  } catch (e: any) {
+    if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("drive/asset-picker-auth failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "取得憑證失敗" });
+  }
+});
+
+/**
+ * 把「已經在 Drive 上的檔案」掛到一支既有素材底下。
+ *
+ * 兩個用途合而為一：
+ *   ① 先建檔、後上傳流程的最後一步（補登逐片說明、清掉 awaitingFiles）
+ *   ② 事後補片段 —— 以前完全沒有入口，同事只能把整批重跑一次，
+ *      而那會再建一支**重複的素材**（commit-groups 每次都 assets.doc()），
+ *      然後那支幽靈片會跑進剪輯師待辦與庫存。
+ *
+ * ⚠️ **不相信前端給的任何東西**：每個 fileId 都用 ensureFileParent 向 Google 確認
+ *    存在、而且確實落在這支素材自己的資料夾裡，否則任何登入者都能把別人的檔案掛過來。
+ * ⚠️ B-roll 一樣**不另外建 Asset**：不是交付品，建了會變幽靈庫存並跑進欠片計算。
+ */
+app.post("/api/drive/attach-files", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    const me = await requireUser(req);
+    if (me.role === 'editor') return res.status(403).json({ error: "剪輯師無法使用系統上傳" });
+
+    const { assetId, files, brollFiles } = req.body || {};
+    if (!assetId) return res.status(400).json({ error: "缺少 assetId" });
+    const rawList = Array.isArray(files) ? files : [];
+    const brollList = Array.isArray(brollFiles) ? brollFiles : [];
+    if (rawList.length + brollList.length === 0) return res.status(400).json({ error: "沒有要掛上的檔案" });
+    if (rawList.length + brollList.length > 100) return res.status(400).json({ error: "一次最多 100 個檔案" });
+
+    const assetRef = adminDb.collection("assets").doc(String(assetId));
+    const aSnap = await assetRef.get();
+    if (!aSnap.exists) return res.status(404).json({ error: "找不到這支素材" });
+    const asset: any = aSnap.data();
+
+    const groupFolderId = String(asset.driveFolderId || '');
+    if (!groupFolderId) {
+      return res.status(409).json({
+        error: "ASSET_FOLDER_UNSET",
+        message: "這支素材沒有雲端資料夾（多半是以前人工建檔的），請改用上傳毛片流程。",
+      });
+    }
+    // 資料夾是我們建的，讀得到就代表它還在。讀不到就別再往下寫紀錄。
+    const folderInfo = await getFile(groupFolderId);
+
+    const now = new Date().toISOString();
+    const checked: any[] = [];
+    for (const f of rawList) {
+      const info = await ensureFileParent(String(f.driveFileId), groupFolderId, groupFolderId);
+      checked.push({ info, note: f.note || null, kind: 'raw' as const });
+    }
+    if (brollList.length) {
+      const brollFolderId = await ensureFolder(BROLL_FOLDER_NAME, groupFolderId);
+      for (const f of brollList) {
+        const info = await ensureFileParent(String(f.driveFileId), brollFolderId, brollFolderId);
+        checked.push({ info, note: f.note || null, kind: 'broll' as const });
+      }
+    }
+
+    for (const c of checked) {
+      // ⚠️ driveFolderId 要用檔案**實際所在**的資料夾，B-roll 在子夾裡（同 commit-groups）
+      const actualFolderId = c.info.parents?.[0] || groupFolderId;
+      await adminDb.collection("assetUploads").doc().set({
+        kind: c.kind, storage: 'drive',
+        vendorId: asset.vendorId, vendorName: asset.vendorName || null,
+        assetId: assetRef.id,
+        batchId: groupFolderId,
+        batchFolderId: folderInfo.parents?.[0] || null,
+        groupName: asset.title || '', groupFolderId,
+        driveFileId: c.info.id, driveFolderId: actualFolderId,
+        webViewLink: c.info.webViewLink || null,
+        md5Checksum: c.info.md5Checksum || null,
+        fileName: c.info.name, sizeBytes: c.info.sizeBytes, mimeType: c.info.mimeType,
+        note: c.note,
+        shotAt: asset.filmingDate || null,
+        uploadedByUid: me.uid,
+        uploadedByName: me.displayName || me.email || null,
+        createdAt: now,
+      });
+    }
+
+    // clipNotes 是給剪輯師看的反正規化快照（規則擋住他們讀 assetUploads）。
+    // 用 fileName 去重：同一個檔案被掛第二次時更新標籤，而不是列兩行。
+    const existing: any[] = Array.isArray(asset.clipNotes) ? asset.clipNotes : [];
+    const merged = [...existing];
+    for (const c of checked) {
+      const row = { fileName: c.info.name, note: c.note || '', kind: c.kind };
+      const at = merged.findIndex(x => x.fileName === row.fileName);
+      if (at >= 0) merged[at] = row; else merged.push(row);
+    }
+
+    await assetRef.update({
+      clipNotes: merged,
+      // 檔案到了就不再是「等檔案」。用 delete 而不是寫 false，維持「欄位不存在＝正常」。
+      awaitingFiles: FieldValue.delete(),
+    });
+
+    return res.json({
+      attached: checked.length,
+      fileCount: checked.filter((c: any) => c.kind === 'raw').length,
+      brollCount: checked.filter((c: any) => c.kind === 'broll').length,
+    });
+  } catch (e: any) {
+    if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("drive/attach-files failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "掛上檔案失敗" });
   }
 });
 

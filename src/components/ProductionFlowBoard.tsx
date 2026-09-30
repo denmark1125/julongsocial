@@ -252,6 +252,12 @@ export default function ProductionFlowBoard({
                           <span className="inline-flex items-center gap-1 text-[9.5px] text-gray-400">
                             {OWNER_ICON[col.stage]} {editorName(ownerKey(a))}
                           </span>
+                          {/* 影片還沒丟進雲端資料夾。不標的話看板上看起來就是一支可以開剪的片 */}
+                          {a.awaitingFiles && (
+                            <span className="inline-flex items-center gap-0.5 text-[9.5px] font-bold text-amber-600 whitespace-nowrap">
+                              等待檔案
+                            </span>
+                          )}
                           <span className={stale
                             ? 'inline-flex items-center gap-0.5 text-[9.5px] font-bold text-red-600'
                             : 'inline-flex items-center gap-0.5 text-[9.5px] text-gray-400'}

@@ -478,6 +478,10 @@ export default function EditorAssetQueue({ userProfile, jumpToVendorId, onJumpCo
     // 內部自己剪的片不進任何外包剪輯師的待辦。
     // ⚠️ 這條一定要有：editorId 空的片本來是「每個被指派這家 IP 的人都看得到」。
     !a.internalEdit &&
+    // 建了檔但影片還在上傳的片也不進待辦 —— 進來只會讓剪輯師點開一個空資料夾。
+    // 同事在素材資料庫按「檔案已就緒」之後才會出現。
+    // ⚠️ 判斷是 truthy 而不是「!== false」：欄位不存在＝正常，四百多支既有素材都沒有這個欄位。
+    !a.awaitingFiles &&
     // 封存＝業主不用這支，我們丟進暫存區。已經上傳過的仍要留著（那是他的請款依據），
     // 還沒做完就被封存的則不該再出現在他的待辦裡。
     (a.status !== 'archived' || !!a.cloudUploadedAt) &&
