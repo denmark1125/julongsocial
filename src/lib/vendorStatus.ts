@@ -81,6 +81,32 @@ export function trackedVendors(vendors: Vendor[]): Vendor[] {
   return vendors.filter(v => getEffectiveVendorStatus(v) === 'active' && countsTowardTargets(v));
 }
 
+/**
+ * 「這家手上有沒有片要處理」用的門檻：排除已終止與不列入統計／待核准，**但保留冷凍中的廠商**。
+ *
+ * 冷凍凍的是發片，不是剪片 —— 片已經拍回來了，剪不剪是我們自己的產能調度，
+ * 跟客戶這個月在不在合約冷凍期無關。又生農場 2026-06～09 冷凍那四個月，手上一直有 12 支待剪，
+ * 卻不會出現在催剪清單與庫存表裡，等於沒有任何人會被提醒去剪它。
+ *
+ * ⚠️ 只能用在「庫存／待剪」這種產能視角。目標、欠片、催拍攝、日曆預排一律還是走
+ *    trackedVendors / isVendorTrackedInMonth —— 冷凍月不算目標是對的，動那邊會改寫歷史數字。
+ */
+export function stockVisibleVendors(vendors: Vendor[]): Vendor[] {
+  return vendors.filter(v => getEffectiveVendorStatus(v) !== 'ended' && countsTowardTargets(v));
+}
+
+/**
+ * 冷凍中回傳恢復日（沒填解除日期就回 null），不是冷凍中整支回 null。
+ *
+ * 顯示文字刻意留給呼叫端自己組：內部畫面講「冷凍中」，給外包剪輯師看的催剪清單講
+ * 「10/31 起恢復發片」（「冷凍」是我們的合約術語，剪輯師看不懂）。但「是不是冷凍中、
+ * 哪天恢復」只能有這一份答案，跟 getEffectiveVendorStatus 走同一套（pausedUntil 當天即恢復）。
+ */
+export function getPauseStatus(vendor: Pick<Vendor, 'status' | 'pausedUntil'>): { resumeDate: string | null } | null {
+  if (getEffectiveVendorStatus(vendor) !== 'paused') return null;
+  return { resumeDate: vendor.pausedUntil || null };
+}
+
 // 冷凍區間是否跟指定月份有重疊；抽出來共用，isVendorTrackedInMonth 跟 getWeeklyPace 都要用同一套判斷，
 // 不然會出現「這個月不列入欠片統計，但撐幾天/催片提醒卻還是照正常節奏算」的自相矛盾
 function pauseOverlapsMonth(pauseHistory: Pick<Vendor, 'pauseHistory'>['pauseHistory'], month: string): boolean {

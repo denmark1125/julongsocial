@@ -15,7 +15,7 @@ import {
 } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import { buildFlowUpdate, getClientApprovalTarget, getFlowDaysStuck, getFlowDueInfo, isFlowStale, sortFlowColumn } from '../lib/assetFlow';
-import { getWorkingEditorId } from '../lib/editorBilling';
+import { getAssetEditorOwner } from '../lib/editorBilling';
 import { Scissors, UserCheck, PenLine, Clock, Flame, CalendarClock, ThumbsUp } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -62,9 +62,20 @@ export default function ProductionFlowBoard({
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const vendorMap = new Map(vendors.map(v => [v.id, v]));
-  // 素材可以逐支覆寫剪輯師，沒填的才回退到廠商的負責剪輯師（跟素材資料庫同一套判斷）
-  const effectiveEditorId = (a: Asset) => getWorkingEditorId(a, vendors) || '';
-  const editorName = (id: string) => editors.find(e => e.id === id)?.name || '未指派';
+
+  /** 篩選與顯示用的歸屬 key。內部剪輯是一個獨立的去處，不是某個剪輯師 */
+  const INTERNAL_KEY = '__internal__';
+
+  // 素材可以逐支覆寫剪輯師，沒填的才回退到廠商的負責剪輯師（跟素材資料庫同一套判斷）。
+  // ⚠️ 走 getAssetEditorOwner 而不是 getWorkingEditorId：內部自己剪的片 editorId 常常是空的，
+  //    只問 editorId 會讓看板把它標成那個 IP 的外包剪輯師，篩選也會把它算進那個人底下。
+  const ownerKey = (a: Asset) => {
+    const owner = getAssetEditorOwner(a, vendors);
+    if (owner.kind === 'internal') return INTERNAL_KEY;
+    return owner.kind === 'editor' ? owner.editorId : '';
+  };
+  const editorName = (id: string) =>
+    id === INTERNAL_KEY ? '內部剪輯' : (editors.find(e => e.id === id)?.name || '未指派');
 
   const settledPostIds = new Set(
     posts.filter(p => p.status === 'scheduled' || p.status === 'published').map(p => p.id)
@@ -78,7 +89,7 @@ export default function ProductionFlowBoard({
     // 已排程/已發布代表真的用掉了，不再是「在製作中」
     !(a.usedInPostId && settledPostIds.has(a.usedInPostId)) &&
     (vendorFilter === 'all' || a.vendorId === vendorFilter) &&
-    (editorFilter === 'all' || effectiveEditorId(a) === editorFilter)
+    (editorFilter === 'all' || ownerKey(a) === editorFilter)
   );
 
   const columns = COLUMN_ORDER.map(stage => ({
@@ -117,8 +128,9 @@ export default function ProductionFlowBoard({
     }
   };
 
-  // 有指派剪輯師的廠商才需要出現在「依剪輯師」篩選裡
-  const usedEditorIds = Array.from(new Set(assets.map(effectiveEditorId).filter(Boolean)));
+  // 有指派剪輯師的廠商才需要出現在「依剪輯師」篩選裡。內部剪輯一律排在最後一顆。
+  const usedEditorIds = Array.from(new Set(assets.map(ownerKey).filter(Boolean)))
+    .sort((a, b) => (a === INTERNAL_KEY ? 1 : 0) - (b === INTERNAL_KEY ? 1 : 0));
 
   return (
     <div className="space-y-4">
@@ -238,7 +250,7 @@ export default function ProductionFlowBoard({
 
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="inline-flex items-center gap-1 text-[9.5px] text-gray-400">
-                            {OWNER_ICON[col.stage]} {editorName(effectiveEditorId(a))}
+                            {OWNER_ICON[col.stage]} {editorName(ownerKey(a))}
                           </span>
                           <span className={stale
                             ? 'inline-flex items-center gap-0.5 text-[9.5px] font-bold text-red-600'

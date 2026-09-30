@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import {
   collection,
   addDoc,
@@ -16,9 +16,9 @@ import {
 import { db, auth } from '../firebase';
 import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking, UserProfile, deriveFlowStage } from '../types';
 import { useLiveCollection } from '../lib/liveData';
-import { visibleVendors, trackedVendors, buildPostIndex, getDisplayAssetStatus } from '../lib/vendorStatus';
+import { visibleVendors, stockVisibleVendors, getPauseStatus, buildPostIndex, getDisplayAssetStatus } from '../lib/vendorStatus';
 import { buildFlowUpdate, buildSubmitUndoUpdate, getClientApprovalTarget, isClientApproved } from '../lib/assetFlow';
-import { getWorkingEditorId, canReassignEditor } from '../lib/editorBilling';
+import { getWorkingEditorId, canReassignEditor, getAssetEditorOwner } from '../lib/editorBilling';
 import { isPickerConfigured } from '../lib/drivePicker';
 import { ASSET_CATEGORIES, ASSET_CATEGORY_DATALIST_ID } from '../lib/assetCategories';
 import EditingBrief from './EditingBrief';
@@ -525,7 +525,9 @@ export default function AssetDatabase() {
     return post && (post.status === 'draft' || post.status === 'scheduled');
   }).length;
 
-  const vendorStocks = trackedVendors(vendors).map(vendor => {
+  // 冷凍中的 IP 也要列出來：頁首那四張總計卡本來就是全庫加總（含冷凍），逐列卻用 trackedVendors 篩掉，
+  // 兩邊一直對不起來。而且冷凍期間手上的片照樣要剪，看不到就沒人排產能。
+  const vendorStocks = stockVisibleVendors(vendors).map(vendor => {
     const availableVideos = assets.filter(a => a.vendorId === vendor.id && a.type === 'video' && effStatus(a) === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
     const availablePosts = assets.filter(a => a.vendorId === vendor.id && a.type === 'post' && effStatus(a) === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
     
@@ -546,6 +548,8 @@ export default function AssetDatabase() {
     const hasVideos = vendor.cooperationItems?.includes('short_video');
     const hasPosts = vendor.cooperationItems?.includes('graphic_post');
 
+    const pause = getPauseStatus(vendor);
+
     return {
       name: vendor.name,
       videos: availableVideos,
@@ -553,9 +557,14 @@ export default function AssetDatabase() {
       scheduledVideos,
       scheduledPosts,
       hasVideos,
-      hasPosts
+      hasPosts,
+      pauseNote: pause ? (pause.resumeDate ? `冷凍中・${format(parseISO(pause.resumeDate), 'MM/dd')} 恢復` : '冷凍中') : null
     };
-  }).sort((a, b) => (b.videos + b.posts + b.scheduledVideos + b.scheduledPosts) - (a.videos + a.posts + a.scheduledVideos + a.scheduledPosts));
+  }).sort((a, b) => {
+    // 冷凍中的沉到最後：庫存要看得到，但排在正在合作的 IP 後面，不然庫存表最上面幾列會變成沒在發的片
+    if (!!a.pauseNote !== !!b.pauseNote) return a.pauseNote ? 1 : -1;
+    return (b.videos + b.posts + b.scheduledVideos + b.scheduledPosts) - (a.videos + a.posts + a.scheduledVideos + a.scheduledPosts);
+  });
 
   const handleExportJPG = async () => {
     if (!summaryRef.current) return;
@@ -600,17 +609,42 @@ export default function AssetDatabase() {
   // 誰要動手剪的判斷一律走 editorBilling，不在這裡再寫一份（以前三個地方各寫一份已經分岔過）
   const getEffectiveEditorId = (asset: Asset) => getWorkingEditorId(asset, vendors);
 
-  const reassignEditor = async (asset: Asset, nextEditorId: string) => {
+  /** 下拉選單裡代表「內部剪輯」的值。不是真的 editorId，送出前轉成 internalEdit 旗標（同 RawFootageUpload） */
+  const INTERNAL_EDIT = '__internal__';
+
+  /** 沒有逐片指名時，這支片實際上會落到誰身上。寫出人名，選單才不會被讀成「不剪輯」 */
+  const vendorDefaultLabel = (asset: Asset) => {
+    const fallback = vendors.find(v => v.id === asset.vendorId)?.editorId;
+    return fallback ? `跟著 IP 預設（${getEditorName(fallback)}）` : '先不指定（沒有人會看到）';
+  };
+
+  /** 這支片現在掛在誰身上，一句話。顯示、選單預設值、改派確認視窗共用同一句 */
+  const ownerLabel = (asset: Asset) => {
+    const owner = getAssetEditorOwner(asset, vendors);
+    if (owner.kind === 'internal') return '內部剪輯';
+    if (owner.kind === 'none') return '未指定';
+    return getEditorName(owner.editorId);
+  };
+
+  const reassignEditor = async (asset: Asset, nextValue: string) => {
     const gate = canReassignEditor(asset, me?.role);
     // 按鈕出現前已經檢查過一次，這裡再檢查一次：兩處用同一支純函式，不會分岔
     if (!gate.ok) { toast.error(gate.reason || '這支片現在不能改派'); return; }
 
-    const fromName = getEditorName(getEffectiveEditorId(asset));
-    const toName = nextEditorId ? getEditorName(nextEditorId) : '先不指定';
-    if (fromName === toName) { setReassigningId(null); return; }
-    if (!window.confirm(`把「${asset.title}」從 ${fromName} 改派給 ${toName}？
+    // ⚠️ internalEdit 與 editorId 一定要**一起**寫。以前只寫 editorId，結果把標了內部剪輯的片
+    //    改派給某人時，畫面說「已改派」、卡片仍顯示「內部剪輯」、那位剪輯師還是看不到這支片。
+    const toInternal = nextValue === INTERNAL_EDIT;
+    const nextEditorId = toInternal ? '' : nextValue;
 
-改派後 ${fromName} 會看不到這支片。`)) return;
+    const fromName = ownerLabel(asset);
+    const toName = toInternal ? '內部剪輯' : (nextEditorId ? getEditorName(nextEditorId) : vendorDefaultLabel(asset));
+    if (fromName === toName) { setReassigningId(null); return; }
+    const after = toInternal
+      ? '改成內部剪輯後，外包剪輯師的工作台不會再出現這支片。'
+      : `改派後 ${fromName} 會看不到這支片。`;
+    if (!window.confirm(`把「${asset.title}」從 ${fromName} 改成 ${toName}？
+
+${after}`)) return;
 
     try {
       const entry = {
@@ -622,11 +656,12 @@ export default function AssetDatabase() {
       };
       await updateDoc(doc(db, 'assets', asset.id!), {
         editorId: nextEditorId,
+        internalEdit: toInternal,
         // 順手補上名稱快照：改派的對象很可能讀不到這家 vendor 的文件
         vendorName: vendors.find(v => v.id === asset.vendorId)?.name || asset.vendorName || '',
         flowLog: [...(asset.flowLog ?? []), entry].slice(-20),
       });
-      toast.success(`已改派給 ${toName}`);
+      toast.success(toInternal ? '已改成內部剪輯' : `已改派給 ${toName}`);
       setReassigningId(null);
     } catch (error) {
       console.error('改派失敗:', error);
@@ -1024,12 +1059,15 @@ export default function AssetDatabase() {
                         <select
                           autoFocus
                           className="text-[13px] font-bold border border-[#5A5A40]/30 rounded px-1 py-0.5 bg-white"
-                          defaultValue={getEffectiveEditorId(asset) || ''}
+                          defaultValue={asset.internalEdit ? INTERNAL_EDIT : (asset.editorId || '')}
                           onBlur={() => setReassigningId(null)}
                           onChange={(e) => reassignEditor(asset, e.target.value)}
                         >
                           {editors.map(ed => <option key={ed.id} value={ed.id}>{ed.name}</option>)}
-                          <option value="">先不指定</option>
+                          <option value={INTERNAL_EDIT}>內部剪輯（不給外包）</option>
+                          {/* 「先不指定」不等於「不剪輯」——它是跟著 IP 的預設剪輯師走。
+                              把實際會生效的人名寫進選項，才不會被讀成「這支沒有人要剪」。 */}
+                          <option value="">{vendorDefaultLabel(asset)}</option>
                         </select>
                       ) : canReassignEditor(asset, me?.role).ok ? (
                         <button
@@ -1038,10 +1076,10 @@ export default function AssetDatabase() {
                           className="underline decoration-dotted hover:text-[#5A5A40] transition-colors"
                           title="點一下改派剪輯師"
                         >
-                          {asset.internalEdit ? '內部剪輯' : getEditorName(getEffectiveEditorId(asset))}
+                          {ownerLabel(asset)}
                         </button>
                       ) : (
-                        <span>{asset.internalEdit ? '內部剪輯' : getEditorName(getEffectiveEditorId(asset))}</span>
+                        <span>{ownerLabel(asset)}</span>
                       )}
                     </div>
                   </div>
@@ -1546,7 +1584,12 @@ export default function AssetDatabase() {
                     </div>
                     {vendorStocks.map((stock, idx) => (
                       <div key={idx} className="grid grid-cols-12 gap-2 items-center px-4 py-3 md:py-4 bg-[#F5F5F0]/50 rounded-2xl border border-black/5 hover:bg-[#F5F5F0] transition-colors">
-                        <div className="col-span-3 font-bold text-gray-800 truncate pr-2 text-[13px] md:text-sm">{stock.name}</div>
+                        <div className="col-span-3 pr-2 min-w-0">
+                          <p className="font-bold text-gray-800 truncate text-[13px] md:text-sm">{stock.name}</p>
+                          {stock.pauseNote && (
+                            <p className="mt-0.5 text-[13px] font-bold text-gray-400 whitespace-nowrap">{stock.pauseNote}</p>
+                          )}
+                        </div>
                         <div className="col-span-2 text-center">
                           {stock.hasVideos ? (
                             <span className={cn(
@@ -1787,8 +1830,11 @@ export default function AssetDatabase() {
                     <tbody>
                       {assets
                         .filter(a => {
-                          const matchesTarget = exportMode === 'editor' 
-                            ? getEffectiveEditorId(a) === selectedEditorId 
+                          // ⚠️ 依剪輯師導出一律走 getAssetEditorOwner：內部自己剪的片 editorId 常常是空的
+                          //    （＝回退到 IP 的預設剪輯師），只比 id 會把它印進外包的工作紀錄表。
+                          const owner = getAssetEditorOwner(a, vendors);
+                          const matchesTarget = exportMode === 'editor'
+                            ? owner.kind === 'editor' && owner.editorId === selectedEditorId
                             : a.vendorId === selectedVendorIdForExport;
                           
                           const isRaw = a.stage === 'raw' && effStatus(a) === 'available';
@@ -1835,8 +1881,11 @@ export default function AssetDatabase() {
                           </tr>
                         ))}
                       {assets.filter(a => {
-                          const matchesTarget = exportMode === 'editor' 
-                            ? getEffectiveEditorId(a) === selectedEditorId 
+                          // ⚠️ 依剪輯師導出一律走 getAssetEditorOwner：內部自己剪的片 editorId 常常是空的
+                          //    （＝回退到 IP 的預設剪輯師），只比 id 會把它印進外包的工作紀錄表。
+                          const owner = getAssetEditorOwner(a, vendors);
+                          const matchesTarget = exportMode === 'editor'
+                            ? owner.kind === 'editor' && owner.editorId === selectedEditorId
                             : a.vendorId === selectedVendorIdForExport;
                           const isRaw = a.stage === 'raw' && effStatus(a) === 'available';
                           const isFinished = a.stage === 'finished' && effStatus(a) === 'available';

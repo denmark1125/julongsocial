@@ -229,6 +229,29 @@ export function getBillableEditorId(asset: Asset, vendors: Vendor[]): string | u
  * 抽成純函式而不是把條件寫在 JSX 裡，是因為這組判斷同時要用在「按鈕出不出現」跟
  * 「真的寫入前」兩個地方（沿用交棒鏈防呆的做法），寫兩份遲早分岔；而且這樣測得到。
  */
+/**
+ * 這支片實際上由誰處理：內部自己剪／某位外包／還沒有人。
+ *
+ * ⚠️ `internalEdit` 必須排在 editorId 前面。內部剪的片往往還是跟著 IP 的預設剪輯師
+ *    （editorId 空＝回退到 vendor.editorId），先問 editorId 會把它算到某位外包頭上——
+ *    製作進度看板、剪輯工作紀錄表、催剪清單三個地方都踩過這個。
+ * ⚠️ 'none' 跟 'internal' 是兩件事：'none'＝還沒有人，要有人去處理；
+ *    'internal'＝已經有歸屬，只是不在外包體系裡。兩者在各張清單上的待遇不同，不可合併。
+ */
+export type AssetEditorOwner =
+  | { kind: 'internal' }
+  | { kind: 'editor'; editorId: string }
+  | { kind: 'none' };
+
+export function getAssetEditorOwner(
+  asset: Pick<Asset, 'editorId' | 'vendorId' | 'internalEdit'>,
+  vendors: Vendor[]
+): AssetEditorOwner {
+  if (asset.internalEdit) return { kind: 'internal' };
+  const editorId = getWorkingEditorId(asset, vendors);
+  return editorId ? { kind: 'editor', editorId } : { kind: 'none' };
+}
+
 export function canReassignEditor(
   asset: Pick<Asset, 'cloudUploadedAt' | 'editorInvoiceId' | 'voidedAt'>,
   role: string | undefined

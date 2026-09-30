@@ -1,7 +1,9 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Vendor, Asset, Post } from '../types';
-import { trackedVendors, getVideoStockAlert, getOwedVideoCount, getAvailableVideoAssets } from '../lib/vendorStatus';
-import { format } from 'date-fns';
+import { Vendor, Asset, Post, Editor } from '../types';
+import { stockVisibleVendors, getPauseStatus, getVideoStockAlert, getOwedVideoCount, getAvailableVideoAssets } from '../lib/vendorStatus';
+import { getAssetEditorOwner } from '../lib/editorBilling';
+import { useLiveCollection } from '../lib/liveData';
+import { format, parseISO } from 'date-fns';
 import { X, Download, Scissors } from 'lucide-react';
 import { toJpeg } from 'html-to-image';
 import download from 'downloadjs';
@@ -18,35 +20,77 @@ interface EditReminderExportModalProps {
 
 const UNASSIGNED_EDITOR = '未指定剪輯師';
 
+// 這張圖是給外包剪輯師看的，所以講「恢復發片」不講「冷凍」——冷凍是我們跟客戶之間的合約術語。
+// 刻意不寫成「不急」：客戶還沒開始發不代表這些片不用剪，提前備料正是我們要的，
+// 這行只回答「為什麼這個 IP 現在沒有排程在等」。
+function pauseNoteFor(vendor: Vendor): string | null {
+  const pause = getPauseStatus(vendor);
+  if (!pause) return null;
+  if (!pause.resumeDate) return '目前暫停發片';
+  return `${format(parseISO(pause.resumeDate), 'MM/dd')} 起恢復發片`;
+}
+
 export default function EditReminderExportModal({ isOpen, onClose, vendors, assets, posts }: EditReminderExportModalProps) {
   const [selectedEditor, setSelectedEditor] = useState<string>('all');
   const exportRef = useRef<HTMLDivElement>(null);
+  // 共用即時資料層（其他內部畫面已經訂過，這裡不會多讀一次）
+  const editors = useLiveCollection<Editor>('editors');
 
   // 清單即時依當下庫存/週分佈/積欠重新計算，不存快照，確保永遠是最新狀態；
   // 用「有沒有待剪素材(rawStock>0)」判斷要不要上清單，不是看整體severity——
   // 一個廠商可能同時「急需拍片(shoot)」又「有素材躺著沒剪」，這兩件事互不排斥，缺片名單擋不住還要進催剪輯清單
+  const editorNameOf = (id: string) => editors.find(e => e.id === id)?.name || UNASSIGNED_EDITOR;
+
+  /**
+   * 一列＝一個 IP 在一位剪輯師手上的待剪支數。
+   *
+   * ⚠️ 待剪支數要**逐支看歸屬**，不能再拿廠商身上那個剪輯師欄位代表整家：
+   *    逐片指派給別人的片會被算到 IP 預設剪輯師頭上，內部自己剪的片也會被印進外包的催剪清單。
+   * ⚠️ 「成片僅夠撐幾天」仍然是 IP 層的事（看的是發片節奏與成片庫存），
+   *    同一家分給兩個人時那句話會在兩列各出現一次 —— 那不是重複計算，是同一個 IP 的狀態。
+   */
   const editItems = useMemo(() => {
-    return trackedVendors(vendors)
-      .map(vendor => {
-        const vendorVideoAssets = getAvailableVideoAssets(vendor.id!, assets, posts);
-        const owed = getOwedVideoCount(vendor, posts, assets, vendorVideoAssets.length);
-        const alert = getVideoStockAlert(vendor, vendorVideoAssets, owed);
-        return { vendor, alert };
-      })
-      .filter(item => item.alert.rawStock > 0);
-  }, [vendors, assets, posts]);
+    const rows: {
+      key: string; vendor: Vendor; alert: ReturnType<typeof getVideoStockAlert>;
+      rawStock: number; editorName: string; pauseNote: string | null;
+    }[] = [];
+
+    for (const vendor of stockVisibleVendors(vendors)) {
+      const vendorVideoAssets = getAvailableVideoAssets(vendor.id!, assets, posts);
+      const owed = getOwedVideoCount(vendor, posts, assets, vendorVideoAssets.length);
+      const alert = getVideoStockAlert(vendor, vendorVideoAssets, owed);
+      const pauseNote = pauseNoteFor(vendor);
+
+      const byEditor = new Map<string, number>();
+      for (const a of vendorVideoAssets.filter(a => a.stage === 'raw')) {
+        const owner = getAssetEditorOwner(a, vendors);
+        // 這張圖是拿去催外包的，內部自己剪的片不該出現在任何一位剪輯師名下
+        if (owner.kind === 'internal') continue;
+        const name = owner.kind === 'editor' ? editorNameOf(owner.editorId) : UNASSIGNED_EDITOR;
+        byEditor.set(name, (byEditor.get(name) || 0) + 1);
+      }
+
+      for (const [editorName, rawStock] of byEditor) {
+        rows.push({ key: `${vendor.id}_${editorName}`, vendor, alert, rawStock, editorName, pauseNote });
+      }
+    }
+
+    // 冷凍中的排在同一位剪輯師的最後：片照樣要剪（提前備料），但沒有排程在等它，
+    // 眼睛應該先落在正在發片的 IP 上。
+    return rows.sort((a, b) => (a.pauseNote ? 1 : 0) - (b.pauseNote ? 1 : 0));
+  }, [vendors, assets, posts, editors]);
 
   const editorNames = useMemo(() => {
-    const names = new Set(editItems.map(item => item.vendor.editorName || UNASSIGNED_EDITOR));
+    const names = new Set(editItems.map(item => item.editorName));
     return Array.from(names).sort();
   }, [editItems]);
 
-  const filteredItems = selectedEditor === 'all' ? editItems : editItems.filter(item => (item.vendor.editorName || UNASSIGNED_EDITOR) === selectedEditor);
+  const filteredItems = selectedEditor === 'all' ? editItems : editItems.filter(item => item.editorName === selectedEditor);
 
   const groupedByEditor = useMemo<Record<string, typeof editItems>>(() => {
     const groups: Record<string, typeof editItems> = {};
     filteredItems.forEach(item => {
-      const key = item.vendor.editorName || UNASSIGNED_EDITOR;
+      const key = item.editorName;
       if (!groups[key]) groups[key] = [];
       groups[key].push(item);
     });
@@ -113,7 +157,7 @@ export default function EditReminderExportModal({ isOpen, onClose, vendors, asse
                   selectedEditor === name ? "bg-[#5A5A40] text-white border-[#5A5A40]" : "bg-white text-gray-400 border-gray-200 hover:border-[#5A5A40]/30"
                 )}
               >
-                {name}（{editItems.filter(i => (i.vendor.editorName || UNASSIGNED_EDITOR) === name).length}）
+                {name}（{editItems.filter(i => i.editorName === name).length}）
               </button>
             ))}
           </div>
@@ -147,11 +191,21 @@ export default function EditReminderExportModal({ isOpen, onClose, vendors, asse
                         剪輯師：{editorName}
                       </h2>
                       <div className="space-y-3">
-                        {items.map(({ vendor, alert }) => (
-                          <div key={vendor.id} className="flex items-center justify-between py-2">
-                            <span className="text-base font-bold text-[#5A5A40]">{vendor.name}</span>
-                            <span className="text-sm text-gray-600">
-                              待剪 <span className="font-bold text-amber-600">{alert.rawStock}</span> 部
+                        {items.map(({ key, vendor, alert, rawStock, pauseNote }) => (
+                          <div key={key} className="flex items-center justify-between py-2 gap-3">
+                            {/* ⚠️ 名字不要 truncate、右邊不要 shrink-0：這張卡窄到手機寬時，
+                                那兩個加起來會把 IP 名壓成一個字。維持原本「右邊自己換行」的行為，
+                                徽章只是多掛一顆可以自己掉到下一行的標籤。 */}
+                            <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                              <span className="text-base font-bold text-[#5A5A40]">{vendor.name}</span>
+                              {pauseNote && (
+                                <span className="px-2 py-0.5 rounded-full bg-gray-200 text-gray-600 text-[13px] font-bold whitespace-nowrap">
+                                  {pauseNote}
+                                </span>
+                              )}
+                            </span>
+                            <span className="text-sm text-gray-600 text-right">
+                              待剪 <span className="font-bold text-amber-600">{rawStock}</span> 部
                               {alert.finishedRunwayDays !== null && (
                                 <>・成片僅夠撐 <span className="font-bold text-red-600">{Math.max(0, Math.floor(alert.finishedRunwayDays))}</span> 天</>
                               )}
