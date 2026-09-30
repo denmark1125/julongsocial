@@ -45,6 +45,10 @@ const MUST_CONTAIN = [
   // 2026-09-30 加入：users 文件禁止自建／經理不能升級成 engineer。
   // 少了它代表送的是舊檔，會把「任何 Google 帳號都能自封最高權限」的洞重新打開。
   'grantsEngineer',
+  // 2026-09-24 加入：內部同事建廠商卡的兩道關鍵。少了它們代表送的是舊檔，
+  // 後果是同事建不了廠商（create 仍鎖 isManager），或是能自己核准自己建的。
+  'pendingApproval',
+  'selfApproves',
 ];
 
 function fail(msg) {

@@ -166,6 +166,14 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys().hasAny(['editorId']);
     }
 
+    // 「自己核准自己」：把 pendingApproval 從 true 變成 false。
+    // 只有管理者可以做這件事 —— 否則同事建完立刻自己核准，這道關卡形同虛設。
+    // ⚠️ 用 get(...,false) 取值：舊廠商根本沒有這個欄位，直接讀會噴錯。
+    function selfApproves() {
+      return resource.data.get('pendingApproval', false) == true
+        && request.resource.data.get('pendingApproval', false) == false;
+    }
+
     function touchesDeficitBaseline() {
       return request.resource.data.diff(resource.data).affectedKeys().hasAny(['manualDeficitBaseline', 'manualDeficitUpdatedAt', 'deficitEntries']);
     }
@@ -201,7 +209,14 @@ service cloud.firestore {
              // 不放進 isEditorAssetUpdate() 白名單——剪輯師不能自己決定認列哪個月。
              (!('recognizedMonth' in data) || data.recognizedMonth is string) &&
              (!('editorName' in data) || data.editorName is string) &&
-             (!('selfPublishing' in data) || data.selfPublishing is bool);
+             (!('selfPublishing' in data) || data.selfPublishing is bool) &&
+             // 待核准：非管理者建立的廠商一律是 true，核准前不進任何統計
+             (!('pendingApproval' in data) || data.pendingApproval is bool) &&
+             // Drive 資料夾（毛片根、共用 B-roll），由 Picker 挑一次後寫入
+             (!('rawFootageFolderId' in data) || data.rawFootageFolderId is string) &&
+             (!('rawFootageFolderName' in data) || data.rawFootageFolderName is string) &&
+             (!('brollFolderId' in data) || data.brollFolderId is string) &&
+             (!('brollFolderName' in data) || data.brollFolderName is string);
     }
 
     function isValidPost(data) {
@@ -388,10 +403,20 @@ service cloud.firestore {
 
     match /vendors/{vendorId} {
       allow read: if isAuthenticated() && editorCanAccessVendor(vendorId);
-      allow create: if isManager() && isValidVendor(request.resource.data);
+      // 2026-09-24 開放內部同事建廠商卡（藏鏡人拍完現場就能建，不用回頭等管理者）。
+      // ⚠️ 非管理者建立的一律是「待核准」——這條寫在規則裡而不是只靠前端，
+      //    所以同事在資料庫層就不可能建出一筆直接計入統計的廠商。
+      //    待核准的效果見 vendorStatus.ts 的 countsTowardTargets()。
+      allow create: if isValidVendor(request.resource.data) && (
+        isManager() ||
+        (isAuthenticated() && !isEditorRole()
+         && request.resource.data.get('pendingApproval', false) == true)
+      );
+      // 同事可以編輯廠商（含自己建錯的），但**不能自己把待核准拿掉**。
       allow update: if isValidVendor(request.resource.data) && (
         (isManager() && !touchesDeficitBaseline()) ||
-        (canEditDeficitBaseline() && touchesOnlyDeficitBaseline())
+        (canEditDeficitBaseline() && touchesOnlyDeficitBaseline()) ||
+        (isAuthenticated() && !isEditorRole() && !touchesDeficitBaseline() && !selfApproves())
       );
       allow delete: if isAdmin();
     }
@@ -401,9 +426,14 @@ service cloud.firestore {
     // 文件時，EditorAssetQueue 的整份文件訂閱會讓外包剪輯師的瀏覽器裡直接有明碼密碼。
     // 邊界刻意跟 billingContracts 一致——擋 editor 就好，不收成 isManager()：
     // 廠商管理分頁 employee 也進得去，小編要用客戶帳號發文，收太緊會擋到真實工作流。
+    // ⚠️ 2026-09-24 寫入從 isManager() 放寬到跟讀取同一條線。
+    //    廠商存檔是**原子 batch**（vendors + vendorSecrets 一起寫），寫入不開的話
+    //    同事連「只改廠商名字」都會整筆失敗，而且錯誤原因看不出來。
+    //    這不是權限升級：employee 本來就讀得到這些明碼密碼（上面那條 read 就是），
+    //    開放寫入只是讓讀寫一致。真正被擋在外面的仍然是外包剪輯師。
     match /vendorSecrets/{vendorId} {
       allow read: if isAuthenticated() && !isEditorRole();
-      allow create, update: if isManager();
+      allow create, update: if isAuthenticated() && !isEditorRole();
       allow delete: if isAdmin();
     }
 

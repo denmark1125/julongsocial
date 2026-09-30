@@ -332,6 +332,16 @@ export interface Vendor {
   weeklyPattern?: number[]; // 長度4，[第1週,第2週,第3週,第4週]目標影音支數（自然月每7天一段，第4段吸收月底剩餘天數）；不填則用 monthlyTargetVideos/4 平均攤提
   assignedUserIds?: string[]; // 指派負責此IP的同事 uid（用於庫存警示通知過濾；engineer/manager 一律看得到全部，不需被指派）
   excludeFromStats?: boolean; // 勾選後不列入本月發文/欠片統計與提醒（內部帳號等不需追蹤進度）
+  /**
+   * 由非管理者建立、還沒被核准。核准前**不列入任何目標/欠片/庫存計算**。
+   *
+   * ⚠️ 跟 excludeFromStats 語意不同（那個是永久排除的內部帳號，這個是暫時未核准），
+   *    但排除的效果一樣 —— 兩者一律走 `countsTowardTargets()`，不要分開判斷。
+   * ⚠️ **刻意不做成 status 的新值**：EffectiveVendorStatus 被多處比對，
+   *    動那個聯集的波及面遠大於加一個布林。待核准的廠商照樣出現在下拉選單、
+   *    照樣能上傳毛片與建貼文，它只是不進統計。
+   */
+  pendingApproval?: boolean;
   monthlyAdjustments?: MonthlyAdjustment[]; // 單月加贈/扣片紀錄（可多筆），套用在 getEffectiveMonthlyTarget，只影響該月目標與欠片，不動每週節奏
   pauseHistory?: PauseRecord[]; // 歷次冷凍期紀錄（可多次），用來判斷「某個月」是否該排除該廠商的目標/欠片計算
   deficitEntries?: DeficitEntry[]; // 逐月回填的積欠支數明細（取代單一數字，加總就是起始欠片），系統從最後一筆的下個月開始自動接著累加

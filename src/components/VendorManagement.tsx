@@ -31,29 +31,15 @@ type StatusTab = 'active' | 'paused' | 'ended';
 // 廠商沒填合作起始月(自然風就是空的)時用這個哨兵月份，語意等同 pauseHistory 的 '9999-12-31'。
 const BASELINE_FROM_MONTH = '1970-01';
 
-export default function VendorManagement() {
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [editors, setEditors] = useState<Editor[]>([]);
-  const [users, setUsers] = useState<UserProfile[]>([]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isEditorModalOpen, setIsEditorModalOpen] = useState(false);
-  const [newEditorName, setNewEditorName] = useState('');
-  const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
-  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
-  const [vendorSecrets, setVendorSecrets] = useState<Record<string, Record<string, string>>>({});
-  const [visibleFormPasswords, setVisibleFormPasswords] = useState<Record<number, boolean>>({});
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [statusTab, setStatusTab] = useState<StatusTab>('active');
-  const [pauseModalVendor, setPauseModalVendor] = useState<Vendor | null>(null);
-  const [pauseFromInput, setPauseFromInput] = useState('');
-  const [pauseUntilInput, setPauseUntilInput] = useState('');
-  const [endModalVendor, setEndModalVendor] = useState<Vendor | null>(null);
-  const [endedAtInput, setEndedAtInput] = useState('');
-  const [customPlatformInput, setCustomPlatformInput] = useState<{ video: string; post: string }>({ video: '', post: '' });
-  const [targetChangeMonth, setTargetChangeMonth] = useState('');
-  const [targetChangeReason, setTargetChangeReason] = useState('');
-  const currentMonth = format(new Date(), 'yyyy-MM');
-  const [formData, setFormData] = useState({
+/**
+ * 廠商表單的空白初始值。
+ *
+ * ⚠️ 抽出來是因為原本有**三處各自寫一份**（初始、存檔後重設、按「建立廠商資料」重設），
+ *    而且欄位不一致 —— 有一份少了 editorId、另一份少了四個 Drive 欄位。
+ *    新增欄位時只改一處，否則會在某些路徑靜靜遺失。
+ */
+function emptyVendorForm() {
+  return {
     name: '',
     socialAccounts: [{ platform: 'IG', username: '', password: '' }],
     postingHabits: [] as any[],
@@ -79,10 +65,40 @@ export default function VendorManagement() {
     // 跨場次共用的 B-roll 素材庫（佐禾的「01-Broll下層素材庫」就是這種）
     brollFolderId: '',
     brollFolderName: '',
-  });
+  };
+}
+
+export default function VendorManagement() {
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [editors, setEditors] = useState<Editor[]>([]);
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditorModalOpen, setIsEditorModalOpen] = useState(false);
+  const [newEditorName, setNewEditorName] = useState('');
+  const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
+  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
+  const [vendorSecrets, setVendorSecrets] = useState<Record<string, Record<string, string>>>({});
+  const [visibleFormPasswords, setVisibleFormPasswords] = useState<Record<number, boolean>>({});
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [statusTab, setStatusTab] = useState<StatusTab>('active');
+  const [pauseModalVendor, setPauseModalVendor] = useState<Vendor | null>(null);
+  const [pauseFromInput, setPauseFromInput] = useState('');
+  const [pauseUntilInput, setPauseUntilInput] = useState('');
+  const [endModalVendor, setEndModalVendor] = useState<Vendor | null>(null);
+  const [endedAtInput, setEndedAtInput] = useState('');
+  const [customPlatformInput, setCustomPlatformInput] = useState<{ video: string; post: string }>({ video: '', post: '' });
+  const [targetChangeMonth, setTargetChangeMonth] = useState('');
+  const [targetChangeReason, setTargetChangeReason] = useState('');
+  const currentMonth = format(new Date(), 'yyyy-MM');
+  const [formData, setFormData] = useState(emptyVendorForm());
   // 指定資料夾只開給 engineer/manager（後端也會再擋一次）
   const [myRole, setMyRole] = useState<string>('');
   const [pickingFolder, setPickingFolder] = useState<'raw' | 'broll' | null>(null);
+  // 新增廠商時預設只顯示必要欄位，其餘收進「其他設定」。編輯既有廠商時一律全開。
+  const [showAllFields, setShowAllFields] = useState(false);
+  const isManagerRole = myRole === 'engineer' || myRole === 'manager';
+  /** 新增時只有必要欄位；編輯時或按了「其他設定」才全部顯示 */
+  const showField = Boolean(editingVendor) || showAllFields;
 
   /**
    * 指定這個 IP 的毛片資料夾。
@@ -391,7 +407,14 @@ export default function VendorManagement() {
         // 「這家什麼時候開始合作」的線索等於每次編輯都消失一次。
         ...(editingVendor
           ? {}
-          : { createdBy: auth.currentUser.uid, createdAt: new Date().toISOString() }),
+          : {
+              createdBy: auth.currentUser.uid,
+              createdAt: new Date().toISOString(),
+              // 非管理者建立的一律待核准，核准前不進任何目標/欠片/庫存計算。
+              // ⚠️ 規則層也擋著同一件事（firestore.rules 的 vendors create），
+              //    這裡只是讓畫面行為一致，不是唯一防線。
+              pendingApproval: !isManagerRole,
+            }),
       };
 
       const previousEditorId = editingVendor?.editorId;
@@ -401,11 +424,16 @@ export default function VendorManagement() {
       savedVendorId = vendorRef.id;
       const batch = writeBatch(db);
       editingVendor ? batch.update(vendorRef, data) : batch.set(vendorRef, data);
-      batch.set(doc(db, 'vendorSecrets', savedVendorId), {
-        passwords: passwordMap,
-        updatedAt: new Date().toISOString(),
-        updatedBy: auth.currentUser.uid,
-      });
+      // ⚠️ 沒有任何密碼就不要碰 vendorSecrets。這個 batch 是原子的，多寫一張表就多一道
+      //    可能被規則擋下的關卡，而簡版新增表單根本不含社群帳號。
+      //    有填過密碼的才寫（含「本來有、這次清空」的情況：editingVendor 一律重寫整份）。
+      if (Object.keys(passwordMap).length > 0 || editingVendor) {
+        batch.set(doc(db, 'vendorSecrets', savedVendorId), {
+          passwords: passwordMap,
+          updatedAt: new Date().toISOString(),
+          updatedBy: auth.currentUser.uid,
+        });
+      }
       await batch.commit();
       toast.success(editingVendor ? '廠商資料已更新' : '廠商資料已建立');
 
@@ -423,29 +451,13 @@ export default function VendorManagement() {
       setEditingVendor(null);
       setTargetChangeMonth('');
       setTargetChangeReason('');
-      setFormData({ 
-        name: '', 
-        socialAccounts: [{ platform: 'IG', username: '', password: '' }], 
-        postingHabits: [],
-        cooperationItems: [],
-        monthlyTargetPosts: 0,
-        monthlyTargetVideos: 8,
-        targetHistory: [],
-        cooperationStartMonth: '',
-        weeklyPattern: null,
-        excludeFromStats: false,
-        pauseHistory: [],
-        assignedUserIds: [],
-        editorName: '',
-        selfPublishing: false,
-        defaultPlatforms: { video: [], post: [] },
-        rawFootageFolderId: '',
-        rawFootageFolderName: '',
-        brollFolderId: '',
-        brollFolderName: '',
-      });
+      setFormData(emptyVendorForm());
+      setShowAllFields(false);
     } catch (error) {
-      toast.error('儲存失敗');
+      // ⚠️ 原本只 toast「儲存失敗」，把真正的原因吞掉。開放同事建廠商之後，
+      //    被規則擋下是最可能的失敗，看不到原因等於沒辦法自己解決。
+      console.error('儲存廠商失敗', error);
+      toast.error(`儲存失敗：${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -484,6 +496,26 @@ export default function VendorManagement() {
       toast.success('已恢復合作');
     } catch (error) {
       toast.error('操作失敗');
+    }
+  };
+
+  /**
+   * 核准一家同事建立的廠商：拿掉待核准旗標，它才開始進目標/欠片/庫存計算。
+   * ⚠️ 規則層只允許管理者做這件事（firestore.rules 的 selfApproves），
+   *    這裡的按鈕顯示條件只是讓畫面一致，不是唯一防線。
+   */
+  const approveVendor = async (vendor: Vendor) => {
+    if (!vendor.id) return;
+    if (!window.confirm(
+      `核准「${vendor.name}」？\n\n核准後這家就會開始計入目標、欠片與庫存警示。` +
+      `\n請先確認每月支數（目前 ${vendor.monthlyTargetVideos ?? 0} 支）與第一支上片時間是對的。`
+    )) return;
+    try {
+      await updateDoc(doc(db, 'vendors', vendor.id), { pendingApproval: false });
+      toast.success(`「${vendor.name}」已核准，開始計入統計`);
+    } catch (error) {
+      console.error('核准廠商失敗', error);
+      toast.error(`核准失敗：${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -584,24 +616,9 @@ export default function VendorManagement() {
               setShowAdvanced(false);
               setTargetChangeMonth('');
               setTargetChangeReason('');
-              setFormData({
-                name: '',
-                socialAccounts: [{ platform: 'IG', username: '', password: '' }],
-                postingHabits: [],
-                cooperationItems: [],
-                defaultPlatforms: { video: [], post: [] },
-                monthlyTargetPosts: 0,
-                monthlyTargetVideos: 8,
-                targetHistory: [],
-                cooperationStartMonth: '',
-                weeklyPattern: null,
-                excludeFromStats: false,
-                pauseHistory: [],
-                assignedUserIds: [],
-                editorId: '',
-                editorName: '',
-                selfPublishing: false
-              });
+              setFormData(emptyVendorForm());
+              // 新增時預設收起管理類欄位
+              setShowAllFields(false);
               setIsModalOpen(true);
             }}
             className="flex-1 sm:flex-none bg-[#5A5A40] text-white px-6 py-3 rounded-xl flex items-center justify-center shadow-lg hover:bg-[#4a4a35] transition-all"
@@ -732,6 +749,9 @@ export default function VendorManagement() {
                     >
                       <RotateCcw size={16} />
                     </button>
+                    {/* 規則只允許工程師刪（firestore.rules 的 allow delete: isAdmin）。
+                        原本沒有前端判斷，其他人按下去才看到「刪除失敗」——直接不顯示比較誠實。 */}
+                    {myRole === 'engineer' && (
                     <button
                       onClick={() => handleHardDelete(vendor.id!)}
                       className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
@@ -739,6 +759,7 @@ export default function VendorManagement() {
                     >
                       <Trash2 size={16} />
                     </button>
+                    )}
                   </>
                 )}
               </div>
@@ -773,6 +794,21 @@ export default function VendorManagement() {
                 {vendor.excludeFromStats && (
                   <div className="flex items-center text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-lg border border-gray-200 w-fit">
                     <span>不列入統計</span>
+                  </div>
+                )}
+                {/* 待核准：同事建的廠商，核准前不進任何目標/欠片/庫存計算 */}
+                {vendor.pendingApproval && (
+                  <div className="flex items-center gap-2 text-xs font-bold text-orange-700 bg-orange-50 px-2 py-1 rounded-lg border border-orange-200 w-fit">
+                    <span>待核准・尚未計入統計</span>
+                    {isManagerRole && (
+                      <button
+                        type="button"
+                        onClick={() => approveVendor(vendor)}
+                        className="underline decoration-dotted hover:text-orange-900"
+                      >
+                        核准
+                      </button>
+                    )}
                   </div>
                 )}
                 {vendor.cooperationStartMonth && vendor.cooperationStartMonth > format(new Date(), 'yyyy-MM') && (
@@ -920,7 +956,7 @@ export default function VendorManagement() {
                   </select>
                 </div>
 
-                {isPickerConfigured() && (myRole === 'engineer' || myRole === 'manager') && (
+                {showField && isPickerConfigured() && (myRole === 'engineer' || myRole === 'manager') && (
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">毛片雲端資料夾</label>
@@ -970,6 +1006,7 @@ export default function VendorManagement() {
                   </div>
                 )}
 
+                {showField && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">藏鏡人</label>
                   <div className="flex flex-wrap gap-2">
@@ -1004,7 +1041,9 @@ export default function VendorManagement() {
                   </div>
                   <p className="text-xs text-gray-400 mt-1">系統內的告警/鈴鐺不分派任何人都看得到全部；這裡指派的人是之後LINE推播通知的對象。</p>
                 </div>
+                )}
 
+                {showField && (
                 <div>
                   <button
                     type="button"
@@ -1037,6 +1076,7 @@ export default function VendorManagement() {
                     </div>
                   )}
                 </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">合作項目</label>
@@ -1164,6 +1204,17 @@ export default function VendorManagement() {
                   </div>
                 </div>
 
+                {/* ⚠️ 只提示不擋存檔（「改支數永不擋存檔」是既有鐵則）。但支數 0 的後果很隱形：
+                    hasVideoTrackingScope 會回 false，整家從拍攝進度與欠片管理消失、庫存警示也失效，
+                    而且不會有任何錯誤訊息 —— 所以一定要在這裡講出來。 */}
+                {(formData.monthlyTargetVideos || 0) <= 0 && !formData.excludeFromStats && (
+                  <p className="text-[13px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2">
+                    影音支數是 0，這家不會出現在拍攝進度與欠片管理，也不會有庫存警示。
+                    只做圖文的客戶這樣是對的；不是的話記得填支數。
+                  </p>
+                )}
+
+                {showField && (
                 <div className="bg-[#F5F5F0]/70 p-4 rounded-2xl border border-gray-200 space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-bold text-gray-700">合約片數變更紀錄</span>
@@ -1237,18 +1288,20 @@ export default function VendorManagement() {
                     )}
                   </div>
                 </div>
+                )}
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">合作起始月（選填）</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">第一支上片時間（選填）</label>
                   <input
                     type="month"
                     value={formData.cooperationStartMonth}
                     onChange={(e) => setFormData({ ...formData, cooperationStartMonth: e.target.value })}
                     className="w-full p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-[#5A5A40]"
                   />
-                  <p className="text-xs text-gray-400 mt-1">新客戶簽約但還沒正式開始拍的話填這個；設定後，這個月之前完全不列入目標/欠片/庫存追蹤，不會提早冒出欠片</p>
+                  <p className="text-xs text-gray-400 mt-1">＝合作起算月。簽約了但還沒開始上片就填這個；這個月之前完全不列入目標/欠片/庫存追蹤，不會提早冒出欠片</p>
                 </div>
 
+                {showField && (
                 <div className="bg-amber-50/50 p-4 rounded-2xl border border-amber-100 space-y-3">
                   <label className="flex items-center space-x-3 cursor-pointer">
                     <input
@@ -1300,7 +1353,9 @@ export default function VendorManagement() {
                     </div>
                   )}
                 </div>
+                )}
 
+                {showField && (
                 <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200">
                   <label className="flex items-center space-x-3 cursor-pointer">
                     <input
@@ -1315,7 +1370,9 @@ export default function VendorManagement() {
                     </div>
                   </label>
                 </div>
+                )}
 
+                {showField && (
                 <div className="bg-cyan-50/40 p-4 rounded-2xl border border-cyan-100 space-y-3">
                   <div className="flex justify-between items-center">
                     <div>
@@ -1376,6 +1433,7 @@ export default function VendorManagement() {
                     </div>
                   ))}
                 </div>
+                )}
 
                 {/* Social Accounts Section */}
                 <div className="space-y-4">
@@ -1538,8 +1596,23 @@ export default function VendorManagement() {
                   ))}
                 </div>
 
+                {/* 新增時只顯示必要欄位。收起來的都是「管理與歷史」類（雲端資料夾、藏鏡人、
+                    合約片數變更紀錄、每週節奏、不列入統計、冷凍期），新客戶當下不可能有。
+                    ⚠️ 社群帳密／發布平台／發布習慣／第一支上片時間刻意**不收起來** ——
+                    它們不強制填，但要讓建檔的人看得到自己還缺什麼、好去跟客戶要。 */}
+                {!editingVendor && !showAllFields && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllFields(true)}
+                    className="w-full flex items-center justify-center gap-2 p-3 rounded-2xl border border-dashed border-gray-300 text-sm text-gray-500 hover:border-[#5A5A40]/40 hover:text-[#5A5A40]"
+                  >
+                    <ChevronDown size={16} />
+                    其他設定（雲端資料夾、藏鏡人、冷凍期、不列入統計…）
+                  </button>
+                )}
+
                 <div className="flex justify-end space-x-4 pt-4">
-                  <button 
+                  <button
                     type="button"
                     onClick={() => setIsModalOpen(false)}
                     className="px-6 py-2 text-gray-500 font-medium"

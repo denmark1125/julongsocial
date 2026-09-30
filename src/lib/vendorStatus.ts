@@ -62,9 +62,23 @@ export function visibleVendors(vendors: Vendor[]): Vendor[] {
   return vendors.filter(v => getEffectiveVendorStatus(v) !== 'ended');
 }
 
-// 目標/欠片/提醒追蹤用：排除已終止、冷凍中，以及手動標記「不列入統計」的廠商（如內部帳號）
+/**
+ * 這家廠商算不算進目標／欠片／庫存。
+ *
+ * 兩個排除理由語意不同 —— `excludeFromStats` 是永久排除的內部帳號，
+ * `pendingApproval` 是同事建了還沒被管理者核准 —— 但**排除的效果完全一樣**，
+ * 所以收在同一支函式裡。三個守門函式都走它，下次才不會只改到其中一處。
+ *
+ * ⚠️ 這支**不看 status**：冷凍與終止的判斷各家守門函式規則不同
+ *（例如終止有填 endedAt 的，終止月之前仍要追蹤），不能混進來。
+ */
+export function countsTowardTargets(vendor: Pick<Vendor, 'excludeFromStats' | 'pendingApproval'>): boolean {
+  return !vendor.excludeFromStats && !vendor.pendingApproval;
+}
+
+// 目標/欠片/提醒追蹤用：排除已終止、冷凍中，以及不列入統計／待核准的廠商
 export function trackedVendors(vendors: Vendor[]): Vendor[] {
-  return vendors.filter(v => getEffectiveVendorStatus(v) === 'active' && !v.excludeFromStats);
+  return vendors.filter(v => getEffectiveVendorStatus(v) === 'active' && countsTowardTargets(v));
 }
 
 // 冷凍區間是否跟指定月份有重疊；抽出來共用，isVendorTrackedInMonth 跟 getWeeklyPace 都要用同一套判斷，
@@ -87,13 +101,13 @@ function pauseOverlapsMonth(pauseHistory: Pick<Vendor, 'pauseHistory'>['pauseHis
 // 合作起始月之前也整月排除（新客戶還沒開始合作）
 // 已終止：有填 endedAt 就只排除終止月(含)之後，更早的月份照常追蹤（欠片才不會因為按了終止就整段消失）；
 //         沒填 endedAt 的舊資料維持一律排除
-export function isVendorTrackedInMonth(vendor: Pick<Vendor, 'status' | 'excludeFromStats' | 'pauseHistory' | 'cooperationStartMonth' | 'endedAt'>, month: string): boolean {
+export function isVendorTrackedInMonth(vendor: Pick<Vendor, 'status' | 'excludeFromStats' | 'pendingApproval' | 'pauseHistory' | 'cooperationStartMonth' | 'endedAt'>, month: string): boolean {
   if (vendor.status === 'ended') {
     const endedMonth = getEndedMonth(vendor);
     if (!endedMonth) return false;
     if (month >= endedMonth) return false;
   }
-  if (vendor.excludeFromStats) return false;
+  if (!countsTowardTargets(vendor)) return false;
   if (vendor.cooperationStartMonth && month < vendor.cooperationStartMonth) return false;
   return !pauseOverlapsMonth(vendor.pauseHistory, month);
 }
@@ -109,9 +123,9 @@ export function trackedVendorsForMonth(vendors: Vendor[], month: string): Vendor
 // 但冷凍中如果之前留有欠片，一樣要看得到、要能繼續管理/沖銷，不能因為還沒解凍就從清單消失；
 // 「這個月」本身不會疊加新短缺的邏輯在 getDeficitBreakdown 內部已經正確處理（用 isVendorTrackedInMonth 判斷）。
 // 已終止但有填 endedAt 的一樣留在清單裡（跟冷凍中同待遇），欠片沖銷到0之後才會被呼叫端的 owed===0 過濾掉。
-export function hasVideoTrackingScope(vendor: Pick<Vendor, 'status' | 'excludeFromStats' | 'monthlyTargetVideos' | 'monthlyTargetPosts' | 'targetHistory' | 'cooperationStartMonth' | 'endedAt'>, month: string): boolean {
+export function hasVideoTrackingScope(vendor: Pick<Vendor, 'status' | 'excludeFromStats' | 'pendingApproval' | 'monthlyTargetVideos' | 'monthlyTargetPosts' | 'targetHistory' | 'cooperationStartMonth' | 'endedAt'>, month: string): boolean {
   if (vendor.status === 'ended' && !getEndedMonth(vendor)) return false;
-  if (vendor.excludeFromStats) return false;
+  if (!countsTowardTargets(vendor)) return false;
   // 用該月的合約基準而非當下的單一欄位：合約中途改片數時，過去月份仍要留在追蹤清單裡（欠片還沒清）
   if (getContractTargets(vendor, month).videos <= 0) return false;
   if (vendor.cooperationStartMonth && month < vendor.cooperationStartMonth) return false;
