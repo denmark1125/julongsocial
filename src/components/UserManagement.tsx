@@ -201,6 +201,10 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
       toast.error('請輸入新密碼');
       return;
     }
+    if (newPassword.length < 6) {
+      toast.error('密碼至少 6 個字');
+      return;
+    }
 
     setIsResetting(true);
     try {
@@ -257,6 +261,12 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
     e.preventDefault();
     if (!newUser.username || !newUser.password || !newUser.displayName) {
       toast.error('請填寫必要欄位');
+      return;
+    }
+
+    // 系統會在密碼後面加固定後綴，Firebase 的 6 字下限因此形同虛設，這裡自己把關
+    if (newUser.password.length < 6) {
+      toast.error('密碼至少 6 個字');
       return;
     }
 
@@ -421,11 +431,13 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                         value={user.role}
                         onChange={(e) => handleUpdateRole(user.uid, e.target.value as UserRole)}
                         className="bg-[#F5F5F0] border-none rounded-lg text-xs font-bold px-3 py-1 outline-none focus:ring-2 focus:ring-[#5A5A40]"
-                        disabled={currentUserRole !== 'engineer' && currentUserRole !== 'manager'}
+                        // 經理不能動工程師、也不能把人升成工程師（firestore.rules 同一條線）
+                        disabled={(currentUserRole !== 'engineer' && currentUserRole !== 'manager')
+                          || (currentUserRole !== 'engineer' && user.role === 'engineer')}
                       >
                         <option value="employee">員工</option>
                         <option value="manager">主管</option>
-                        <option value="engineer">工程師</option>
+                        <option value="engineer" disabled={currentUserRole !== 'engineer'}>工程師</option>
                         <option value="editor">剪輯師</option>
                       </select>
                     </td>
@@ -727,7 +739,7 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                 >
                   <option value="employee">員工</option>
                   <option value="manager">主管</option>
-                  <option value="engineer">工程師</option>
+                  <option value="engineer" disabled={currentUserRole !== 'engineer'}>工程師</option>
                   <option value="editor">剪輯師(外包)</option>
                 </select>
               </div>

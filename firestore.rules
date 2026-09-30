@@ -1,4 +1,4 @@
-// Rules Updated: 2026-08-11 — 剪輯師角色權限 + 請款/對帳 + 素材刪除保護
+// Rules Updated: 2026-09-30 — users 文件禁止自建、經理不能升級成 engineer
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -57,9 +57,15 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() && (
         getUserData().role == 'engineer' ||
-        (request.auth.token.email == "denmark1125@gmail.com" && request.auth.token.email_verified == true) ||
-        (request.auth.token.email == "david@forest.system")
+        // 2026-09-30 拿掉 david@forest.system 白名單：@forest.system 是假網域，信箱永遠驗證不了，
+        // 等於只憑「註冊得到這個 email」就是管理員。管理員身分一律看 users 文件的 role。
+        (request.auth.token.email == "denmark1125@gmail.com" && request.auth.token.email_verified == true)
       );
+    }
+
+    // 寫入後的文件是 engineer，而操作的人不是 admin —— 只有 admin 能產生 engineer
+    function grantsEngineer() {
+      return request.resource.data.get('role', '') == 'engineer' && !isAdmin();
     }
 
     function isManager() {
@@ -364,8 +370,14 @@ service cloud.firestore {
       // reading other users' docs or listing the whole collection requires manager/engineer.
       allow get: if isAuthenticated() && (isOwner(uid) || isManager());
       allow list: if isManager();
-      allow create: if (isAuthenticated() && request.auth.uid == uid) || isManager() || !exists(/databases/$(database)/documents/users/$(uid));
-      allow update: if (isManager() && !touchesDeficitPermission()) || isAdmin();
+      // 2026-09-30 收斂：原本「登入者可以建自己的文件」＋「文件不存在就能建」，
+      // 任何 Google 帳號登入後直接呼叫 API 就能寫一筆 role:'engineer' 給自己＝拿到最高權限。
+      // 帳號一律由管理者在員工管理頁建立（UserManagement 是用管理者身分寫這份文件）。
+      allow create: if isManager() && !grantsEngineer();
+      // 經理不能碰 engineer：不能把任何人（含自己）升成 engineer，也不能改 engineer 的文件。
+      // 少了這條，經理改自己的 role 就等於升級成老闆。
+      allow update: if (isManager() && !touchesDeficitPermission() && !grantsEngineer()
+                        && resource.data.get('role', '') != 'engineer') || isAdmin();
       allow delete: if isAdmin();
     }
 

@@ -42,6 +42,9 @@ const MUST_CONTAIN = [
   // 2026-09-24 加入：素材的剪輯需求。少了這行型別檢查，寫得進去但規則等於沒把關，
   // 而且代表送上去的是不含這次改動的舊檔。
   'editingBrief',
+  // 2026-09-30 加入：users 文件禁止自建／經理不能升級成 engineer。
+  // 少了它代表送的是舊檔，會把「任何 Google 帳號都能自封最高權限」的洞重新打開。
+  'grantsEngineer',
 ];
 
 function fail(msg) {

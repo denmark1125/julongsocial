@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
 import cookieParser from "cookie-parser";
-import session from "express-session";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
 // 用subpath模組化API而不是 `import * as admin from "firebase-admin"`——
@@ -106,6 +105,9 @@ async function requireUser(req: any): Promise<AuthedUser> {
     throw Object.assign(new Error("身分憑證無效或已過期"), { httpStatus: 401 });
   }
   const snap = await adminDb.collection("users").doc(decoded.uid).get();
+  // 沒有 users 文件＝不是系統建立的帳號（例如隨便一個 Google 帳號登入）。
+  // 以前這裡會預設成 employee，等於任何 Google 帳號都能拿到 Drive 權杖。
+  if (!snap.exists) throw Object.assign(new Error("這個帳號尚未被授權"), { httpStatus: 403 });
   const d = snap.data() || {};
   return {
     uid: decoded.uid,
@@ -701,56 +703,25 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// Debug Endpoint (Admin Only - but for now let's keep it simple)
-app.get("/api/debug", (req, res) => {
-  res.json({
-    nodeEnv: process.env.NODE_ENV,
-    port: PORT,
-    firebaseProjectId: firebaseConfig.projectId,
-    firebaseDatabaseId: firebaseConfig.firestoreDatabaseId,
-    appsInitialized: getApps().length
-  });
-});
-
-app.use(
-  session({
-    secret: "social-media-manager-secret",
-    resave: false,
-    saveUninitialized: true,
-    cookie: { 
-      secure: true, 
-      sameSite: 'none',
-      httpOnly: true 
-    },
-  })
-);
-
 // Password Reset Endpoint (Admin Only)
 app.post("/api/admin/reset-password", async (req, res) => {
-  const { idToken, targetUid, newPassword } = req.body;
+  const { targetUid, newPassword } = req.body;
 
-  if (!idToken || !targetUid || !newPassword) {
+  if (!targetUid || !newPassword) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
-  if (!adminAuth || !adminDb) {
-    return res.status(500).json({ error: "Firebase Admin not initialized" });
-  }
-
   try {
-    // Verify the admin's ID token
-    const decodedToken = await adminAuth.verifyIdToken(idToken);
-    const adminUid = decodedToken.uid;
-
-    // Check if the user is an admin in Firestore
-    const adminDoc = await adminDb.collection("users").doc(adminUid).get();
-    const adminData = adminDoc.data();
-
-    if (!adminData || (adminData.role !== "engineer" && adminData.role !== "manager")) {
-      // Check for hardcoded admin emails as fallback
-      const adminEmail = decodedToken.email;
-      if (adminEmail !== "denmark1125@gmail.com" && adminEmail !== "david@forest.system") {
-        return res.status(403).json({ error: "Unauthorized: Admin access required" });
+    // 2026-09-30：拿掉寫死的 email 白名單（@forest.system 是假網域，驗證不了），一律看 users 文件的 role。
+    const me = await requireUser(req);
+    if (me.role !== "engineer" && me.role !== "manager") {
+      return res.status(403).json({ error: "Unauthorized: Admin access required" });
+    }
+    // 經理不能重設 engineer 的密碼，否則等於能登入老闆帳號＝升級成老闆
+    if (me.role !== "engineer") {
+      const targetDoc = await adminDb.collection("users").doc(targetUid).get();
+      if (targetDoc.data()?.role === "engineer") {
+        return res.status(403).json({ error: "只有工程師可以重設工程師的密碼" });
       }
     }
 
@@ -762,6 +733,7 @@ app.post("/api/admin/reset-password", async (req, res) => {
 
     res.json({ success: true, message: "Password updated successfully" });
   } catch (error: any) {
+    if (error?.httpStatus) return sendAuthError(res, error);
     console.error("Password reset error details:", {
       message: error.message,
       code: error.code,
@@ -782,13 +754,19 @@ app.post("/api/webhook/make", async (req, res) => {
   }
 
   try {
+    // 2026-09-30：原本不用登入就能打，任何人都能透過這支往 Make 灌資料。
+    // 身分放 Authorization header（body 要原封不動轉給 Make，不能混進 idToken）。
+    const me = await requireUser(req);
+    if (me.role === 'editor') return res.status(403).json({ error: "無權限" });
+
     const response = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req.body),
     });
     res.json({ success: response.ok });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.httpStatus) return sendAuthError(res, error);
     console.error("Webhook error:", error);
     res.status(500).json({ error: "Failed to trigger webhook" });
   }
@@ -799,8 +777,10 @@ app.post("/api/webhook/make", async (req, res) => {
 // ===============================================================
 function verifyLineSignature(rawBody: Buffer, signature: string | undefined, channelSecret: string): boolean {
   if (!signature) return false;
-  const hash = crypto.createHmac("SHA256", channelSecret).update(rawBody).digest("base64");
-  return hash === signature;
+  const hash = Buffer.from(crypto.createHmac("SHA256", channelSecret).update(rawBody).digest("base64"));
+  const given = Buffer.from(signature);
+  // 定時比較，避免用回應時間一個字元一個字元猜出簽章
+  return hash.length === given.length && crypto.timingSafeEqual(hash, given);
 }
 
 app.post("/api/webhook/line", async (req: any, res) => {
@@ -1167,7 +1147,8 @@ app.post("/api/notify/flow-event", async (req, res) => {
   try {
     // 只要是本系統的登入者就能觸發（剪輯師也要能觸發「轉成片」通知）；
     // 內容不由呼叫端決定，所以不需要再限角色。
-    await adminAuth.verifyIdToken(idToken);
+    // ⚠️ 但一定要是系統建立的帳號（有 users 文件），不然任何 Google 帳號都能拿來狂推 LINE。
+    await requireUser(req);
 
     const assetDoc = await adminDb.collection("assets").doc(assetId).get();
     if (!assetDoc.exists) return res.status(404).json({ error: "asset not found" });
@@ -1200,6 +1181,7 @@ app.post("/api/notify/flow-event", async (req, res) => {
     await Promise.all(recipients.map((to) => sendLinePushMessage(to, message)));
     res.json({ pushed: true, recipientCount: recipients.length });
   } catch (e: any) {
+    if (e?.httpStatus) return sendAuthError(res, e);
     console.error("flow-event notify failed", e);
     res.status(500).json({ error: e.message || "unknown error" });
   }

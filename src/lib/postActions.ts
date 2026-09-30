@@ -1,6 +1,6 @@
 import { doc, updateDoc } from 'firebase/firestore';
 import toast from 'react-hot-toast';
-import { db } from '../firebase';
+import { auth, db } from '../firebase';
 import { Post, PostStatus, Asset, Vendor } from '../types';
 import { isClientApproved } from './assetFlow';
 
@@ -38,11 +38,12 @@ function fireMakeWebhook(post: Post, newStatus: PostStatus, vendors: Vendor[]) {
 
   // 先走自家 proxy，失敗才退回環境變數裡的直連網址
   const fetchFn = globalThis.fetch || window.fetch;
-  fetchFn('/api/webhook/make', {
+  // proxy 需要登入身分（2026-09-30 起不再接受匿名呼叫），放 header 不放 body，body 會原封轉給 Make
+  Promise.resolve(auth.currentUser?.getIdToken()).then(idToken => fetchFn('/api/webhook/make', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken || ''}` },
     body: JSON.stringify(webhookData)
-  }).then(res => {
+  })).then(res => {
     if (!res.ok) throw new Error('Proxy failed');
   }).catch(err => {
     console.warn('Webhook proxy failed, checking for direct URL...', err);

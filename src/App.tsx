@@ -4,10 +4,9 @@ import {
   signInWithPopup, 
   GoogleAuthProvider,
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   User
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, getDocs, query, limit, getDocFromServer } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs, query, limit, getDocFromServer } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
@@ -28,7 +27,7 @@ import { LogIn, Mail, Lock, User as UserIcon } from 'lucide-react';
 import { UserProfile, UserRole } from './types';
 import { disposeAllLive } from './lib/liveData';
 import toast from 'react-hot-toast';
-import { PASSWORD_SUFFIX, ADMIN_USERNAME, ADMIN_EMAIL, INITIAL_ADMIN_REAL_EMAIL } from './constants';
+import { PASSWORD_SUFFIX, ADMIN_USERNAME, ADMIN_EMAIL } from './constants';
 
 // 剪輯師（外包，權限最收斂）唯一能進的兩頁。新增剪輯師分頁時這裡跟 TAB_ROLES、
 // Layout.tsx 的 menuItems 三個地方都要一起加，少一個就會被強制導回工作台。
@@ -73,27 +72,12 @@ export default function App() {
             setUserProfile(userDoc.data() as UserProfile);
             setUser(user);
           } else {
-            // Check if this is the hardcoded admin email or the internal admin email
-            const isInitialAdmin = user.email === INITIAL_ADMIN_REAL_EMAIL || user.email === ADMIN_EMAIL;
-            
-            if (isInitialAdmin) {
-              const newProfile: UserProfile = {
-                uid: user.uid,
-                username: 'David',
-                email: 'denmark1125@gmail.com',
-                role: 'engineer',
-                displayName: 'David',
-                createdAt: new Date().toISOString()
-              };
-              await setDoc(doc(db, 'users', user.uid), newProfile);
-              setUserProfile(newProfile);
-              setUser(user);
-            } else {
-              await auth.signOut();
-              toast.error('您的帳號尚未被授權，請聯繫管理員設定帳號。');
-              setUser(null);
-              setUserProfile(null);
-            }
+            // 2026-09-30 拿掉「特定 email 登入就自動建 engineer 文件」的初始化：
+            // 管理員帳號早已存在，這段只剩後門作用，規則也不再允許自己建 users 文件。
+            await auth.signOut();
+            toast.error('您的帳號尚未被授權，請聯繫管理員設定帳號。');
+            setUser(null);
+            setUserProfile(null);
           }
         } catch (error) {
           console.error('Error fetching user profile:', error);
@@ -138,33 +122,6 @@ export default function App() {
       await signInWithEmailAndPassword(auth, loginEmail, securePassword);
     } catch (error: any) {
       console.error('Login failed:', error);
-      
-      // Special case for initial David setup
-      if (username.toLowerCase() === ADMIN_USERNAME.toLowerCase() && password === '1125' && (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential')) {
-        try {
-          const userCredential = await createUserWithEmailAndPassword(auth, loginEmail, securePassword);
-          const user = userCredential.user;
-          const newProfile: UserProfile = {
-            uid: user.uid,
-            username: ADMIN_USERNAME,
-            email: ADMIN_EMAIL,
-            role: 'engineer',
-            displayName: ADMIN_USERNAME,
-            createdAt: new Date().toISOString()
-          };
-          await setDoc(doc(db, 'users', user.uid), newProfile);
-          setUserProfile(newProfile);
-          setUser(user);
-          toast.success('管理員帳號初始化成功');
-          return;
-        } catch (createError: any) {
-          if (createError.code === 'auth/email-already-in-use') {
-             toast.error('登入失敗：帳號或密碼錯誤');
-             return;
-          }
-          console.error('Initial setup failed:', createError);
-        }
-      }
 
       if (error.code === 'auth/operation-not-allowed') {
         toast.error('系統尚未啟用帳號密碼登入，請聯繫管理員。', { duration: 5000 });
