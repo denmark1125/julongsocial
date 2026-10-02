@@ -114,7 +114,6 @@ export default function RawFootageUpload({
   // 只要有任何一組已經建了資料夾，上面那三個欄位就不能再動 —— 改了路徑就對不上了
   const lockHeader = groups.some(g => g.folderId);
   const uploadedCount = groups.reduce((n, g) => n + g.files.length + g.brollFiles.length, 0);
-  const namedCount = groups.filter(g => g.name.trim()).length;
 
   const patch = (key: string, next: Partial<Group>) =>
     setGroups(prev => prev.map(g => (g.key === key ? { ...g, ...next } : g)));
@@ -220,43 +219,22 @@ export default function RawFootageUpload({
       : prev.filter(g => g.key !== key)));
   };
 
-  /**
-   * 建檔。**不需要先上傳任何檔案** —— 這是 2026-09-30 的核心改動。
-   *
-   * 同事棄坑的真因是被迫守著 Google 上傳視窗跑完才能建下一支，一次拍攝要守五次。
-   * 現在按這顆就只做「建資料夾＋建素材」，幾秒鐘結束，影片他們自己丟進 Drive 背景上傳。
-   * 沒有檔案的素材由後端標 awaitingFiles，不會進剪輯師待辦。
-   */
   const handleCommit = async () => {
-    const named = groups.filter(g => g.name.trim());
-    // ⚠️ 只有 B-roll 沒有主片段的組不送：B-roll 是補充畫面，掛在某支素材底下，
-    //    這種組合多半是選錯地方了。（沒有任何檔案是可以的，那是「先建檔」。）
-    const brollOnly = named.filter(g => g.files.length === 0 && g.brollFiles.length > 0);
+    // ⚠️ 只有 B-roll 沒有主片段的組不送：B-roll 是補充畫面，
+    //    沒有主片段的話會建出一支空殼素材。
+    const used = groups.filter(g => g.folderId && g.files.length > 0);
+    const brollOnly = groups.filter(g => g.files.length === 0 && g.brollFiles.length > 0);
     if (brollOnly.length) {
       toast.error(`「${brollOnly[0].name || '未命名'}」只有 B-roll 沒有主片段，請先選主片段`);
       return;
     }
-    if (named.length === 0) { toast.error('至少要幫一支素材取名字'); return; }
+    if (used.length === 0) { toast.error('至少要有一支素材傳了片段'); return; }
 
     setBusy(true);
     try {
-      // 還沒開過上傳視窗的組沒有 folderId，這裡補建資料夾。
-      // group-folder 是冪等的（已存在就沿用），跟 Picker 是兩件獨立的事 ——
-      // 只是以前被綁在「選檔案」那顆按鈕上，所以非得開視窗才建得出資料夾。
-      const withFolder: (Group & { folderId: string })[] = [];
-      for (const g of named) {
-        if (g.folderId) { withFolder.push(g as Group & { folderId: string }); continue; }
-        const cred = await callApi('/api/drive/group-folder', {
-          vendorId, shotAt, batchName, groupName: g.name.trim(),
-        });
-        if (cred.freeGB !== undefined) setFreeGB(cred.freeGB);
-        patch(g.key, { folderId: cred.groupFolderId, path: cred.path });
-        withFolder.push({ ...g, folderId: cred.groupFolderId, path: cred.path });
-      }
-
       const data = await callApi('/api/drive/commit-groups', {
         vendorId, shotAt,
-        groups: withFolder.map(g => ({
+        groups: used.map(g => ({
           name: g.name.trim(),
           groupFolderId: g.folderId,
           category: g.category,
@@ -271,10 +249,7 @@ export default function RawFootageUpload({
       if (data.failed?.length) {
         toast.error(`${data.created?.length || 0} 支建好了，${data.failed.length} 支失敗`);
       } else {
-        const waiting = (data.created || []).filter((c: any) => c.awaitingFiles).length;
-        toast.success(waiting
-          ? `已建立 ${data.created.length} 支素材，${waiting} 支等你把影片丟進資料夾`
-          : `已建立 ${data.created?.length || 0} 支素材`);
+        toast.success(`已建立 ${data.created?.length || 0} 支素材`);
       }
     } catch (e: any) {
       toast.error(e?.message || '建立素材失敗');
@@ -334,50 +309,11 @@ export default function RawFootageUpload({
                 <CheckCircle2 className="w-5 h-5 text-green-600" />
                 已建立 {done.created.length} 支素材
               </p>
-              {/* 等檔案的素材要把資料夾連結給足：那是他們接下來唯一要做的動作。
-                  不要只寫「已建立」就收工，人會不知道影片該丟去哪。 */}
-              <ul className="text-sm text-slate-700 space-y-2">
+              <ul className="text-sm text-slate-700 space-y-1">
                 {done.created.map((c: any) => (
-                  <li key={c.assetId} className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="font-medium">{c.name}</span>
-                    <span className="text-slate-500">
-                      {c.awaitingFiles
-                        ? '等待影片'
-                        : `${c.fileCount} 個片段${c.brollCount ? `，${c.brollCount} 個 B-roll` : ''}`}
-                    </span>
-                    {c.folderUrl && (
-                      <>
-                        <a
-                          href={c.folderUrl} target="_blank" rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline whitespace-nowrap"
-                        >
-                          開啟資料夾
-                        </a>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard?.writeText(c.folderUrl)
-                              .then(() => toast.success('連結已複製'))
-                              .catch(() => toast.error('複製失敗，請用「開啟資料夾」'));
-                          }}
-                          className="text-slate-500 hover:text-slate-700 underline decoration-dotted whitespace-nowrap"
-                        >
-                          複製連結
-                        </button>
-                      </>
-                    )}
-                  </li>
+                  <li key={c.assetId}>・{c.name}（{c.fileCount} 個片段{c.brollCount ? `，${c.brollCount} 個 B-roll` : ''}）</li>
                 ))}
               </ul>
-              {done.created.some((c: any) => c.awaitingFiles) && (
-                <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 space-y-1">
-                  <p className="font-medium">接下來：把影片丟進上面的資料夾就好，不用留在這裡等。</p>
-                  <p>
-                    傳完之後回素材資料庫按「檔案已就緒」，剪輯師才會看到這支片。
-                    想補上逐片說明的話，按「掛上檔案」。
-                  </p>
-                </div>
-              )}
               {done.failed.length > 0 && (
                 <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                   <p className="font-medium mb-1">這幾支沒有成功，檔案還在雲端資料夾裡：</p>
@@ -449,16 +385,6 @@ export default function RawFootageUpload({
                 </div>
               )}
 
-              {/* 同事習慣是「建完就走」，被迫守著上傳視窗是他們棄坑的原因。
-                  這句話要在動手之前就看到，不然他們會照舊按「現在就上傳」。 */}
-              {vendorId && folderReady && (
-                <div className="text-sm text-slate-600 leading-relaxed space-y-0.5">
-                  {/* ⚠️ 拆成兩句不是排版潔癖：擠成一段時尾巴的「等。」會自己掉到第二行變孤字 */}
-                  <p>取好名字就按底下的<span className="font-medium text-slate-800">「建立資料夾並建檔」</span>。</p>
-                  <p>資料夾馬上建好並給你連結，<span className="font-medium text-slate-800">影片自己丟進去就行，不用留在這裡等</span>。</p>
-                </div>
-              )}
-
               <div className="space-y-3">
                 {groups.map((g, gi) => {
                   const locked = Boolean(g.folderId);
@@ -479,17 +405,13 @@ export default function RawFootageUpload({
                           placeholder="素材名稱，例如：超好吃的金磚"
                           className="flex-1 min-w-[12rem] px-3 py-2 border border-slate-300 rounded-lg text-base disabled:bg-slate-100 disabled:text-slate-600"
                         />
-                        {/* ⚠️ 這顆刻意**不是**主按鈕。2026-09-30 之前它是藍色的，同事照習慣按下去，
-                            就被 Google 的上傳視窗綁住到傳完為止——那正是他們棄坑的原因。
-                            現在的主動作是底下的「建立資料夾並建檔」，這顆只是零星補檔的備用路。 */}
                         <button
                           onClick={() => handlePickFiles(g)}
                           disabled={!g.name.trim() || !folderReady || thisBusy}
-                          title="會開 Google 上傳視窗，要等它傳完才能關掉"
-                          className="px-3 py-2 rounded-lg border border-slate-300 text-slate-600 text-sm hover:bg-slate-50 disabled:opacity-40 flex items-center gap-1.5 shrink-0 whitespace-nowrap"
+                          className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40 flex items-center gap-1.5 shrink-0 whitespace-nowrap"
                         >
                           {thisBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FilePlus2 className="w-4 h-4" />}
-                          {g.files.length > 0 ? '再加片段' : '現在就上傳'}
+                          {g.files.length > 0 ? '再加片段' : '選檔案'}
                         </button>
                         {/* 次要樣式：B-roll 是補充，不要跟主片段搶視覺 */}
                         <button
@@ -630,15 +552,14 @@ export default function RawFootageUpload({
               登記檔案
             </button>
           )}
-          {/* ⚠️ 條件是「有沒有取名字」而不是「有沒有傳檔案」——不然又會逼人先守完上傳才建得了檔 */}
-          {mode === 'raw' && namedCount > 0 && !done && (
+          {mode === 'raw' && uploadedCount > 0 && !done && (
             <button
               onClick={handleCommit}
-              disabled={busy || !folderReady}
+              disabled={busy}
               className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 font-medium"
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-              {uploadedCount > 0 ? '建立素材' : '建立資料夾並建檔'}
+              建立素材
             </button>
           )}
         </div>

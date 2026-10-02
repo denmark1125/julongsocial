@@ -11,8 +11,7 @@ import {
   setDoc,
   updateDoc,
   where,
-  getDocs,
-  deleteField
+  getDocs
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking, UserProfile, deriveFlowStage } from '../types';
@@ -24,6 +23,7 @@ import { isPickerConfigured } from '../lib/drivePicker';
 import { ASSET_CATEGORIES, ASSET_CATEGORY_DATALIST_ID } from '../lib/assetCategories';
 import EditingBrief from './EditingBrief';
 import AttachFilesModal from './AttachFilesModal';
+import ClaimFoldersModal from './ClaimFoldersModal';
 import RawFootageUpload from './RawFootageUpload';
 import { 
   Video, 
@@ -49,7 +49,8 @@ import {
   RotateCcw,
   MessageSquareText,
   Flame,
-  UploadCloud
+  UploadCloud,
+  FolderOpen
 } from 'lucide-react';
 import { toJpeg } from 'html-to-image';
 import download from 'downloadjs';
@@ -96,8 +97,9 @@ export default function AssetDatabase() {
   const [me, setMe] = useState<UserProfile | null>(null);
   // 正在改派的那一張卡（null＝都沒在改）
   const [reassigningId, setReassigningId] = useState<string | null>(null);
-  // 正在掛檔案的那一支素材（先建檔、後上傳流程的最後一步）
+  // 正在掛檔案的那一支素材（把已經在雲端的片段登記進來、逐片打標籤）
   const [attachingAsset, setAttachingAsset] = useState<Asset | null>(null);
+  const [isClaiming, setIsClaiming] = useState(false);
   // 按「標記完成」時要選認列月份（預設當月）。所有 IP 一律走同一套，不做特例：
   // 不列入統計的廠商（例如秀姨）選了也不影響數字，因為她本來就不進欠片計算。
   const [completingAsset, setCompletingAsset] = useState<Asset | null>(null);
@@ -630,25 +632,6 @@ export default function AssetDatabase() {
     return getEditorName(owner.editorId);
   };
 
-  /**
-   * 「檔案已就緒」：清掉等待旗標，這支片才進剪輯師待辦。
-   *
-   * ⚠️ 用 deleteField 而不是寫 false —— 全系統一律以「欄位不存在＝正常」為準，
-   *    留一個 false 在那裡會讓日後的查詢多一種要處理的狀態。
-   */
-  const markFilesReady = async (asset: Asset) => {
-    if (!window.confirm(`「${asset.title}」的影片都上傳完了嗎？
-
-按確定之後剪輯師才會看到這支片。`)) return;
-    try {
-      await updateDoc(doc(db, 'assets', asset.id!), { awaitingFiles: deleteField() });
-      toast.success('已標記檔案就緒，剪輯師看得到了');
-    } catch (error) {
-      console.error('標記檔案就緒失敗:', error);
-      toast.error('標記失敗，請再試一次');
-    }
-  };
-
   const reassignEditor = async (asset: Asset, nextValue: string) => {
     const gate = canReassignEditor(asset, me?.role);
     // 按鈕出現前已經檢查過一次，這裡再檢查一次：兩處用同一支純函式，不會分岔
@@ -716,13 +699,25 @@ ${after}`)) return;
               ⚠️ 金鑰沒設就整顆不顯示（正式站尚未設 VITE_GOOGLE_PICKER_API_KEY，
               所以在那裡這個功能是暗的），免得人按了才看到錯誤。 */}
           {me?.role && me.role !== 'editor' && isPickerConfigured() && (
-            <button
-              onClick={() => setIsUploadingRaw(true)}
-              className="bg-white text-[#5A5A40] px-4 py-2 rounded-2xl border border-black/5 shadow-sm font-bold flex items-center space-x-2 hover:bg-gray-50 transition-colors"
-            >
-              <UploadCloud size={18} />
-              <span>上傳毛片</span>
-            </button>
+            <>
+              {/* ⚠️ 認領排在前面且是實心的，上傳毛片退成白底。
+                  同事的習慣是先在雲端把東西弄好再走人，要他們先回系統拿資料夾＝多一道手續，
+                  2026-09 第一週就是這樣讓人棄坑的。主路徑必須是「弄完回來收一次」。 */}
+              <button
+                onClick={() => setIsClaiming(true)}
+                className="bg-[#5A5A40] text-white px-4 py-2 rounded-2xl shadow-sm font-bold flex items-center space-x-2 hover:bg-[#4a4a35] transition-colors"
+              >
+                <FolderOpen size={18} />
+                <span>從雲端認領</span>
+              </button>
+              <button
+                onClick={() => setIsUploadingRaw(true)}
+                className="bg-white text-[#5A5A40] px-4 py-2 rounded-2xl border border-black/5 shadow-sm font-bold flex items-center space-x-2 hover:bg-gray-50 transition-colors"
+              >
+                <UploadCloud size={18} />
+                <span>上傳毛片</span>
+              </button>
+            </>
           )}
           <button
             onClick={() => setIsTaskListOpen(true)}
@@ -1065,7 +1060,7 @@ ${after}`)) return;
                   effStatus(asset) === 'available' ? "bg-[#8A8A6A]/10 text-[#8A8A6A] border border-[#8A8A6A]/20" : 
                   "bg-gray-100 text-gray-500 border border-gray-200"
                 )}>
-                  {asset.voidedAt ? '已作廢' : asset.awaitingFiles ? '等待檔案' : asset.stage === 'raw' ? '待剪輯' : effStatus(asset) === 'available' ? '可使用' : '已使用'}
+                  {asset.voidedAt ? '已作廢' : asset.stage === 'raw' ? '待剪輯' : effStatus(asset) === 'available' ? '可使用' : '已使用'}
                 </span>
               </div>
             </div>
@@ -1152,17 +1147,6 @@ ${after}`)) return;
                   >
                     <Flame size={12} /><span>急件</span>
                   </button>
-                  )}
-                  {/* 先建檔、後上傳流程：影片還沒丟進資料夾的片，要有地方按「傳完了」。
-                      沒有這顆按鈕它會永遠卡在待辦外面。 */}
-                  {asset.stage === 'raw' && asset.awaitingFiles && (
-                    <button
-                      type="button"
-                      onClick={() => markFilesReady(asset)}
-                      className="shrink-0 whitespace-nowrap bg-amber-500 text-white px-3 py-1 rounded-lg text-[13px] font-bold hover:bg-amber-600 transition-colors"
-                    >
-                      檔案已就緒
-                    </button>
                   )}
                   {/* 掛上檔案＝把已經在雲端的片段登記進來並逐片打標籤，順便解掉
                       「事後想補片段卻沒有入口」——以前只能整批重跑，那會建出重複素材。 */}
@@ -1293,6 +1277,15 @@ ${after}`)) return;
       </div>
     </div>
   </div>
+
+      {isClaiming && (
+        <ClaimFoldersModal
+          vendors={vendors}
+          editors={editors}
+          canSetFolder={me?.role === 'engineer' || me?.role === 'manager'}
+          onClose={() => setIsClaiming(false)}
+        />
+      )}
 
       {isUploadingRaw && (
         <RawFootageUpload

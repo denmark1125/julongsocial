@@ -102,12 +102,24 @@ export interface DriveQuota {
   accountEmail: string;
 }
 
-export async function getQuota(): Promise<DriveQuota> {
+/**
+ * 容量查詢的短期快取。
+ *
+ * 為什麼需要：每按一次「選檔案／建資料夾」都會先查一次容量，而那是一趟完整的 Drive
+ * 往返；一次拍攝五支素材就白等五趟。容量是用來擋「快滿了別傳」的，分鐘級的誤差
+ * 完全無所謂（2TB 的硬碟不會在 60 秒內少掉 50GB）。
+ * ⚠️ 不要把 TTL 拉長到幾十分鐘：真的傳爆的時候要能及時擋下來。
+ */
+let cachedQuota: { value: DriveQuota; expiresAt: number } | null = null;
+const QUOTA_TTL_MS = 60_000;
+
+export async function getQuota(force = false): Promise<DriveQuota> {
+  if (!force && cachedQuota && Date.now() < cachedQuota.expiresAt) return cachedQuota.value;
   const d = await driveFetch('/about?fields=user(emailAddress),storageQuota');
   const q = d.storageQuota || {};
   const limit = Number(q.limit || 0);
   const usage = Number(q.usage || 0);
-  return {
+  const quota: DriveQuota = {
     limitBytes: limit,
     usageBytes: usage,
     freeBytes: Math.max(0, limit - usage),
@@ -115,6 +127,8 @@ export async function getQuota(): Promise<DriveQuota> {
     trashBytes: Number(q.usageInDriveTrash || 0),
     accountEmail: d.user?.emailAddress || '',
   };
+  cachedQuota = { value: quota, expiresAt: Date.now() + QUOTA_TTL_MS };
+  return quota;
 }
 
 /**

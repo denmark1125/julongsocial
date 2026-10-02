@@ -211,8 +211,12 @@ app.post("/api/drive/picker-auth", async (req, res) => {
   if (!requireDriveConfigured(res)) return;
   try {
     const me = await requireUser(req);
-    if (me.role !== 'engineer' && me.role !== 'manager') {
-      return res.status(403).json({ error: "只有工程師或管理者可以指定資料夾" });
+    // 2026-10-01 從 manager/engineer 放寬到「非剪輯師」：認領流程要用這支開資料夾視窗，
+    // 而認領是小編日常工作。這不是權限放寬 —— 真正的守門在寫入端：
+    // set-vendor-folder（改 IP 根目錄）仍然自己鎖 manager/engineer，
+    // 而這支吐出來的 token 是 drive.file 範圍，只動得了這個 app 建過或被挑過的檔案。
+    if (me.role === 'editor') {
+      return res.status(403).json({ error: "剪輯師無法使用系統上傳" });
     }
     return res.json({
       accessToken: await getAccessToken(),
@@ -576,9 +580,7 @@ app.post("/api/drive/commit-groups", async (req, res) => {
     }
     if (groups.length > 30) return res.status(400).json({ error: "一次最多 30 支素材" });
     const fileCount = groups.reduce((n: number, g: any) => n + (g.files?.length || 0) + (g.brollFiles?.length || 0), 0);
-    // ⚠️ 刻意**不再**要求「至少要有一個片段」。2026-09-30 同事棄坑的真因是被迫守著上傳視窗，
-    //    所以改成建檔與上傳可以分開：0 個檔案＝只建資料夾與素材，檔案之後自己丟進 Drive，
-    //    素材先標 awaitingFiles 不進剪輯師待辦。
+    if (fileCount === 0) return res.status(400).json({ error: "每一支素材至少要有一個片段" });
     if (fileCount > 100) return res.status(400).json({ error: "一次最多 100 個檔案" });
 
     const vSnap = await adminDb.collection("vendors").doc(vendorId).get();
@@ -595,8 +597,10 @@ app.post("/api/drive/commit-groups", async (req, res) => {
       if (!groupName || !groupFolderId) {
         failed.push({ name: g.name || '(未命名)', reason: "這一組沒有名字或沒有資料夾" }); continue;
       }
-      // 0 個檔案是合法的：先建檔、檔案之後自己丟（見上面 fileCount 那段）
-      const rawList = Array.isArray(g.files) ? g.files : [];
+      if (!Array.isArray(g.files) || g.files.length === 0) {
+        failed.push({ name: groupName, reason: "這一組沒有檔案" }); continue;
+      }
+      const rawList = g.files;
       try {
         const checked: any[] = [];
         for (const f of rawList) {
@@ -639,11 +643,6 @@ app.post("/api/drive/commit-groups", async (req, res) => {
           // 整支片的剪輯方向，以及每個片段的短標籤。
           // clipNotes 是刻意的反正規化：權威紀錄在 assetUploads，但規則擋住剪輯師讀那張表，
           // 而他們正是要看這些字的人（理由同 vendorName 快照）。
-          // 建了檔但還沒有任何片段＝同事等一下才會把影片丟進 Drive。
-          // 這支片先不要進剪輯師待辦，否則他點進去是一個空資料夾。
-          // ⚠️ 有檔案時**不要寫 false**，直接不帶這個欄位 —— 讓「欄位不存在＝正常」這件事
-          //    對所有既有素材與新素材都成立，判斷端才只需要看 truthy。
-          ...(checked.length === 0 ? { awaitingFiles: true } : {}),
           editingBrief: String(g.brief || '').trim(),
           clipNotes: checked.map((c: any) => ({
             fileName: c.info.name,
@@ -689,9 +688,7 @@ app.post("/api/drive/commit-groups", async (req, res) => {
           assetId: assetRef.id, name: groupName,
           fileCount: checked.filter((c: any) => c.kind === 'raw').length,
           brollCount: checked.filter((c: any) => c.kind === 'broll').length,
-          // 「先建檔、後上傳」的人就是靠這個連結把影片丟進去，一定要回給前端
           folderUrl: folderInfo.webViewLink || '',
-          awaitingFiles: checked.length === 0,
         });
       } catch (err: any) {
         failed.push({ name: groupName, reason: err?.message || "這一組處理失敗" });
@@ -704,6 +701,105 @@ app.post("/api/drive/commit-groups", async (req, res) => {
     if (e?.httpStatus) return sendAuthError(res, e);
     console.error("drive/commit-groups failed:", e?.message);
     return res.status(502).json({ error: e?.message || "登記失敗" });
+  }
+});
+
+/**
+ * 認領：把同事**已經在雲端建好、也丟好檔案**的資料夾，一次收成 N 支素材。
+ *
+ * 為什麼是這個方向（2026-10-01，第一週同事棄坑之後）：
+ * 他們的習慣是先在 Drive（多半是本機的 Drive 桌面版）建資料夾、把影片拖進去就走人。
+ * 系統原本要求反過來——先回來建檔才拿得到資料夾——所以變成多一道手續，同事直接不用了。
+ * 認領取代的是「在素材資料庫一支一支人工建檔」，**不是多出來的一步**：
+ * 一次拍攝從「回系統 5 次」變成「回系統按 1 次」。
+ *
+ * ⚠️ 資料夾是人在 Picker 裡挑的，所以**不需要**這個 IP 事先指定過毛片根目錄，
+ *    也不需要後端有能力列出別人建的資料夾（那是 drive.file 做不到的事）。
+ * ⚠️ **一定要擋重複認領**：同事手滑按兩次就會多一倍素材，而那些幽靈片會進剪輯師
+ *    待辦、庫存與欠片計算。靠 assets.driveFolderId 查，已經有人認領過就跳過。
+ */
+app.post("/api/drive/claim-folders", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    const me = await requireUser(req);
+    if (me.role === 'editor') return res.status(403).json({ error: "剪輯師無法使用系統上傳" });
+
+    const { vendorId, folders, shotAt, category, editorId, internalEdit } = req.body || {};
+    if (!vendorId || !Array.isArray(folders) || folders.length === 0) {
+      return res.status(400).json({ error: "缺少 vendorId / folders" });
+    }
+    if (folders.length > 30) return res.status(400).json({ error: "一次最多 30 支素材" });
+
+    const vSnap = await adminDb.collection("vendors").doc(vendorId).get();
+    if (!vSnap.exists) return res.status(404).json({ error: "找不到這個 IP" });
+    const vendorName = vSnap.data()?.name || vendorId;
+
+    const now = new Date().toISOString();
+    const created: any[] = [];
+    const skipped: any[] = [];
+    const failed: any[] = [];
+
+    for (const f of folders) {
+      const folderId = String(f?.id || '');
+      if (!folderId) { failed.push({ name: f?.name || '(未命名)', reason: "沒有資料夾 id" }); continue; }
+      try {
+        // 向 Google 確認它真的存在、而且真的是資料夾（不相信前端送上來的東西）
+        const info = await getFile(folderId);
+        if (info.mimeType !== 'application/vnd.google-apps.folder') {
+          failed.push({ name: info.name || folderId, reason: "這不是資料夾" }); continue;
+        }
+
+        // 重複認領防護
+        const dup = await adminDb.collection("assets").where("driveFolderId", "==", folderId).limit(1).get();
+        if (!dup.empty) {
+          skipped.push({ name: info.name, reason: "這個資料夾已經有對應的素材了" }); continue;
+        }
+
+        const assetRef = adminDb.collection("assets").doc();
+        await assetRef.set({
+          // 資料夾名稱就是素材名稱。同事本來就會好好命名，不另外要他們再打一次。
+          title: info.name,
+          url: info.webViewLink || '',
+          driveFolderId: folderId,
+          vendorId,
+          vendorName,
+          editorId: String(editorId || '').trim(),
+          internalEdit: Boolean(internalEdit),
+          category: String(category || '').trim() || '未分類',
+          type: 'video',
+          stage: 'raw',
+          filmingDate: shotAt || now.slice(0, 10),
+          status: 'available',
+          approved: false,
+          createdAt: now,
+          createdBy: me.uid,
+        });
+
+        // 跟 commit-groups 一樣留一筆資料夾紀錄，日後孤兒對帳才對得上。
+        // ⚠️ 文件 id 不能含 `/`（Firestore 會當成子集合路徑），所以直接用 folderId 當 id。
+        await adminDb.collection("driveFolders").doc(`claim_${folderId}`).set({
+          folderId, parentFolderId: info.parents?.[0] || null,
+          path: info.name, vendorId, kind: 'raw',
+          batchName: '', groupName: info.name,
+          claimed: true,
+          createdAt: now, createdByUid: me.uid,
+        }, { merge: true });
+
+        created.push({ assetId: assetRef.id, name: info.name, folderUrl: info.webViewLink || '' });
+      } catch (err: any) {
+        failed.push({ name: f?.name || folderId, reason: err?.message || "這個資料夾處理失敗" });
+      }
+    }
+
+    // 拍攝預約核銷：跟人工建檔與 commit-groups 一致，整批算一次
+    if (created.length) await autoResolveShootBooking(vendorId);
+
+    return res.json({ created, skipped, failed });
+  } catch (e: any) {
+    if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("drive/claim-folders failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "認領失敗" });
   }
 });
 
@@ -747,7 +843,7 @@ app.post("/api/drive/asset-picker-auth", async (req, res) => {
  * 把「已經在 Drive 上的檔案」掛到一支既有素材底下。
  *
  * 兩個用途合而為一：
- *   ① 先建檔、後上傳流程的最後一步（補登逐片說明、清掉 awaitingFiles）
+ *   ① 補登逐片說明（檔案已經在雲端，這裡只是把它們登記進來並打標籤）
  *   ② 事後補片段 —— 以前完全沒有入口，同事只能把整批重跑一次，
  *      而那會再建一支**重複的素材**（commit-groups 每次都 assets.doc()），
  *      然後那支幽靈片會跑進剪輯師待辦與庫存。
@@ -830,11 +926,7 @@ app.post("/api/drive/attach-files", async (req, res) => {
       if (at >= 0) merged[at] = row; else merged.push(row);
     }
 
-    await assetRef.update({
-      clipNotes: merged,
-      // 檔案到了就不再是「等檔案」。用 delete 而不是寫 false，維持「欄位不存在＝正常」。
-      awaitingFiles: FieldValue.delete(),
-    });
+    await assetRef.update({ clipNotes: merged });
 
     return res.json({
       attached: checked.length,

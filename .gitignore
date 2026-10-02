@@ -12,3 +12,6 @@ _stage_backfill_backup.json
 
 # 一次性診斷／修復腳本留在本機；可重用的請整理進 scripts/
 /_*.mjs
+
+# 本機驗證用的暫存預覽/測試輸出，不進版控
+.preview-tmp/

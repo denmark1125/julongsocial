@@ -236,6 +236,68 @@ export async function openFolderPicker(opts: PickerAuth & { title?: string }): P
 }
 
 /** 金鑰沒設就不要顯示上傳入口，免得人按了才看到錯誤。 */
+/**
+ * 一次挑**多個既有資料夾**（認領流程）。
+ *
+ * 同事照舊在 Drive（或本機的 Drive 桌面版）建資料夾、丟檔案，回系統按一次認領，
+ * 一個資料夾變成一支素材。這是 2026-10-01 改成的主路徑 —— 它取代的是「在素材資料庫
+ * 一支一支人工建檔」，不是多出來的一步。
+ *
+ * ⚠️ **這支不受 drive.file 限制**：Picker 是以使用者本人的 Drive 身分在瀏覽，
+ *    所以他自己建的、別人建的、本機同步上去的全都看得到。授權是在「他勾選那一刻」
+ *    才發生，勾了我們才拿得到那個資料夾。別把它跟後端的 files.list 混為一談，
+ *    後者只看得到這個 app 自己建的東西。
+ *
+ * 回傳空陣列＝使用者取消（不是錯誤）。
+ */
+export async function openMultiFolderPicker(opts: PickerAuth & {
+  /**
+   * 從哪一層開始看（＝這個 IP 的毛片資料夾）。
+   *
+   * ⚠️ **不給的話 Google 會列出整個雲端硬碟的所有資料夾，而且是平面清單** ——
+   *    車出、設計發包、東京畫面、2辦公室 全部混在一起，根本挑不到。2026-10-01 實測踩過。
+   *    給了之後視窗一開就停在那家 IP 底下，點進批次夾就是這次拍攝的素材夾。
+   */
+  parentFolderId?: string;
+  title?: string;
+}): Promise<PickedFolder[]> {
+  await loadPicker();
+  const picker = window.google?.picker;
+  if (!picker) throw new Error('Picker 尚未就緒，請重新整理後再試');
+
+  return new Promise<PickedFolder[]>((resolve, reject) => {
+    try {
+      // ⚠️ 有起點時要用 ViewId.DOCS 再過濾成資料夾，不能用 ViewId.FOLDERS：
+      //    後者是「所有資料夾」的平面清單，setParent 對它沒有意義。
+      const view = opts.parentFolderId
+        ? new picker.DocsView(picker.ViewId.DOCS)
+            .setParent(opts.parentFolderId)
+            .setIncludeFolders(true)
+            .setSelectFolderEnabled(true)
+            .setMimeTypes('application/vnd.google-apps.folder')
+        : new picker.DocsView(picker.ViewId.FOLDERS)
+            .setIncludeFolders(true)
+            .setSelectFolderEnabled(true)
+            .setMimeTypes('application/vnd.google-apps.folder');
+
+      buildBase(picker, opts, opts.title || '勾選這次拍攝的素材資料夾（可多選）')
+        .addView(view)
+        .enableFeature(picker.Feature.MULTISELECT_ENABLED)
+        .setCallback((data: any) => {
+          if (data.action === picker.Action.PICKED) {
+            resolve((data.docs || []).map((d: any) => ({ id: d.id, name: d.name })));
+          } else if (data.action === picker.Action.CANCEL) {
+            resolve([]);
+          }
+        })
+        .build()
+        .setVisible(true);
+    } catch (e: any) {
+      reject(new Error(e?.message || '開啟資料夾選擇視窗失敗'));
+    }
+  });
+}
+
 export function isPickerConfigured(): boolean {
   return Boolean(import.meta.env.VITE_GOOGLE_PICKER_API_KEY);
 }
