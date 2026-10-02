@@ -46,6 +46,8 @@ export default function ClaimFoldersModal({
    *    （上傳毛片那條路本來就是逐組給 brief，兩邊要一致。）
    */
   const [briefs, setBriefs] = useState<Record<string, string>>({});
+  /** 逐支的分類，key 是資料夾 id。沒設過的沿用上面那個預設值。 */
+  const [cats, setCats] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ created: any[]; skipped: any[]; failed: any[] } | null>(null);
 
@@ -87,6 +89,12 @@ export default function ClaimFoldersModal({
       if (folders.length === 0) return;
       setPicked(prev => {
         const fresh = folders.filter(f => !prev.some(o => o.id === f.id));
+        // 新勾的先帶上目前選的預設分類，之後可以逐支改
+        if (fresh.length) {
+          // ⚠️ 只在預設**有值**時才寫入。寫空字串進去的話，`cats[f.id] ?? category`
+          //    會拿到 ''（?? 只接 null/undefined），之後再選預設就套不到已經勾進來的那幾支。
+          if (category) setCats(c => { const n = { ...c }; fresh.forEach(f => { if (!n[f.id]) n[f.id] = category; }); return n; });
+        }
         return [...prev, ...fresh];
       });
     } catch (e: any) {
@@ -104,7 +112,12 @@ export default function ClaimFoldersModal({
         vendorId, shotAt, category,
         editorId: editorChoice === INTERNAL ? '' : editorChoice,
         internalEdit: editorChoice === INTERNAL,
-        folders: picked.map(f => ({ ...f, brief: briefs[f.id] || '' })),
+        folders: picked.map(f => ({
+          ...f,
+          brief: briefs[f.id] || '',
+          // 逐支分類；沒動過的就是上面選的預設
+          category: cats[f.id] ?? category,
+        })),
       });
       setDone(data);
       if (data.failed?.length) {
@@ -193,14 +206,25 @@ export default function ClaimFoldersModal({
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">分類（這批共用）</label>
-                  <input
-                    list={ASSET_CATEGORY_DATALIST_ID}
-                    value={category}
-                    onChange={e => setCategory(e.target.value)}
-                    placeholder="輸入或選擇"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-base"
-                  />
+                  {/* 2026-10-02 老闆：「分類照理來說應該是分別分類」。
+                      這裡只剩「新勾進來的預設值」，真正的分類在下面逐支調。
+                      ⚠️ 一次可以勾 30 支，全部逐支從零選太慢 —— 所以留一個預設，
+                         下面再逐支改。兩者都要，少一個都難用。 */}
+                  <label className="block text-sm font-medium text-slate-700 mb-1">分類（新勾進來的預設）</label>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {ASSET_CATEGORIES.map(c => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setCategory(c)}
+                        className={category === c
+                          ? 'px-3 py-2 rounded-lg text-sm font-bold bg-blue-600 text-white'
+                          : 'px-3 py-2 rounded-lg text-sm bg-white border border-slate-300 text-slate-600 hover:border-blue-400'}
+                      >
+                        {c}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">剪輯師（這批共用）</label>
@@ -256,12 +280,27 @@ export default function ClaimFoldersModal({
                           // 連同需求一起清掉 —— 不清的話等一下再勾回同一個資料夾，
                           // 上次打的字會自己冒出來，看起來像系統亂填。
                           setBriefs(prev => { const n = { ...prev }; delete n[f.id]; return n; });
+                          setCats(prev => { const n = { ...prev }; delete n[f.id]; return n; });
                         }}
                         className="text-slate-400 hover:text-red-500 shrink-0"
                         aria-label="移除"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
+                    </div>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {ASSET_CATEGORIES.map(c => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setCats(prev => ({ ...prev, [f.id]: c }))}
+                          className={(cats[f.id] ?? category) === c
+                            ? 'px-2.5 py-1 rounded-full text-[13px] font-bold bg-blue-600 text-white'
+                            : 'px-2.5 py-1 rounded-full text-[13px] bg-white border border-slate-300 text-slate-500 hover:border-blue-400'}
+                        >
+                          {c}
+                        </button>
+                      ))}
                     </div>
                     <textarea
                       value={briefs[f.id] || ''}

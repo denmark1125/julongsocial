@@ -765,7 +765,8 @@ app.post("/api/drive/claim-folders", async (req, res) => {
           vendorName,
           editorId: String(editorId || '').trim(),
           internalEdit: Boolean(internalEdit),
-          category: String(category || '').trim() || '未分類',
+          // 逐支分類；前端沒帶就退回這批的預設值（舊版前端只送批次層的 category）
+          category: String(f?.category || category || '').trim() || '未分類',
           // 整支片的剪輯方向。逐支給（跟上傳毛片那條路一致），剪輯師的卡片上直接看得到。
           // ⚠️ 空字串也要寫進去，不要用 undefined —— Firestore 會整個略過該欄位，
           //    之後在畫面上改成空白時會變成「改不掉」。
