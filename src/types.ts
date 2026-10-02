@@ -47,7 +47,7 @@ export type DurationTier = 'under60' | 'over60';
 
 export const EDITOR_FEE_BY_TIER: Record<DurationTier, number> = {
   under60: 750,   // 60 秒以下
-  over60: 950,    // 60 秒（含）以上
+  over60: 900,    // 60 秒（含）以上。2026-09-11～10-03 這裡誤寫成 950，未付款的單已用 scripts/fix-fee-950.mjs 更正
 };
 
 export const DURATION_TIER_LABEL: Record<DurationTier, string> = {

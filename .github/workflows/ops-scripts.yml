@@ -1,0 +1,35 @@
+# 維運腳本的雲端按鈕：在 GitHub 的機器上跑，不用在任何人的電腦上裝環境或放金鑰。
+# 用法：GitHub → Actions → 「維運腳本」→ Run workflow → 選腳本與模式。
+# 金鑰：repo Settings → Secrets → FIREBASE_SERVICE_ACCOUNT_KEY（跟 Vercel 上同一把）。
+name: 維運腳本
+
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: 要跑哪一支
+        type: choice
+        options:
+          - fix-fee-950
+      mode:
+        description: 預覽只讀；寫入會真的改正式資料
+        type: choice
+        default: preview
+        options:
+          - preview
+          - apply
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: 執行
+        env:
+          FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
+        run: node scripts/${{ inputs.script }}.mjs ${{ inputs.mode == 'apply' && '--apply' || '' }}
