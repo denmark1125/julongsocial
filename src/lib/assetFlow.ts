@@ -259,6 +259,11 @@ export function isFlowStale(
 
 export interface FlowDueInfo {
   scheduledAt: string;
+  /**
+   * 這個日期哪來的。'post'＝掛在貼文上（帶時分），'planned'＝同事在排片頁確認的上片日（只有日期）。
+   * ⚠️ 畫面要用它決定印不印時間：plannedAirDate 沒有時分，硬印會變成「10/06 00:00 要上」。
+   */
+  source: 'post' | 'planned';
   daysUntil: number;
   /** 發布日已到/已過，但這支還沒走到可排程 */
   overdue: boolean;
@@ -272,20 +277,34 @@ export interface FlowDueInfo {
  * 過去要等小編排程時才會發現，那時候已經來不及了。
  */
 export function getFlowDueInfo(
-  asset: Pick<Asset, 'id' | 'usedInPostId' | 'stage' | 'approved' | 'flowStage'>,
+  asset: Pick<Asset, 'id' | 'usedInPostId' | 'stage' | 'approved' | 'flowStage' | 'plannedAirDate'>,
   posts: Pick<Post, 'id' | 'scheduledAt' | 'status'>[],
   now: Date = new Date()
 ): FlowDueInfo | null {
-  if (!asset.usedInPostId) return null;
-  const post = posts.find(p => p.id === asset.usedInPostId);
-  if (!post?.scheduledAt) return null;
-  const due = new Date(post.scheduledAt);
+  // 來源一：已經掛在有排程日期的貼文上。
+  // 來源二：同事在排片頁確認的「預計上片日」。
+  //
+  // ⚠️ 沒有來源二的話，這支函式對**待剪素材永遠回 null** —— 待剪片根本掛不上貼文
+  //    （PostManagement 的素材下拉硬篩 stage==='finished'），所以 sortFlowColumn 裡
+  //    「逾期 +5000／即將到期 +2000」對待剪片恆為 0，整個排序實際上只是在比誰卡最久。
+  //    這是 2026-09-17 查出來的老問題，排片功能就是為了補上這個來源。
+  const found = (() => {
+    if (asset.usedInPostId) {
+      const post = posts.find(p => p.id === asset.usedInPostId);
+      if (post?.scheduledAt) return { scheduledAt: post.scheduledAt, source: 'post' as const };
+    }
+    return asset.plannedAirDate ? { scheduledAt: asset.plannedAirDate, source: 'planned' as const } : null;
+  })();
+  if (!found) return null;
+  const { scheduledAt, source } = found;
+  const due = new Date(scheduledAt);
   if (Number.isNaN(due.getTime())) return null;
 
   const daysUntil = differenceInCalendarDays(due, now);
   const settled = deriveFlowStage(asset) === 'ready';
   return {
-    scheduledAt: post.scheduledAt,
+    scheduledAt,
+    source,
     daysUntil,
     overdue: !settled && daysUntil < 0,
     imminent: !settled && daysUntil >= 0 && daysUntil <= 3,

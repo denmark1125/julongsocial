@@ -287,9 +287,9 @@ service cloud.firestore {
              (!('editingBrief' in data) || data.editingBrief is string) &&
              (!('clipNotes' in data) || data.clipNotes is list) &&
              (!('internalEdit' in data) || data.internalEdit is bool) &&
-             // 建了檔但影片還在上傳。剪輯師清不掉它（不在 isEditorAssetUpdate 白名單），
-             // 所以「檔案就緒」一定是公司內部的人按的。
-             (!('awaitingFiles' in data) || data.awaitingFiles is bool);
+             // 同事在排片頁確認的上片日。不在 isEditorAssetUpdate 白名單＝剪輯師天生改不了，
+             // 所以「先剪哪一支」的順序只有公司這邊決定得了。
+             (!('plannedAirDate' in data) || data.plannedAirDate is string);
     }
 
     function isValidDismissedHabit(data) {

@@ -14,9 +14,10 @@ import {
   FLOW_OWNER_LABEL,
 } from '../types';
 import { useLiveCollection } from '../lib/liveData';
+import AirPlanModal from './AirPlanModal';
 import { buildFlowUpdate, getClientApprovalTarget, getFlowDaysStuck, getFlowDueInfo, isFlowStale, sortFlowColumn } from '../lib/assetFlow';
 import { getAssetEditorOwner } from '../lib/editorBilling';
-import { Scissors, UserCheck, PenLine, Clock, Flame, CalendarClock, ThumbsUp } from 'lucide-react';
+import { Scissors, UserCheck, PenLine, Clock, Flame, CalendarClock, ThumbsUp, CalendarDays } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -60,6 +61,7 @@ export default function ProductionFlowBoard({
   const [vendorFilter, setVendorFilter] = useState<string>('all');
   const [editorFilter, setEditorFilter] = useState<string>('all');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [isPlanning, setIsPlanning] = useState(false);
 
   const vendorMap = new Map(vendors.map(v => [v.id, v]));
 
@@ -143,6 +145,14 @@ export default function ProductionFlowBoard({
             每支片現在球在誰手上、卡了幾天。紅色代表停太久，不用再回頭一個個問。
           </p>
         </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* 一週一次的儀式，一顆按鈕就夠 —— 不新增分頁（那要動 App.tsx 與 Layout.tsx 兩處） */}
+          <button
+            onClick={() => setIsPlanning(true)}
+            className="bg-[#5A5A40] text-white px-4 py-2 rounded-2xl shadow-sm font-bold flex items-center gap-2 hover:bg-[#4a4a35] transition-colors whitespace-nowrap"
+          >
+            <CalendarDays size={16} /> 排接下來要上的片
+          </button>
         {stuckCount > 0 && (
           <div className="bg-white px-4 py-2 rounded-2xl border border-red-200 shadow-sm flex items-center gap-3">
             <div className="bg-red-50 p-2 rounded-lg text-red-600"><Clock size={16} /></div>
@@ -152,6 +162,7 @@ export default function ProductionFlowBoard({
             </div>
           </div>
         )}
+        </div>
       </div>
 
       {/* 依 IP 或依剪輯師篩選：過去的排序清單是一份全公司共用的順序，
@@ -252,12 +263,6 @@ export default function ProductionFlowBoard({
                           <span className="inline-flex items-center gap-1 text-[9.5px] text-gray-400">
                             {OWNER_ICON[col.stage]} {editorName(ownerKey(a))}
                           </span>
-                          {/* 影片還沒丟進雲端資料夾。不標的話看板上看起來就是一支可以開剪的片 */}
-                          {a.awaitingFiles && (
-                            <span className="inline-flex items-center gap-0.5 text-[9.5px] font-bold text-amber-600 whitespace-nowrap">
-                              等待檔案
-                            </span>
-                          )}
                           <span className={stale
                             ? 'inline-flex items-center gap-0.5 text-[9.5px] font-bold text-red-600'
                             : 'inline-flex items-center gap-0.5 text-[9.5px] text-gray-400'}
@@ -307,6 +312,7 @@ export default function ProductionFlowBoard({
         })}
       </div>
 
+      {isPlanning && <AirPlanModal onClose={() => setIsPlanning(false)} />}
     </div>
   );
 }

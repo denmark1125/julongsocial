@@ -31,7 +31,7 @@ import { PASSWORD_SUFFIX, ADMIN_USERNAME, ADMIN_EMAIL } from './constants';
 
 // 剪輯師（外包，權限最收斂）唯一能進的兩頁。新增剪輯師分頁時這裡跟 TAB_ROLES、
 // Layout.tsx 的 menuItems 三個地方都要一起加，少一個就會被強制導回工作台。
-const EDITOR_TABS = ['editorQueue', 'editorSchedule', 'editorInvoice'];
+const EDITOR_TABS = ['editorQueue', 'editorAssets', 'editorSchedule', 'editorInvoice'];
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -227,6 +227,7 @@ export default function App() {
     users: ['engineer', 'manager'],
     version: ['engineer'],
     editorQueue: ['editor'],
+    editorAssets: ['editor'],
     editorSchedule: ['editor'],
     editorInvoice: ['editor'],
   };
@@ -243,12 +244,27 @@ export default function App() {
             onOpenVendorQueue={(vendorId) => { setEditorJumpVendorId(vendorId); setActiveTab('editorQueue'); }}
           />
         );
+        // 「我的所有片」＝原本的分區清單（待剪／待上傳／已完成、批次上傳）。
+        // ⚠️ 2026-10-01 拆成獨立分頁：以前兩個畫面擠在同一頁互相切換，
+        //    要回「排好的順序」還得再切一次，使用者實測說不方便。
+        case 'editorAssets': return (
+          <EditorAssetQueue
+            userProfile={userProfile}
+            mode="list"
+            jumpToVendorId={editorJumpVendorId}
+            onJumpConsumed={() => setEditorJumpVendorId(null)}
+          />
+        );
         case 'editorQueue':
         default: return (
           <EditorAssetQueue
             userProfile={userProfile}
-            jumpToVendorId={editorJumpVendorId}
-            onJumpConsumed={() => setEditorJumpVendorId(null)}
+            mode="queue"
+            onOpenAllAssets={(vendorId) => {
+              // 從「沒片」那一列點過來時會帶 IP，那一頁要直接展開它，不要再叫人自己找
+              if (vendorId) setEditorJumpVendorId(vendorId);
+              setActiveTab('editorAssets');
+            }}
           />
         );
       }
