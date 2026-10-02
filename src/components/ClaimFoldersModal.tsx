@@ -38,6 +38,14 @@ export default function ClaimFoldersModal({
   const [category, setCategory] = useState('');
   const [editorChoice, setEditorChoice] = useState('');
   const [picked, setPicked] = useState<{ id: string; name: string }[]>([]);
+  /**
+   * 每一支的「剪輯需求（整支片的方向）」，key 是資料夾 id。
+   *
+   * ⚠️ 逐支給，不是整批共用。分類與剪輯師一批多半相同，但「這支要剪成什麼」
+   *    每支都不一樣 —— 共用一個欄位等於沒有這個欄位。
+   *    （上傳毛片那條路本來就是逐組給 brief，兩邊要一致。）
+   */
+  const [briefs, setBriefs] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ created: any[]; skipped: any[]; failed: any[] } | null>(null);
 
@@ -96,7 +104,7 @@ export default function ClaimFoldersModal({
         vendorId, shotAt, category,
         editorId: editorChoice === INTERNAL ? '' : editorChoice,
         internalEdit: editorChoice === INTERNAL,
-        folders: picked,
+        folders: picked.map(f => ({ ...f, brief: briefs[f.id] || '' })),
       });
       setDone(data);
       if (data.failed?.length) {
@@ -238,19 +246,36 @@ export default function ClaimFoldersModal({
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-slate-700">會建立這 {picked.length} 支素材：</p>
                   {picked.map(f => (
-                    <div key={f.id} className="flex items-center justify-between gap-3 bg-slate-50 rounded-lg px-3 py-2">
+                    <div key={f.id} className="bg-slate-50 rounded-lg px-3 py-2.5 space-y-2">
+                    <div className="flex items-center justify-between gap-3">
                       <span className="text-sm text-slate-800 break-all">{f.name}</span>
                       <button
                         type="button"
-                        onClick={() => setPicked(prev => prev.filter(x => x.id !== f.id))}
+                        onClick={() => {
+                          setPicked(prev => prev.filter(x => x.id !== f.id));
+                          // 連同需求一起清掉 —— 不清的話等一下再勾回同一個資料夾，
+                          // 上次打的字會自己冒出來，看起來像系統亂填。
+                          setBriefs(prev => { const n = { ...prev }; delete n[f.id]; return n; });
+                        }}
                         className="text-slate-400 hover:text-red-500 shrink-0"
                         aria-label="移除"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
+                    <textarea
+                      value={briefs[f.id] || ''}
+                      onChange={e => setBriefs(prev => ({ ...prev, [f.id]: e.target.value }))}
+                      rows={2}
+                      placeholder="剪輯需求（整支片的方向）── 可留空"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white resize-y"
+                    />
+                    </div>
                   ))}
-                  <p className="text-xs text-slate-500">資料夾名稱就是素材名稱，認領完可在素材卡改。</p>
+                  <p className="text-xs text-slate-500">
+                    資料夾名稱就是素材名稱，認領完可在素材卡改。
+                    剪輯需求會直接顯示在剪輯師的卡片上，之後也能再補。
+                  </p>
                 </div>
               )}
             </>

@@ -79,3 +79,43 @@
 .readability-surface .overflow-x-auto > button {
   flex-shrink: 0;
 }
+
+/* ───────────────────────────────────────────────────────────
+   Google Picker 在手機上的修正
+
+   ⚠️ 2026-10-02 正式站實測：同事用手機按「從雲端認領」是一片白畫面。
+      Picker 的對話框固定 1054×652，置中算法是 left=(innerWidth-1054)/2，
+      390px 的手機算出來是 **-332px** —— 框跑到畫面外，只剩遮罩看得見。
+
+   drivePicker.ts 已經用 setSize() 把尺寸夾進視窗，但 Google 對 setSize
+   有寬度下限（約 566），比下限更窄的手機它會忽略。所以這裡再硬壓一次。
+
+   這幾個 class 是 Picker 自己掛在 <body> 下的，不是我們的元件，
+   改名風險由 Google 決定 —— 真的被改名也只是退回原狀，不會壞掉別的東西。
+   ─────────────────────────────────────────────────────────── */
+@media (max-width: 720px) {
+  .picker-dialog {
+    width: 100vw !important;
+    height: 100% !important;
+    height: 100dvh !important;
+    left: 0 !important;
+    top: 0 !important;
+    min-width: 0 !important;
+    max-width: 100vw !important;
+    border-radius: 0 !important;
+    box-sizing: border-box !important;
+  }
+  .picker-dialog-content,
+  .picker-dialog-content > iframe,
+  .picker-dialog iframe {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100vw !important;
+  }
+  /* 遮罩本來就蓋滿，但它若有 inline 尺寸會跟著 1054 走 */
+  .picker-dialog-bg {
+    width: 100vw !important;
+    height: 100% !important;
+    height: 100dvh !important;
+  }
+}

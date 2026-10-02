@@ -766,6 +766,10 @@ app.post("/api/drive/claim-folders", async (req, res) => {
           editorId: String(editorId || '').trim(),
           internalEdit: Boolean(internalEdit),
           category: String(category || '').trim() || '未分類',
+          // 整支片的剪輯方向。逐支給（跟上傳毛片那條路一致），剪輯師的卡片上直接看得到。
+          // ⚠️ 空字串也要寫進去，不要用 undefined —— Firestore 會整個略過該欄位，
+          //    之後在畫面上改成空白時會變成「改不掉」。
+          editingBrief: String(f?.brief || '').trim(),
           type: 'video',
           stage: 'raw',
           filmingDate: shotAt || now.slice(0, 10),

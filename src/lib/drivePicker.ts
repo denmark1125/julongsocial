@@ -91,11 +91,36 @@ interface PickerAuth {
   appId: string;
 }
 
+/**
+ * Picker 預設是**固定 1054 × 652 的對話框**，而且它只用
+ * `left = (window.innerWidth - 1054) / 2` 把自己置中 —— 沒有任何 RWD。
+ *
+ * ⚠️ 2026-10-02 正式站實測（同事的手機按「從雲端認領」一直是白畫面）：
+ *    桌機 2048px → left: 495px，正常；
+ *    手機 390px  → left: **-332px**，整個框飛到畫面左外側，
+ *    留在螢幕上的只剩那層蓋滿全畫面的灰白遮罩 `.picker-dialog-bg`。
+ *    看起來就是「白畫面」，其實視窗有開，只是在看不到的地方。
+ *
+ * 所以每個 Picker 都要自己算尺寸。Google 對 setSize 有下限（寬約 566），
+ * 小於下限時它會忽略 —— 所以另外在 index.css 針對窄螢幕硬改 `.picker-dialog`
+ * 的寬高與位置，兩道一起才真的修得掉。
+ */
+function pickerSize(): { width: number; height: number } {
+  const vw = window.innerWidth || 1054;
+  const vh = window.innerHeight || 652;
+  return {
+    width: Math.max(320, Math.min(1051, vw - 16)),
+    height: Math.max(320, Math.min(650, vh - 16)),
+  };
+}
+
 function buildBase(picker: any, auth: PickerAuth, title?: string) {
+  const { width, height } = pickerSize();
   let b = new picker.PickerBuilder()
     .setOAuthToken(auth.accessToken)
     .setDeveloperKey(auth.apiKey)
-    .setAppId(auth.appId);
+    .setAppId(auth.appId)
+    .setSize(width, height);
   if (title) b = b.setTitle(title);
   return b;
 }
