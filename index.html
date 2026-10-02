@@ -3,6 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      ⚠️ 這一行是給 Google Picker 的，不要拿掉。
+
+      Picker 的 API 金鑰在 GCP 設了「HTTP 參照網址」限制，而 Google 對**沒有帶 referrer**
+      的請求一律回 `Requests from referer <empty> are blocked.`，前端看到的就是
+      「The API developer key is invalid」。
+
+      2026-10-02 同事的 iPhone 把系統「加到主畫面」當 App 用（standalone PWA），
+      那個情境下 WebKit 不送 referrer → 認領一按就是錯誤頁；桌機瀏覽器會送，所以一直沒人發現。
+      實測：帶 Referer 打同一支 API，金鑰通過；不帶，直接被擋。
+
+      content="origin" ＝ 永遠只送來源網域（不送路徑），足夠通過限制，也不洩漏使用者在看哪一頁。
+    -->
+    <meta name="referrer" content="origin" />
     <title>Julong 社群排程系統</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/favicon.svg" />
