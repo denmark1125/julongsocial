@@ -116,9 +116,24 @@ function pickerSize(): { width: number; height: number } {
 
 function buildBase(picker: any, auth: PickerAuth, title?: string) {
   const { width, height } = pickerSize();
+  // ⚠️ **刻意不呼叫 `setDeveloperKey()`。別「順手補回來」。**
+  //
+  // 那把金鑰在 GCP 設了「HTTP 參照網址」限制，而 Google 對**沒帶 referrer 的請求一律擋**：
+  //     帶 Referer: julongsocial.vercel.app → 金鑰通過
+  //     不帶 referrer                       → Requests from referer <empty> are blocked.
+  //
+  // 同事把系統「加到主畫面」當 App 用（standalone PWA），iOS 在那個模式下不送 referrer，
+  // 於是按認領就是「The API developer key is invalid」。桌機瀏覽器會送，所以一直沒人踩到。
+  // 先試過 `<meta name="referrer" content="origin">`，WebKit 在 standalone 下照樣不送，救不了。
+  //
+  // 2026-10-02 實測：**不帶 developerKey，Picker 照常開啟、資料夾全部列得出來。**
+  // 驗證身分的是 OAuth token，認 app 的是 appId，developerKey 在這裡只做配額歸屬，
+  // 功能上沒有它也行 —— 留著反而是一條必然炸在手機上的失敗路徑。
+  //
+  // `auth.apiKey` 仍然留在介面上：各畫面用 isPickerConfigured() 判斷「Drive 設定好了沒」，
+  // 那個用途不受影響。
   let b = new picker.PickerBuilder()
     .setOAuthToken(auth.accessToken)
-    .setDeveloperKey(auth.apiKey)
     .setAppId(auth.appId)
     .setSize(width, height);
   if (title) b = b.setTitle(title);
