@@ -458,7 +458,7 @@ export function AssetCard({
         {/* 2026-10-03 老闆：剪輯師要知道素材是誰上傳的，有問題才找得到對應窗口。舊素材沒有就不顯示。 */}
         {asset.createdByName && (
           <p className={`text-[13px] text-gray-500 mt-0.5 ${compact ? 'lg:text-[15px]' : ''}`}>
-            素材窗口：<span className="font-medium text-gray-700">{asset.createdByName}</span>
+            素材聯繫窗口：<span className="font-medium text-gray-700">{asset.createdByName}</span>
           </p>
         )}
         {/* 這支片的資訊，不是派工單 —— 措辭一律陳述，不要出現祈使句。

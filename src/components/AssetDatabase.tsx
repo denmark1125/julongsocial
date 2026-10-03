@@ -1288,7 +1288,11 @@ ${after}`)) return;
                       {asset.recognizedMonth ? `已交・${Number(asset.recognizedMonth.slice(5))}月` : '未認列月份'}
                     </button>
                   )}
-                  <span className="shrink-0 whitespace-nowrap text-[13px] text-gray-400">{new Date(asset.createdAt).toLocaleDateString()}</span>
+                  {/* 原本這裡印建檔日，但沒寫是什麼日期、又跟右上角的拍攝日擺在一起，老闆看不懂。
+                      2026-10-03 改成建檔人（跟剪輯師看到的同一個名字）。舊素材沒有記名字就不顯示。 */}
+                  {asset.createdByName && (
+                    <span className="shrink-0 whitespace-nowrap text-[13px] text-gray-500">素材聯繫窗口：{asset.createdByName}</span>
+                  )}
                   {asset.voidedAt && (
                     <span className="text-[13px] font-bold text-red-500">已作廢{asset.voidReason ? `・${asset.voidReason}` : ''}</span>
                   )}
