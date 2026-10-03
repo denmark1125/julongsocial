@@ -610,6 +610,16 @@ export interface Asset {
    * ⚠️ 剪輯師改不了它（不在 firestore.rules 的 isEditorAssetUpdate 白名單）。
    */
   plannedAirDate?: string;
+  /**
+   * 同事指定的「預計交片日」（YYYY-MM-DD）。有值時取代「上片日往前推 7 個工作天」，
+   * 並參與剪輯師清單的排序（急件仍最優先）。剪輯師改不了（不在 isEditorAssetUpdate 白名單）。
+   */
+  editDueDate?: string;
+  /**
+   * 建檔人名字快照：剪輯師讀不到 users 文件，有問題要知道找哪個窗口。
+   * 2026-10-03 之後建的素材才有，舊素材不補。
+   */
+  createdByName?: string;
   type: AssetType;
   stage: 'raw' | 'finished';
   filmingDate?: string;

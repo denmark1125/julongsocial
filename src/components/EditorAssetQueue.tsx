@@ -17,7 +17,9 @@ import {
 } from '../lib/assetFlow';
 import { visibleVendors } from '../lib/vendorStatus';
 import EditingBrief from './EditingBrief';
-import { buildEditorQueue, EditorQueueRow } from '../lib/editorQueue';
+import {
+  buildEditorQueue, customDeadline, deadlineStatus, deliveryDeadline, EditorQueueRow, formatDeadline,
+} from '../lib/editorQueue';
 import {
   buildHorizonDemands, buildSupplyPlan, describeSupply, SUPPLY_HORIZON_DAYS,
 } from '../lib/materialSupply';
@@ -309,13 +311,9 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
    */
   onOpenLibrary?: () => void;
 }) {
-  const left = row.date ? differenceInCalendarDays(row.date, new Date()) : null;
-  const overdue = left !== null && left < 0;
-  /** 不要讓他自己算還剩幾天 */
-  const countdown = left === null ? ''
-    : overdue ? `　已逾期 ${Math.abs(left)} 天`
-    : left === 0 ? '　就是今天'
-    : `　剩 ${left} 天`;
+  // 剪輯師只看交片期限，不看上片日（見 editorQueue.ts 的 EDIT_LEAD_WORKDAYS）
+  const status = row.deadline ? deadlineStatus(row.deadline, row.asset?.createdAt) : null;
+  const toneClass = status?.tone === 'late' ? 'text-red-600' : status?.tone === 'soon' ? 'text-amber-600' : 'text-[#5A5A40]';
 
   return (
     // 電腦版：左邊一欄放「哪天要上」，右邊放素材卡，一支片一橫列。
@@ -329,11 +327,9 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
       <div className={row.kind === 'to_edit'
         ? 'flex items-baseline gap-2 flex-wrap px-4 pt-3 lg:flex-col lg:items-start lg:justify-center lg:gap-0.5 lg:w-40 lg:shrink-0 lg:py-3 lg:border-r lg:border-black/5'
         : 'flex items-baseline gap-2 flex-wrap lg:w-40 lg:shrink-0 lg:flex-col lg:items-start lg:gap-0.5'}>
-        {row.date ? (
-          <span className={overdue
-            ? 'text-[13px] lg:text-[15px] font-bold text-red-600 whitespace-nowrap'
-            : 'text-[13px] lg:text-[15px] font-bold text-[#5A5A40] whitespace-nowrap'}>
-            {`${format(row.date, 'MM/dd')}（${'日一二三四五六'[row.date.getDay()]}）要上`}
+        {row.deadline ? (
+          <span className={`text-[13px] lg:text-[15px] font-bold whitespace-nowrap ${status?.tone === 'late' ? 'text-red-600' : 'text-[#5A5A40]'}`}>
+            {formatDeadline(row.deadline)}
           </span>
         ) : (
           // 急件但沒配到日子。老闆：「急件，現在就要」很好笑，橘色「急件」加一個火焰就好。
@@ -341,13 +337,10 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
             <Flame size={14} /> 急件
           </span>
         )}
-        {row.date && (
-          <span className={overdue
-            ? 'text-[13px] lg:text-sm font-bold text-red-600 whitespace-nowrap'
-            : left !== null && left <= 3
-              ? 'text-[13px] lg:text-sm font-bold text-amber-600 whitespace-nowrap'
-              : 'text-[13px] lg:text-sm text-gray-400 lg:text-gray-500 whitespace-nowrap'}>
-            {countdown.trim()}
+        {status && (
+          <span className={`text-[13px] lg:text-sm whitespace-nowrap ${status.tone === 'calm' ? 'text-gray-500' : `font-bold ${toneClass}`}`}>
+            {status.text}
+            {row.deadlineSource === 'custom' && <span className="ml-1.5 font-normal text-gray-500">同事指定</span>}
           </span>
         )}
         {row.kind !== 'to_edit' && <span className="text-[13px] lg:text-[15px] text-gray-500">{vendorName}</span>}
@@ -407,6 +400,11 @@ export function AssetCard({
   const due = getFlowDueInfo(asset, posts);
   /** 電腦版精簡卡排成「資訊在左、按鈕在右」一橫列 */
   const rowOnDesktop = compact && !stacked;
+  const flowStage = deriveFlowStage(asset);
+  const cardDeadline = flowStage === 'to_edit' || flowStage === 'revising'
+    ? customDeadline(asset) ?? (due ? deliveryDeadline(parseISO(due.scheduledAt)) : null)
+    : null;
+  const cardDeadlineStatus = cardDeadline ? deadlineStatus(cardDeadline, asset.createdAt) : null;
   const days = getFlowDaysStuck(asset);
   const stale = isFlowStale(asset);
 
@@ -445,6 +443,12 @@ export function AssetCard({
         <p className={compact
           ? 'text-lg font-bold text-[#1a1a1a] mt-0.5 break-words [text-wrap:balance]'
           : 'text-base text-gray-600 truncate mt-0.5'}>{asset.title}</p>
+        {/* 2026-10-03 老闆：剪輯師要知道素材是誰上傳的，有問題才找得到對應窗口。舊素材沒有就不顯示。 */}
+        {asset.createdByName && (
+          <p className={`text-[13px] text-gray-500 mt-0.5 ${compact ? 'lg:text-[15px]' : ''}`}>
+            素材窗口：<span className="font-medium text-gray-700">{asset.createdByName}</span>
+          </p>
+        )}
         {/* 這支片的資訊，不是派工單 —— 措辭一律陳述，不要出現祈使句。
             沒填的舊素材整塊不渲染，卡片維持原本的樣子。 */}
         <EditingBrief brief={asset.editingBrief} clipNotes={asset.clipNotes} desktopLarge={compact} />
@@ -469,21 +473,20 @@ export function AssetCard({
             要換行就整個標籤換下一行。 */}
         {!compact && (
         <div className="flex items-center gap-x-3 gap-y-1 mt-1 flex-wrap">
-          {due && (
+          {/* 剪輯師只看交片期限，不看上片日（見 editorQueue.ts 的 EDIT_LEAD_WORKDAYS）。
+              交出去之後期限就沒意義了，只在待剪／業主要改時顯示。 */}
+          {cardDeadline && cardDeadlineStatus && (
             <span
               className={
-                due.overdue
+                cardDeadlineStatus.tone === 'late'
                   ? 'inline-flex items-center gap-1 text-[13px] font-bold text-red-600 whitespace-nowrap'
-                  : due.imminent
+                  : cardDeadlineStatus.tone === 'soon'
                     ? 'inline-flex items-center gap-1 text-[13px] font-bold text-amber-600 whitespace-nowrap'
                     : 'inline-flex items-center gap-1 text-[13px] text-gray-500 whitespace-nowrap'
               }
             >
               <CalendarClock size={10} />
-              {format(parseISO(due.scheduledAt), 'MM/dd HH:mm')} 要上
-              {due.overdue
-                ? `（已逾期 ${Math.abs(due.daysUntil)} 天）`
-                : due.imminent ? `（剩 ${due.daysUntil} 天）` : ''}
+              {formatDeadline(cardDeadline)}（{cardDeadlineStatus.text}）
             </span>
           )}
           <span className={stale

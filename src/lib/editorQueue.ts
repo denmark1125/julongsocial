@@ -1,5 +1,57 @@
+import { differenceInCalendarDays, format, parseISO, startOfDay, subBusinessDays } from 'date-fns';
 import { Asset } from '../types';
 import { DemandItem } from './materialSupply';
+
+/**
+ * 交片後要留幾個工作天走完「業主審稿 → 修改 → 上傳雲端」。
+ *
+ * ⚠️ 2026-10-03 老闆：清單原本寫「10/10 要上，剩 7 天」，剪輯師照上片日剪一定來不及，
+ *    事後還會說「是你寫 7 天」。所以剪輯師畫面**只顯示交片期限，不顯示上片日**。
+ * 工作天＝跳過週六、日。國定假日沒有排除（date-fns 不知道台灣的假日），遇到連假要靠同事指定交片日。
+ */
+export const EDIT_LEAD_WORKDAYS = 7;
+
+/** 上片日往前推 EDIT_LEAD_WORKDAYS 個工作天＝交片期限 */
+export function deliveryDeadline(airDate: Date): Date {
+  return subBusinessDays(startOfDay(airDate), EDIT_LEAD_WORKDAYS);
+}
+
+export type DeadlineTone = 'calm' | 'soon' | 'late';
+
+/**
+ * 交片期限的倒數文字與顏色。倒數用日曆天（「剩 3 天」＝3 天後），比工作天直觀。
+ *
+ * 「盡快」：毛片建檔時期限就已經過了（例如 10/06 要上、10/02 才進毛片）。
+ * 這時寫「已超過 N 天」對剪輯師不公平——不是他拖，是料晚到。
+ */
+export function deadlineStatus(
+  deadline: Date,
+  createdAt: string | undefined,
+  now: Date = new Date()
+): { text: string; tone: DeadlineTone } {
+  const left = differenceInCalendarDays(deadline, now);
+  if (left < 0) {
+    const created = createdAt ? parseISO(createdAt) : null;
+    if (created && !Number.isNaN(created.getTime()) && differenceInCalendarDays(deadline, created) < 0) {
+      return { text: '盡快', tone: 'soon' };
+    }
+    return { text: `已超過 ${Math.abs(left)} 天`, tone: 'late' };
+  }
+  if (left === 0) return { text: '今天', tone: 'soon' };
+  return { text: `剩 ${left} 天`, tone: left <= 3 ? 'soon' : 'calm' };
+}
+
+/** 「10/01（四）前交片」 */
+export function formatDeadline(deadline: Date): string {
+  return `${format(deadline, 'MM/dd')}（${'日一二三四五六'[deadline.getDay()]}）前交片`;
+}
+
+/** 同事指定的交片日（YYYY-MM-DD）。格式不對就當沒填，不要讓一筆壞資料把整份清單弄壞 */
+export function customDeadline(asset: Pick<Asset, 'editDueDate'> | undefined): Date | null {
+  if (!asset?.editDueDate) return null;
+  const d = parseISO(asset.editDueDate);
+  return Number.isNaN(d.getTime()) ? null : startOfDay(d);
+}
 
 /**
  * 剪輯師那條「現在該剪哪一支」的清單。
@@ -36,8 +88,12 @@ export type EditorQueueKind =
 
 export interface EditorQueueRow {
   key: string;
-  /** 要上片的那一天。急件但沒配到任何一天時為 null */
+  /** 要上片的那一天。急件但沒配到任何一天時為 null。⚠️ 剪輯師畫面不顯示它，只顯示 deadline */
   date: Date | null;
+  /** 交片期限：同事指定的交片日，沒有就是上片日往前推 7 個工作天。急件沒配到日子時為 null */
+  deadline: Date | null;
+  /** 期限從哪來：'custom'＝同事指定，'air'＝由上片日推算 */
+  deadlineSource?: 'custom' | 'air';
   vendorId: string;
   kind: EditorQueueKind;
   asset?: Asset;
@@ -75,7 +131,20 @@ export interface EditorQueue {
  */
 function rawOrder(a: Asset, b: Asset): number {
   if (!!a.isUrgent !== !!b.isUrgent) return a.isUrgent ? -1 : 1;
+  // 同事指定了交片日的先配最近的日子，日子早的先
+  if (!!a.editDueDate !== !!b.editDueDate) return a.editDueDate ? -1 : 1;
+  if (a.editDueDate && b.editDueDate && a.editDueDate !== b.editDueDate) {
+    return a.editDueDate.localeCompare(b.editDueDate);
+  }
   return (a.createdAt || '').localeCompare(b.createdAt || '');
+}
+
+/** 這一列的期限：素材有指定交片日就用它，否則由上片日推算 */
+function rowDeadline(asset: Asset | undefined, airDate: Date | null): Pick<EditorQueueRow, 'deadline' | 'deadlineSource'> {
+  const custom = customDeadline(asset);
+  if (custom) return { deadline: custom, deadlineSource: 'custom' };
+  if (airDate) return { deadline: deliveryDeadline(airDate), deadlineSource: 'air' };
+  return { deadline: null };
 }
 
 /**
@@ -123,7 +192,7 @@ export function buildEditorQueue(opts: {
 
     // 已經掛好素材的那幾天：不進配對，但要留著讓人跟日曆對帳。
     mine.filter(d => d.attachedAssetId).forEach(d => settled.push({
-      key: d.id, date: d.date, vendorId, kind: 'settled', urgent: false,
+      key: d.id, date: d.date, deadline: null, vendorId, kind: 'settled', urgent: false,
     }));
 
     const dates = mine.filter(d => !d.attachedAssetId);
@@ -136,7 +205,7 @@ export function buildEditorQueue(opts: {
       const stock = delivered[i];
       if (stock) {
         stocked.push({
-          key: slot.id, date: slot.date, vendorId,
+          key: slot.id, date: slot.date, deadline: null, vendorId,
           kind: 'has_stock', asset: stock, urgent: false,
         });
         return;
@@ -144,11 +213,14 @@ export function buildEditorQueue(opts: {
       const raw = raws[i - delivered.length];
       if (raw) {
         rows.push({
-          key: slot.id, date: slot.date, vendorId,
+          key: slot.id, date: slot.date, ...rowDeadline(raw, slot.date), vendorId,
           kind: 'to_edit', asset: raw, urgent: Boolean(raw.isUrgent),
         });
       } else {
-        rows.push({ key: slot.id, date: slot.date, vendorId, kind: 'no_material', urgent: false });
+        rows.push({
+          key: slot.id, date: slot.date, ...rowDeadline(undefined, slot.date), vendorId,
+          kind: 'no_material', urgent: false,
+        });
       }
     });
 
@@ -158,14 +230,15 @@ export function buildEditorQueue(opts: {
     raws.slice(Math.max(0, dates.length - delivered.length)).forEach(a => unassigned.push(a));
   }
 
-  // 急件但沒配到任何一天：一樣要在最上面。標了急件卻看不到，等於這個標記沒有用。
+  // 急件、或同事指定了交片日，但沒配到任何一天：一樣要進主清單。
+  // 標了急件／指定了日子卻看不到，等於這個標記沒有用。
   for (let i = unassigned.length - 1; i >= 0; i--) {
     const a = unassigned[i];
-    if (!a.isUrgent) continue;
+    if (!a.isUrgent && !customDeadline(a)) continue;
     unassigned.splice(i, 1);
     rows.push({
-      key: `urgent_${a.id}`, date: null, vendorId: a.vendorId,
-      kind: 'to_edit', asset: a, urgent: true,
+      key: `${a.isUrgent ? 'urgent' : 'due'}_${a.id}`, date: null, ...rowDeadline(a, null), vendorId: a.vendorId,
+      kind: 'to_edit', asset: a, urgent: Boolean(a.isUrgent),
     });
   }
 
@@ -181,11 +254,15 @@ export function buildEditorQueue(opts: {
   stocked.sort(byDate);
   settled.sort(byDate);
 
+  // 主清單照「交片期限」排，不照上片日排：同事指定的交片日可能比推算的早或晚。
+  // 急件之間也照期限排；急件沒有期限的排在急件最前面（「現在就要」）。
   rows.sort((x, y) => {
     if (x.urgent !== y.urgent) return x.urgent ? -1 : 1;
-    if (!x.date) return -1;
-    if (!y.date) return 1;
-    if (x.date.getTime() !== y.date.getTime()) return x.date.getTime() - y.date.getTime();
+    if (!x.deadline || !y.deadline) {
+      if (!x.deadline && !y.deadline) return 0;
+      return !x.deadline ? -1 : 1;
+    }
+    if (x.deadline.getTime() !== y.deadline.getTime()) return x.deadline.getTime() - y.deadline.getTime();
     // 同一天好幾個 IP：有片可剪的排前面，剪輯師先看到能動手的
     if ((x.kind === 'to_edit') !== (y.kind === 'to_edit')) return x.kind === 'to_edit' ? -1 : 1;
     return 0;

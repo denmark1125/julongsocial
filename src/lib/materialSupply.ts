@@ -155,6 +155,11 @@ interface VendorPool {
  */
 function queueOrder(a: Asset, b: Asset): number {
   if (!!a.isUrgent !== !!b.isUrgent) return a.isUrgent ? -1 : 1;
+  // 同事指定了交片日的排在沒指定的前面，日子早的先（跟 editorQueue 的 rawOrder 一致）
+  if (!!a.editDueDate !== !!b.editDueDate) return a.editDueDate ? -1 : 1;
+  if (a.editDueDate && b.editDueDate && a.editDueDate !== b.editDueDate) {
+    return a.editDueDate.localeCompare(b.editDueDate);
+  }
   return (a.createdAt || '').localeCompare(b.createdAt || '');
 }
 
