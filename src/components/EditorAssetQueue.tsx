@@ -1295,7 +1295,7 @@ export default function EditorAssetQueue({
             {activeView === 'queue'
               // ⚠️ 陳述句，不要祈使句。「從上面開始剪」等於系統在派工，
               //    而派工是同事在做的事（見 feedback_editor_facing_wording）。
-              ? '照接下來要上片的日子排好，最近的在最上面。'
+              ? '照交片期限排好，最近的在最上面。'
               : '手上全部的片。剪完按「交片送審」；檔案傳上雲端後就按「上傳雲端」，不用等我們通知。'}
           </p>
         </div>
