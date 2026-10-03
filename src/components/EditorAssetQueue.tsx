@@ -82,7 +82,7 @@ function stepStates(asset: Asset): { convert: StepState; upload: StepState } {
 }
 
 function Step({
-  state, label, caption, icon, tone, busy, onClick,
+  state, label, caption, icon, tone, busy, onClick, compact,
 }: {
   state: StepState;
   label: string;
@@ -91,6 +91,8 @@ function Step({
   tone: 'primary' | 'cloud';
   busy: boolean;
   onClick?: () => void;
+  /** 排程清單裡的精簡版：電腦版收掉說明小字（那一頁上方已經講過流程），字放大 */
+  compact?: boolean;
 }) {
   const clickable = state === 'active' && !!onClick;
   const style =
@@ -108,11 +110,11 @@ function Step({
       disabled={!clickable || busy}
       className={`flex-1 min-w-0 rounded-xl px-3 py-2 text-left transition-all border ${style} disabled:opacity-100 ${clickable ? '' : 'cursor-default'}`}
     >
-      <span className="flex items-center gap-1.5 text-[13px] font-bold">
+      <span className={`flex items-center gap-1.5 text-[13px] font-bold ${compact ? 'lg:text-[15px] lg:justify-center lg:py-1' : ''}`}>
         {state === 'done' ? <CheckCircle2 size={12} /> : icon}
         {busy && clickable ? '處理中...' : label}
       </span>
-      <span className={state === 'active' ? 'block text-[9.5px] mt-0.5 text-white/70' : 'block text-[9.5px] mt-0.5 text-gray-500'}>
+      <span className={`${state === 'active' ? 'block text-[9.5px] mt-0.5 text-white/70' : 'block text-[9.5px] mt-0.5 text-gray-500'} ${compact ? 'lg:hidden' : ''}`}>
         {caption}
       </span>
     </button>
@@ -163,6 +165,7 @@ function FlowSteps({
         tone="primary"
         busy={busy}
         onClick={onAdvance}
+        compact={compact}
       />
       )}
       {!(compact && upload !== 'active') && (
@@ -174,6 +177,7 @@ function FlowSteps({
           tone="cloud"
           busy={busy}
           onClick={onUpload}
+          compact={compact}
         />
       )}
     </div>
@@ -209,6 +213,21 @@ function ClientBadge({ asset }: { asset: Asset }) {
 
 /** 清單預設攤開幾筆。剩下的收在「後面還有 N 筆」底下 */
 const QUEUE_PREVIEW = 8;
+/** 電腦版一支一橫列、每列矮很多，同樣一個畫面放得下更多 */
+const QUEUE_PREVIEW_DESKTOP = 12;
+
+/** 是否為電腦版寬度（跟 Tailwind 的 lg 斷點一致：1024px） */
+function useIsDesktop(): boolean {
+  const query = '(min-width: 1024px)';
+  const [match, setMatch] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const onChange = () => setMatch(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return match;
+}
 
 /**
  * 隊伍底下那幾個收合區的共用標頭。
@@ -243,12 +262,12 @@ function FoldHeader({ open, title, hint, count, unit = '支', tone = 'plain', ic
       {open ? <ChevronDown size={16} className={cloud ? 'shrink-0 text-sky-600' : 'shrink-0 text-gray-400'} />
             : <ChevronRight size={16} className={cloud ? 'shrink-0 text-sky-600' : 'shrink-0 text-gray-400'} />}
       <span className="min-w-0 flex-1">
-        <span className={`flex items-center gap-1.5 text-sm font-bold whitespace-nowrap ${cloud ? 'text-sky-900' : 'text-[#5A5A40]'}`}>
+        <span className={`flex items-center gap-1.5 text-sm lg:text-[15px] font-bold whitespace-nowrap ${cloud ? 'text-sky-900' : 'text-[#5A5A40]'}`}>
           {icon}{title}
         </span>
-        {hint && <span className={`block text-[13px] mt-0.5 ${cloud ? 'text-sky-800/80' : 'text-gray-500'}`}>{hint}</span>}
+        {hint && <span className={`block text-[13px] lg:text-sm mt-0.5 ${cloud ? 'text-sky-800/80' : 'text-gray-500'}`}>{hint}</span>}
       </span>
-      <span className={`shrink-0 text-[13px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${
+      <span className={`shrink-0 text-[13px] lg:text-sm font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${
         cloud ? 'bg-white/70 text-sky-900' : 'bg-black/5 text-gray-500'}`}>
         {count} {unit}
       </span>
@@ -265,10 +284,10 @@ function FoldDayRow({ row, vendorName }: {
 }) {
   return (
     <div className="px-4 py-2.5 flex items-baseline gap-2 flex-wrap">
-      <span className="text-[13px] font-bold text-gray-500 whitespace-nowrap">
+      <span className="text-[13px] lg:text-sm font-bold text-gray-500 whitespace-nowrap">
         {row.date ? `${format(row.date, 'MM/dd')}（${'日一二三四五六'[row.date.getDay()]}）要上` : ''}
       </span>
-      <span className="text-[13px] text-gray-500">{vendorName}</span>
+      <span className="text-[13px] lg:text-sm text-gray-500">{vendorName}</span>
     </div>
   );
 }
@@ -299,43 +318,46 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
     : `　剩 ${left} 天`;
 
   return (
+    // 電腦版：左邊一欄放「哪天要上」，右邊放素材卡，一支片一橫列。
+    // ⚠️ 2026-10-03 老闆：電腦版卡片只用到左邊三分之一，右邊整片空著，一個畫面只看得到兩三支。
+    //    手機版維持原樣（他說手機版很好用），所以全部用 lg: 前綴，不動手機的 class。
     <div className={row.kind === 'to_edit'
-      ? 'bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden'
-      : 'bg-white/60 rounded-2xl border border-dashed border-black/10 px-4 py-3'}>
+      ? 'bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden lg:flex lg:items-stretch'
+      : 'bg-white/60 rounded-2xl border border-dashed border-black/10 px-4 py-3 lg:flex lg:items-baseline lg:gap-4'}>
       {/* ⚠️ 有片可剪時這一行只講「哪天」—— IP 與片名都在底下的素材卡上，
           兩邊都印會變成同一張卡把同一件事講兩次。 */}
       <div className={row.kind === 'to_edit'
-        ? 'flex items-baseline gap-2 flex-wrap px-4 pt-3'
-        : 'flex items-baseline gap-2 flex-wrap'}>
+        ? 'flex items-baseline gap-2 flex-wrap px-4 pt-3 lg:flex-col lg:items-start lg:justify-center lg:gap-0.5 lg:w-40 lg:shrink-0 lg:py-3 lg:border-r lg:border-black/5'
+        : 'flex items-baseline gap-2 flex-wrap lg:w-40 lg:shrink-0 lg:flex-col lg:items-start lg:gap-0.5'}>
         <span className={overdue
-          ? 'text-[13px] font-bold text-red-600 whitespace-nowrap'
-          : 'text-[13px] font-bold text-[#5A5A40] whitespace-nowrap'}>
+          ? 'text-[13px] lg:text-[15px] font-bold text-red-600 whitespace-nowrap'
+          : 'text-[13px] lg:text-[15px] font-bold text-[#5A5A40] whitespace-nowrap'}>
           {row.date
             ? `${format(row.date, 'MM/dd')}（${'日一二三四五六'[row.date.getDay()]}）要上`
             : '急件，現在就要'}
         </span>
         {row.date && (
           <span className={overdue
-            ? 'text-[13px] font-bold text-red-600 whitespace-nowrap'
+            ? 'text-[13px] lg:text-sm font-bold text-red-600 whitespace-nowrap'
             : left !== null && left <= 3
-              ? 'text-[13px] font-bold text-amber-600 whitespace-nowrap'
-              : 'text-[13px] text-gray-400 whitespace-nowrap'}>
+              ? 'text-[13px] lg:text-sm font-bold text-amber-600 whitespace-nowrap'
+              : 'text-[13px] lg:text-sm text-gray-400 lg:text-gray-500 whitespace-nowrap'}>
             {countdown.trim()}
           </span>
         )}
-        {row.kind !== 'to_edit' && <span className="text-[13px] text-gray-500">{vendorName}</span>}
+        {row.kind !== 'to_edit' && <span className="text-[13px] lg:text-[15px] text-gray-500">{vendorName}</span>}
       </div>
 
-      {row.kind === 'to_edit' ? card : (
-        <div className="mt-1 flex items-baseline gap-3 flex-wrap">
+      {row.kind === 'to_edit' ? <div className="lg:flex-1 lg:min-w-0">{card}</div> : (
+        <div className="mt-1 flex items-baseline gap-3 flex-wrap lg:mt-0">
           {/* 老闆：「如果 10/3 沒片就寫沒片」。不要再加「等 X 日拍攝」那種推測，講不知道的事只會更亂。
               ⚠️ 真的沒片才會走到這裡 —— 已經有成片在等排程的那幾天走 has_stock，不在這份清單裡。 */}
-          <p className="text-[13px] font-medium text-amber-700">沒片</p>
+          <p className="text-[13px] lg:text-[15px] font-medium text-amber-700">沒片</p>
           {onOpenLibrary && (
             <button
               type="button"
               onClick={onOpenLibrary}
-              className="text-[13px] text-gray-500 underline underline-offset-2 hover:text-[#5A5A40] whitespace-nowrap"
+              className="text-[13px] lg:text-sm text-gray-500 underline underline-offset-2 hover:text-[#5A5A40] whitespace-nowrap"
             >
               看 {vendorName} 的素材庫
             </button>
@@ -348,7 +370,7 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
 
 export function AssetCard({
   asset, vendorName, posts, busy, onAdvance, onUpload, onUndoSubmit, onUndoUpload, showClientBadge,
-  selected, onToggleSelect, compact,
+  selected, onToggleSelect, compact, stacked,
 }: {
   // 這個專案沒有安裝 @types/react，JSX.IntrinsicAttributes 不存在，
   // 所以 key 要自己宣告成 prop，否則 tsc 會當成多餘屬性報錯。
@@ -374,14 +396,20 @@ export function AssetCard({
    * 另外片名在這裡是主角（要比 IP 大），不是配角。
    */
   compact?: boolean;
+  /** 放在窄欄（電腦版右側欄）時不要排成左右一橫列，維持上下堆疊 */
+  stacked?: boolean;
 }) {
   const due = getFlowDueInfo(asset, posts);
+  /** 電腦版精簡卡排成「資訊在左、按鈕在右」一橫列 */
+  const rowOnDesktop = compact && !stacked;
   const days = getFlowDaysStuck(asset);
   const stale = isFlowStale(asset);
 
   return (
-    <div className="p-4 space-y-3">
-      <div className="min-w-0">
+    <div className={rowOnDesktop
+      ? 'p-4 space-y-3 lg:space-y-0 lg:flex lg:items-center lg:gap-4 lg:py-3'
+      : 'p-4 space-y-3'}>
+      <div className={rowOnDesktop ? 'min-w-0 lg:flex-1' : 'min-w-0'}>
         <div className="flex items-center gap-2 flex-wrap">
           {onToggleSelect && (
             <button
@@ -396,10 +424,10 @@ export function AssetCard({
             </button>
           )}
           <span className={compact
-            ? 'text-[13px] font-medium text-gray-500'
+            ? 'text-[13px] lg:text-[15px] font-medium text-gray-500'
             : 'font-bold text-[#5A5A40] text-base'}>{vendorName}</span>
           {asset.isUrgent && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[13px] font-bold border border-red-200">
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[13px] font-bold border border-red-200 ${compact ? 'lg:text-sm' : ''}`}>
               <Flame size={9} /> 急件
             </span>
           )}
@@ -414,7 +442,7 @@ export function AssetCard({
           : 'text-base text-gray-600 truncate mt-0.5'}>{asset.title}</p>
         {/* 這支片的資訊，不是派工單 —— 措辭一律陳述，不要出現祈使句。
             沒填的舊素材整塊不渲染，卡片維持原本的樣子。 */}
-        <EditingBrief brief={asset.editingBrief} clipNotes={asset.clipNotes} />
+        <EditingBrief brief={asset.editingBrief} clipNotes={asset.clipNotes} desktopLarge={compact} />
 
         {/* 沒有這個連結的話，系統告訴他「有 3 個片段」之後他還是得自己去 Drive 翻資料夾 ——
             整套自動歸檔的價值會在最後一哩斷掉。
@@ -425,7 +453,7 @@ export function AssetCard({
             href={asset.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 mt-1.5 text-[13px] font-medium text-sky-700 hover:text-sky-900 hover:underline"
+            className={`inline-flex items-center gap-1.5 mt-1.5 text-[13px] font-medium text-sky-700 hover:text-sky-900 hover:underline ${compact ? 'lg:text-[15px]' : ''}`}
           >
             <ExternalLink size={12} />
             {asset.driveFolderId ? '開啟毛片資料夾' : '開啟素材連結'}
@@ -467,6 +495,9 @@ export function AssetCard({
 
       </div>
 
+      {/* 按鈕與「按錯了」連結包成同一欄：電腦版精簡卡把這一欄放在右側固定寬度。
+          手機版這層 div 的 space-y-3 跟外層一樣，間距不變。 */}
+      <div className={rowOnDesktop ? 'space-y-3 lg:w-52 lg:shrink-0' : 'space-y-3'}>
       <FlowSteps asset={asset} busy={busy} onAdvance={onAdvance} onUpload={onUpload} compact={compact} />
 
       {onUndoSubmit && deriveFlowStage(asset) === 'client_review' && !asset.cloudUploadedAt && !asset.editorInvoiceId && !asset.usedInPostId && (
@@ -492,6 +523,7 @@ export function AssetCard({
           上傳按錯了？取消這個標記
         </button>
       )}
+      </div>
     </div>
   );
 }
@@ -586,6 +618,8 @@ export default function EditorAssetQueue({
   //    2026-10-01 之前拿掉的「IP 總覽」也不要加回來：排程清單天然跨 IP。
   /** 隊伍一次只攤開前幾支。三十張卡一次倒出來等於沒有排序 */
   const [queueExpanded, setQueueExpanded] = useState(false);
+  const isDesktop = useIsDesktop();
+  const previewCount = isDesktop ? QUEUE_PREVIEW_DESKTOP : QUEUE_PREVIEW;
   /** 尚未排上片日那一區是否展開 */
   const [showUnscheduled, setShowUnscheduled] = useState(false);
   /** 隊伍頁裡「剪好了，還沒傳雲端」那一區是否展開 */
@@ -1054,104 +1088,11 @@ export default function EditorAssetQueue({
     busy: busyId === a.id,
   });
 
-  return (
-    // readability-surface：手機點擊區 44px、桌面 24px、輸入框 16px（避免 iOS 自動放大整頁）。
-    // 規則寫在 index.css，是 opt-in 的，掛在哪一頁就只影響那一頁。
-    <div className="readability-surface space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-        <div>
-          {/* 兩個分頁共用這支元件，標題要跟側邊欄那一項一模一樣，
-              不然人點了「我的所有片」卻看到「我的剪輯任務」會以為點錯 */}
-          <h2 className="text-xl font-bold serif text-[#5A5A40] flex items-center gap-2">
-            {activeView === 'queue'
-              ? <><Scissors size={20} /> 我的剪輯任務</>
-              : <><Film size={20} /> 我的所有片</>}
-          </h2>
-          <p className="text-sm text-gray-500 mt-1">
-            {activeView === 'queue'
-              // ⚠️ 陳述句，不要祈使句。「從上面開始剪」等於系統在派工，
-              //    而派工是同事在做的事（見 feedback_editor_facing_wording）。
-              ? '照接下來要上片的日子排好，最近的在最上面。'
-              : '手上全部的片。剪完按「交片送審」；檔案傳上雲端後就按「上傳雲端」，不用等我們通知。'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {/* ⚠️ 數字要對得上同一頁看得到的東西。
-              原本只有一個「待處理 61 支」＝待剪＋待上傳相加，但畫面上沒有任何一處是 61，
-              剪輯師無從核對。拆成兩個，各自對應下面的清單與區塊。 */}
-          {/* list 模式底下本來就有「待剪／待上傳雲端／已完成」三張大卡，這裡再放一次是重複 */}
-          {activeView === 'queue' && (
-            <>
-              <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm">
-                <p className="text-[13px] font-bold text-gray-500 whitespace-nowrap">要剪</p>
-                <p className="text-lg font-bold leading-none text-[#5A5A40]">
-                  {toEdit.length} <span className="text-sm font-normal text-gray-500">支</span>
-                </p>
-              </div>
-              <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm">
-                <p className="text-[13px] font-bold text-gray-500 whitespace-nowrap">剪好待傳</p>
-                <p className="text-lg font-bold leading-none text-[#5A5A40]">
-                  {toUpload.length} <span className="text-sm font-normal text-gray-500">支</span>
-                </p>
-              </div>
-            </>
-          )}
-          <div className="bg-white px-4 py-2 rounded-2xl border border-sky-200 shadow-sm">
-            <p className="text-[13px] font-bold text-gray-500">本月已上傳</p>
-            <p className="text-lg font-bold leading-none text-sky-700">
-              {uploadedThisMonth} <span className="text-sm font-normal text-gray-500">支</span>
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {activeView === 'queue' && (
-        <>
-          {/* 剪輯師是外包，不熟我們的後台。整套流程只有三步，一行講完就不用再問誰。
-              ⚠️ 講的是「按鈕在哪、按了會怎樣」，不是「你該剪哪一支」—— 後者是同事的事。 */}
-          <p className="text-[13px] text-gray-500 bg-black/[0.03] rounded-2xl px-4 py-2.5 leading-relaxed">
-            剪完按<span className="font-bold text-[#5A5A40]">「交片送審」</span>，我們會拿去給業主看；
-            檔案傳上雲端後再按<span className="font-bold text-[#5A5A40]">「上傳雲端」</span>。
-            兩步都在這一頁。
-          </p>
-
-          {queue.rows.length === 0 ? (
-            <p className="text-center text-sm text-gray-500 py-10">
-              接下來沒有要上的片，手上也沒有待剪的。
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {(queueExpanded ? queue.rows : queue.rows.slice(0, QUEUE_PREVIEW)).map(row => (
-                <QueueRow
-                  key={row.key}
-                  row={row}
-                  vendorName={vendorName(row.vendorId)}
-                  onOpenLibrary={
-                    // 只有那個 IP 在「我的所有片」裡真的有東西才給連結
-                    onOpenAllAssets && displayed.some(a => a.vendorId === row.vendorId)
-                      ? () => onOpenAllAssets(row.vendorId)
-                      : undefined
-                  }
-                  card={row.asset ? (
-                    <AssetCard {...cardProps(row.asset)} compact onAdvance={() => advance(row.asset!)} />
-                  ) : null}
-                />
-              ))}
-            </div>
-          )}
-
-          {queue.rows.length > QUEUE_PREVIEW && (
-            <button
-              type="button"
-              onClick={() => setQueueExpanded(v => !v)}
-              className="w-full py-2.5 rounded-2xl text-[13px] font-bold text-gray-500 hover:text-[#5A5A40]"
-            >
-              {queueExpanded
-                ? `收起後面 ${queue.rows.length - QUEUE_PREVIEW} 筆`
-                : `後面還有 ${queue.rows.length - QUEUE_PREVIEW} 筆`}
-            </button>
-          )}
-
+  // ── 隊伍頁的收合區。電腦版跟手機版擺的位置不同（見下方兩欄版面），
+  //    所以抽成變數、兩處共用同一份，避免兩邊各改各的走樣。
+  // 已交片、等安排上片
+  const stockedBlock = (
+    <>
           {/* 這幾天不缺片，缺的是排程 —— 而排程是小編的事，不是剪輯師的。
               老闆：「因為目前成片區已經有兩個，照理來說我會安排排程，但問題是我還沒安排」。
 
@@ -1178,7 +1119,11 @@ export default function EditorAssetQueue({
               )}
             </>
           )}
-
+    </>
+  );
+  // 已經排好了（對帳用）
+  const settledBlock = (
+    <>
           {/* 已經掛好素材、整件事結案的那幾天。
               ⚠️ 剪輯師不需要這一區，它存在的唯一理由是**能跟社群日曆對帳**。
               老闆 2026-10-02：「我應該 10/3 有排程，但為什麼都對不上…我就是很不放心」。
@@ -1202,7 +1147,11 @@ export default function EditorAssetQueue({
               )}
             </>
           )}
-
+    </>
+  );
+  // 剪好了，還沒傳雲端
+  const toUploadBlock = (
+    <>
           {/* 已交片等上傳的不進清單，但不能讓它們無聲消失 ——
               沒有這一區，剪輯師在預設畫面上永遠看不到待上傳，交了片就忘了傳。
 
@@ -1264,6 +1213,7 @@ export default function EditorAssetQueue({
                           onUndoSubmit={() => undoSubmit(a)}
                           onUndoUpload={() => undoUploaded(a)}
                           showClientBadge
+                          stacked
                           selected={!!selectedIds[a.id!]}
                           onToggleSelect={() => setSelectedIds(prev => ({ ...prev, [a.id!]: !prev[a.id!] }))}
                         />
@@ -1274,7 +1224,11 @@ export default function EditorAssetQueue({
               )}
             </>
           )}
-
+    </>
+  );
+  // 還沒排到上片日
+  const unassignedBlock = (
+    <>
           {/* 庫存比格子多出來的片。藏起來會讓剪輯師以為沒事做，所以收合而不是拿掉。 */}
           {queue.unassigned.length > 0 && (
             <>
@@ -1296,7 +1250,11 @@ export default function EditorAssetQueue({
               )}
             </>
           )}
-
+    </>
+  );
+  // 到「我的所有片」的出口
+  const allAssetsLink = (
+    <>
           {/* 「我的所有片」退成純查找用（搜尋片名、翻已完成）。
               日常動線不需要它，但要留一個出口，不然想找舊片的人會卡住。
               ⚠️ 擺在全部收合區的最後面 —— 夾在中間會把那幾區切開，看起來像兩群不相干的東西。 */}
@@ -1309,8 +1267,147 @@ export default function EditorAssetQueue({
               想找某一支舊片？到「我的所有片」搜尋
             </button>
           )}
+    </>
+  );
 
-        </>
+  return (
+    // readability-surface：手機點擊區 44px、桌面 24px、輸入框 16px（避免 iOS 自動放大整頁）。
+    // 規則寫在 index.css，是 opt-in 的，掛在哪一頁就只影響那一頁。
+    <div className="readability-surface space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+        <div>
+          {/* 兩個分頁共用這支元件，標題要跟側邊欄那一項一模一樣，
+              不然人點了「我的所有片」卻看到「我的剪輯任務」會以為點錯 */}
+          <h2 className="text-xl font-bold serif text-[#5A5A40] flex items-center gap-2">
+            {activeView === 'queue'
+              ? <><Scissors size={20} /> 我的剪輯任務</>
+              : <><Film size={20} /> 我的所有片</>}
+          </h2>
+          <p className="text-sm text-gray-500 mt-1">
+            {activeView === 'queue'
+              // ⚠️ 陳述句，不要祈使句。「從上面開始剪」等於系統在派工，
+              //    而派工是同事在做的事（見 feedback_editor_facing_wording）。
+              ? '照接下來要上片的日子排好，最近的在最上面。'
+              : '手上全部的片。剪完按「交片送審」；檔案傳上雲端後就按「上傳雲端」，不用等我們通知。'}
+          </p>
+        </div>
+        <div className={`flex items-center gap-2 shrink-0 ${activeView === 'queue' ? 'lg:hidden' : ''}`}>
+          {/* ⚠️ 數字要對得上同一頁看得到的東西。
+              原本只有一個「待處理 61 支」＝待剪＋待上傳相加，但畫面上沒有任何一處是 61，
+              剪輯師無從核對。拆成兩個，各自對應下面的清單與區塊。 */}
+          {/* list 模式底下本來就有「待剪／待上傳雲端／已完成」三張大卡，這裡再放一次是重複 */}
+          {activeView === 'queue' && (
+            <>
+              <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm">
+                <p className="text-[13px] font-bold text-gray-500 whitespace-nowrap">要剪</p>
+                <p className="text-lg font-bold leading-none text-[#5A5A40]">
+                  {toEdit.length} <span className="text-sm font-normal text-gray-500">支</span>
+                </p>
+              </div>
+              <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm">
+                <p className="text-[13px] font-bold text-gray-500 whitespace-nowrap">剪好待傳</p>
+                <p className="text-lg font-bold leading-none text-[#5A5A40]">
+                  {toUpload.length} <span className="text-sm font-normal text-gray-500">支</span>
+                </p>
+              </div>
+            </>
+          )}
+          <div className="bg-white px-4 py-2 rounded-2xl border border-sky-200 shadow-sm">
+            <p className="text-[13px] font-bold text-gray-500">本月已上傳</p>
+            <p className="text-lg font-bold leading-none text-sky-700">
+              {uploadedThisMonth} <span className="text-sm font-normal text-gray-500">支</span>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {activeView === 'queue' && (
+        // 電腦版兩欄：左邊只回答「接下來剪什麼」，右邊固定側欄回答「還有什麼要按、對不對得上」。
+        // ⚠️ 2026-10-03 老闆：四個收合區都藏在最底下不直觀，放上面又會干擾。
+        //    電腦版把「剪好待傳」與兩個對帳區搬到右欄；「還沒排到上片日」接在清單尾巴。
+        //    手機版（lg 以下）維持原本由上往下的順序不變。
+        <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-6 lg:items-start">
+          <div className="space-y-4 min-w-0">
+          {/* 剪輯師是外包，不熟我們的後台。整套流程只有三步，一行講完就不用再問誰。
+              ⚠️ 講的是「按鈕在哪、按了會怎樣」，不是「你該剪哪一支」—— 後者是同事的事。 */}
+          <p className="text-[13px] text-gray-500 bg-black/[0.03] rounded-2xl px-4 py-2.5 leading-relaxed">
+            剪完按<span className="font-bold text-[#5A5A40]">「交片送審」</span>，我們會拿去給業主看；
+            檔案傳上雲端後再按<span className="font-bold text-[#5A5A40]">「上傳雲端」</span>。
+            兩步都在這一頁。
+          </p>
+
+          {queue.rows.length === 0 ? (
+            <p className="text-center text-sm text-gray-500 py-10">
+              接下來沒有要上的片，手上也沒有待剪的。
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {(queueExpanded ? queue.rows : queue.rows.slice(0, previewCount)).map(row => (
+                <QueueRow
+                  key={row.key}
+                  row={row}
+                  vendorName={vendorName(row.vendorId)}
+                  onOpenLibrary={
+                    // 只有那個 IP 在「我的所有片」裡真的有東西才給連結
+                    onOpenAllAssets && displayed.some(a => a.vendorId === row.vendorId)
+                      ? () => onOpenAllAssets(row.vendorId)
+                      : undefined
+                  }
+                  card={row.asset ? (
+                    <AssetCard {...cardProps(row.asset)} compact onAdvance={() => advance(row.asset!)} />
+                  ) : null}
+                />
+              ))}
+            </div>
+          )}
+
+          {queue.rows.length > previewCount && (
+            <button
+              type="button"
+              onClick={() => setQueueExpanded(v => !v)}
+              className="w-full py-2.5 rounded-2xl text-[13px] font-bold text-gray-500 hover:text-[#5A5A40]"
+            >
+              {queueExpanded
+                ? `收起後面 ${queue.rows.length - previewCount} 筆`
+                : `後面還有 ${queue.rows.length - previewCount} 筆`}
+            </button>
+          )}
+
+            {/* 手機版：這三區照原本順序排在清單下面。電腦版在右欄，這裡隱藏。 */}
+            <div className="space-y-4 lg:hidden">
+              {stockedBlock}
+              {settledBlock}
+              {toUploadBlock}
+            </div>
+            {unassignedBlock}
+            {allAssetsLink}
+          </div>
+
+          <aside className="hidden lg:block lg:sticky lg:top-4 space-y-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+            {/* 標題列那組數字在電腦版搬到這裡（標題列那組在 lg 隱藏） */}
+            <div className="bg-white rounded-2xl border border-black/5 shadow-sm grid grid-cols-3 divide-x divide-black/5">
+              {[
+                { label: '要剪', value: toEdit.length, tone: 'text-[#5A5A40]' },
+                { label: '剪好待傳', value: toUpload.length, tone: 'text-sky-700' },
+                { label: '本月已上傳', value: uploadedThisMonth, tone: 'text-sky-700' },
+              ].map(s => (
+                <div key={s.label} className="px-2 py-3 text-center">
+                  <p className="text-sm font-bold text-gray-500 whitespace-nowrap">{s.label}</p>
+                  <p className={`text-xl font-bold leading-tight ${s.tone}`}>
+                    {s.value} <span className="text-sm font-normal text-gray-500">支</span>
+                  </p>
+                </div>
+              ))}
+            </div>
+            {/* 還要他動手的（而且跟請款有關）放最上面 */}
+            {toUploadBlock}
+            {(queue.stocked.length > 0 || queue.settled.length > 0) && (
+              <p className="text-sm font-bold text-gray-500 px-1 pt-2">對帳用 · 不用動手</p>
+            )}
+            {stockedBlock}
+            {settledBlock}
+          </aside>
+        </div>
       )}
 
       {/* 只帶一個 IP 的剪輯師不需要這排，多一列按鈕反而是雜訊 */}
