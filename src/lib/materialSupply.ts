@@ -155,11 +155,8 @@ interface VendorPool {
  */
 function queueOrder(a: Asset, b: Asset): number {
   if (!!a.isUrgent !== !!b.isUrgent) return a.isUrgent ? -1 : 1;
-  // 同事指定了交片日的排在沒指定的前面，日子早的先（跟 editorQueue 的 rawOrder 一致）
-  if (!!a.editDueDate !== !!b.editDueDate) return a.editDueDate ? -1 : 1;
-  if (a.editDueDate && b.editDueDate && a.editDueDate !== b.editDueDate) {
-    return a.editDueDate.localeCompare(b.editDueDate);
-  }
+  // ⚠️ 不要把 editDueDate（同事指定交片日）加進來：這支同時排「成片庫存」，
+  //    交片日在片交出去之後還留在文件上，加進來會改變小編排片建議用哪一支成片。
   return (a.createdAt || '').localeCompare(b.createdAt || '');
 }
 

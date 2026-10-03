@@ -131,11 +131,8 @@ export interface EditorQueue {
  */
 function rawOrder(a: Asset, b: Asset): number {
   if (!!a.isUrgent !== !!b.isUrgent) return a.isUrgent ? -1 : 1;
-  // 同事指定了交片日的先配最近的日子，日子早的先
-  if (!!a.editDueDate !== !!b.editDueDate) return a.editDueDate ? -1 : 1;
-  if (a.editDueDate && b.editDueDate && a.editDueDate !== b.editDueDate) {
-    return a.editDueDate.localeCompare(b.editDueDate);
-  }
+  // ⚠️ 不要用 editDueDate 決定「哪支毛片配哪一天」：指定 10/30 交片的片會插隊搶走 10/06 那格，
+  //    沒指定的片反而被推到後面。交片日只影響這一列的期限，以及主清單照期限的排序。
   return (a.createdAt || '').localeCompare(b.createdAt || '');
 }
 

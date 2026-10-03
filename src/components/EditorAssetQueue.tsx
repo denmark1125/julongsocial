@@ -312,7 +312,9 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
   onOpenLibrary?: () => void;
 }) {
   // 剪輯師只看交片期限，不看上片日（見 editorQueue.ts 的 EDIT_LEAD_WORKDAYS）
-  const status = row.deadline ? deadlineStatus(row.deadline, row.asset?.createdAt) : null;
+  const raw = row.deadline ? deadlineStatus(row.deadline, row.asset?.createdAt) : null;
+  // 「沒片」那一列逾期不標紅：剪輯師手上沒料可剪，紅字等於怪錯人。改成橘色「盡快」，提醒同事去催料。
+  const status = raw && row.kind === 'no_material' && raw.tone === 'late' ? { text: '盡快', tone: 'soon' as const } : raw;
   const toneClass = status?.tone === 'late' ? 'text-red-600' : status?.tone === 'soon' ? 'text-amber-600' : 'text-[#5A5A40]';
 
   return (
