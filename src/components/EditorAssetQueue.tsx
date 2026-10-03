@@ -329,13 +329,18 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
       <div className={row.kind === 'to_edit'
         ? 'flex items-baseline gap-2 flex-wrap px-4 pt-3 lg:flex-col lg:items-start lg:justify-center lg:gap-0.5 lg:w-40 lg:shrink-0 lg:py-3 lg:border-r lg:border-black/5'
         : 'flex items-baseline gap-2 flex-wrap lg:w-40 lg:shrink-0 lg:flex-col lg:items-start lg:gap-0.5'}>
-        <span className={overdue
-          ? 'text-[13px] lg:text-[15px] font-bold text-red-600 whitespace-nowrap'
-          : 'text-[13px] lg:text-[15px] font-bold text-[#5A5A40] whitespace-nowrap'}>
-          {row.date
-            ? `${format(row.date, 'MM/dd')}（${'日一二三四五六'[row.date.getDay()]}）要上`
-            : '急件，現在就要'}
-        </span>
+        {row.date ? (
+          <span className={overdue
+            ? 'text-[13px] lg:text-[15px] font-bold text-red-600 whitespace-nowrap'
+            : 'text-[13px] lg:text-[15px] font-bold text-[#5A5A40] whitespace-nowrap'}>
+            {`${format(row.date, 'MM/dd')}（${'日一二三四五六'[row.date.getDay()]}）要上`}
+          </span>
+        ) : (
+          // 急件但沒配到日子。老闆：「急件，現在就要」很好笑，橘色「急件」加一個火焰就好。
+          <span className="inline-flex items-center gap-1 text-[13px] lg:text-[15px] font-bold text-orange-600 whitespace-nowrap">
+            <Flame size={14} /> 急件
+          </span>
+        )}
         {row.date && (
           <span className={overdue
             ? 'text-[13px] lg:text-sm font-bold text-red-600 whitespace-nowrap'
