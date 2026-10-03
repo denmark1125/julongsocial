@@ -7,6 +7,7 @@ import {
   EDITOR_BILLING_CUTOVER_AT,
   EDITOR_BILLING_START_MONTH,
   EDITOR_FEE_BY_TIER,
+  EditorInvoice,
   EditorInvoiceItem,
   Vendor,
 } from '../types';
@@ -355,4 +356,49 @@ export function summarizeByEditor(
   return Array.from(rows.values())
     .filter(r => r.totalCount > 0)
     .sort((a, b) => b.totalAmount - a.totalAmount);
+}
+
+
+/**
+ * 2026-09-11～10-03 剪輯費 60 秒以上誤寫成 950（公司定價是 900）。
+ * 找出被這個錯價影響的請款單與素材，給「應付對帳」頁的一次性更正卡片用。
+ *
+ * ⚠️ 只認「凍結金額剛好 950 且分級是 over60」的片，管帳手動調過的其他金額不算。
+ * 跟 scripts/fix-fee-950.mjs 是同一套判定，兩邊不要分岔。
+ */
+export const WRONG_OVER60_FEE = 950;
+
+export interface Fee950Issues {
+  /** 未付款（送出／已核准）：可以作廢重開 */
+  unpaid: { invoice: EditorInvoice; wrongAssetIds: string[] }[];
+  /** 付款處理中：錢可能在路上，只列出來 */
+  processing: { invoice: EditorInvoice; wrongAssetIds: string[] }[];
+  /** 已付款：只列出來給老闆決定 */
+  paid: { invoice: EditorInvoice; wrongAssetIds: string[] }[];
+  /** 不在任何有效單上、但 editorFee 卡在 950 的片（下次請款仍會用 950 算） */
+  strayAssetIds: string[];
+}
+
+export function findFee950Issues(invoices: EditorInvoice[], assets: Asset[]): Fee950Issues {
+  const byId = new Map(assets.map(a => [a.id, a]));
+  const isWrong = (it: EditorInvoiceItem) =>
+    it.amount === WRONG_OVER60_FEE && byId.get(it.assetId)?.durationTier === 'over60';
+
+  const result: Fee950Issues = { unpaid: [], processing: [], paid: [], strayAssetIds: [] };
+  const onLiveInvoice = new Set<string>();
+  for (const invoice of invoices) {
+    if (invoice.status === 'void') continue;
+    (invoice.items || []).forEach(it => onLiveInvoice.add(it.assetId));
+    const wrongAssetIds = (invoice.items || []).filter(isWrong).map(it => it.assetId);
+    if (wrongAssetIds.length === 0) continue;
+    const row = { invoice, wrongAssetIds };
+    if (invoice.status === 'submitted' || invoice.status === 'approved') result.unpaid.push(row);
+    else if (invoice.status === 'payment_processing') result.processing.push(row);
+    else if (invoice.status === 'paid') result.paid.push(row);
+  }
+  result.strayAssetIds = assets
+    .filter(a => a.id && a.editorFee === WRONG_OVER60_FEE && a.durationTier === 'over60'
+      && !a.editorInvoiceId && !onLiveInvoice.has(a.id))
+    .map(a => a.id!);
+  return result;
 }
