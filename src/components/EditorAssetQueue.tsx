@@ -865,6 +865,11 @@ export default function EditorAssetQueue({
 
   const toEdit = inBucket('to_edit');
   const toUpload = inBucket('to_upload');
+  // 隊伍頁（我的剪輯任務）用的版本：**不吃**「我的所有片」的 IP 篩選／搜尋／只看急件。
+  // ⚠️ 兩個分頁是同一個元件、React 會沿用同一份 state：在「我的所有片」點了某個 IP 再切回來，
+  //    隊伍頁的「要剪／剪好待傳」數字跟「剪好了，還沒傳雲端」那一區會被篩掉，看起來像片不見了。
+  const queueToEdit = displayed.filter(a => bucketOf(a) === 'to_edit');
+  const queueToUpload = sortFlowColumn(displayed.filter(a => bucketOf(a) === 'to_upload'), posts);
   const done = inBucket('done');
 
   // 預設落在第一個有東西的待辦頁；兩邊都空才停在待剪
@@ -1181,13 +1186,13 @@ export default function EditorAssetQueue({
               使用者原話：「頁面要切換很麻煩」。剪完→交片→傳雲端是同一條動線上的三步，
               前兩步在這一頁，第三步卻要換頁才做得到，等於每天都被迫跳一次。
               現在隊伍頁一頁就能走完，「我的所有片」退回成純查找用。 */}
-          {toUpload.length > 0 && (
+          {queueToUpload.length > 0 && (
             <>
               <FoldHeader
                 open={showToUpload}
                 title="剪好了，還沒傳雲端"
                 hint="檔案傳上雲端後按「上傳雲端」，不用等業主審完。"
-                count={toUpload.length}
+                count={queueToUpload.length}
                 tone="cloud"
                 icon={<UploadCloud size={14} />}
                 onToggle={() => setShowToUpload(v => !v)}
@@ -1200,30 +1205,30 @@ export default function EditorAssetQueue({
                     <button
                       type="button"
                       onClick={() => {
-                        const allSelected = toUpload.every(a => selectedIds[a.id!]);
+                        const allSelected = queueToUpload.every(a => selectedIds[a.id!]);
                         const next = { ...selectedIds };
-                        for (const a of toUpload) next[a.id!] = !allSelected;
+                        for (const a of queueToUpload) next[a.id!] = !allSelected;
                         setSelectedIds(next);
                       }}
                       className="text-[13px] font-bold text-sky-800 hover:text-sky-900"
                     >
-                      {toUpload.every(a => selectedIds[a.id!]) ? '取消全選' : `選取這 ${toUpload.length} 支`}
+                      {queueToUpload.every(a => selectedIds[a.id!]) ? '取消全選' : `選取這 ${queueToUpload.length} 支`}
                     </button>
-                    {toUpload.filter(a => selectedIds[a.id!]).length > 0 && (
+                    {queueToUpload.filter(a => selectedIds[a.id!]).length > 0 && (
                       <button
                         type="button"
                         disabled={batchBusy}
-                        onClick={() => markUploadedBatch(toUpload)}
+                        onClick={() => markUploadedBatch(queueToUpload)}
                         className="px-4 py-2 rounded-xl bg-[#5A5A40] text-white text-[13px] font-bold disabled:opacity-50"
                       >
                         {batchBusy
                           ? '處理中…'
-                          : `把選取的 ${toUpload.filter(a => selectedIds[a.id!]).length} 支標記已上傳`}
+                          : `把選取的 ${queueToUpload.filter(a => selectedIds[a.id!]).length} 支標記已上傳`}
                       </button>
                     )}
                   </div>
                   <div className="space-y-3">
-                    {toUpload.map(a => (
+                    {queueToUpload.map(a => (
                       <div key={a.id} className="bg-white rounded-2xl border border-black/5 overflow-hidden">
                         {/* compact：跟上面的隊伍同一頁，就要長得像同一頁。
                             拿掉「停留 N 天」紅字（這一區每張都紅＝沒有在警告任何事）與拍攝日，
@@ -1323,13 +1328,13 @@ export default function EditorAssetQueue({
               <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm">
                 <p className="text-[13px] font-bold text-gray-500 whitespace-nowrap">要剪</p>
                 <p className="text-lg font-bold leading-none text-[#5A5A40]">
-                  {toEdit.length} <span className="text-sm font-normal text-gray-500">支</span>
+                  {queueToEdit.length} <span className="text-sm font-normal text-gray-500">支</span>
                 </p>
               </div>
               <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm">
                 <p className="text-[13px] font-bold text-gray-500 whitespace-nowrap">剪好待傳</p>
                 <p className="text-lg font-bold leading-none text-[#5A5A40]">
-                  {toUpload.length} <span className="text-sm font-normal text-gray-500">支</span>
+                  {queueToUpload.length} <span className="text-sm font-normal text-gray-500">支</span>
                 </p>
               </div>
             </>
@@ -1409,8 +1414,8 @@ export default function EditorAssetQueue({
             {/* 標題列那組數字在電腦版搬到這裡（標題列那組在 lg 隱藏） */}
             <div className="bg-white rounded-2xl border border-black/5 shadow-sm grid grid-cols-3 divide-x divide-black/5">
               {[
-                { label: '要剪', value: toEdit.length, tone: 'text-[#5A5A40]' },
-                { label: '剪好待傳', value: toUpload.length, tone: 'text-sky-700' },
+                { label: '要剪', value: queueToEdit.length, tone: 'text-[#5A5A40]' },
+                { label: '剪好待傳', value: queueToUpload.length, tone: 'text-sky-700' },
                 { label: '本月已上傳', value: uploadedThisMonth, tone: 'text-sky-700' },
               ].map(s => (
                 <div key={s.label} className="px-2 py-3 text-center">
