@@ -327,17 +327,27 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
       <div className={row.kind === 'to_edit'
         ? 'flex items-baseline gap-2 flex-wrap px-4 pt-3 lg:flex-col lg:items-start lg:justify-center lg:gap-0.5 lg:w-40 lg:shrink-0 lg:py-3 lg:border-r lg:border-black/5'
         : 'flex items-baseline gap-2 flex-wrap lg:w-40 lg:shrink-0 lg:flex-col lg:items-start lg:gap-0.5'}>
-        {row.deadline ? (
+        {/* 急件一律只寫橘色火焰「急件」，不寫推算出來的期限。
+            ⚠️ 2026-10-03 老闆：急件底下列一個早就過去的推算日期（「09/24 前交片／盡快」）看不懂，
+               同一件事講兩次。急件之間的先後仍照期限排（見 buildEditorQueue），只是不印出來。
+               例外：同事親手指定的交片日要印，那是特別交代的日子。 */}
+        {row.urgent ? (
+          <>
+            <span className="inline-flex items-center gap-1 text-[13px] lg:text-[15px] font-bold text-orange-600 whitespace-nowrap">
+              <Flame size={14} /> 急件
+            </span>
+            {row.deadline && row.deadlineSource === 'custom' && (
+              <span className="text-[13px] lg:text-sm text-gray-500 whitespace-nowrap">
+                {formatDeadline(row.deadline)}・同事指定
+              </span>
+            )}
+          </>
+        ) : row.deadline ? (
           <span className={`text-[13px] lg:text-[15px] font-bold whitespace-nowrap ${status?.tone === 'late' ? 'text-red-600' : 'text-[#5A5A40]'}`}>
             {formatDeadline(row.deadline)}
           </span>
-        ) : (
-          // 急件但沒配到日子。老闆：「急件，現在就要」很好笑，橘色「急件」加一個火焰就好。
-          <span className="inline-flex items-center gap-1 text-[13px] lg:text-[15px] font-bold text-orange-600 whitespace-nowrap">
-            <Flame size={14} /> 急件
-          </span>
-        )}
-        {status && (
+        ) : null}
+        {status && !row.urgent && (
           <span className={`text-[13px] lg:text-sm whitespace-nowrap ${status.tone === 'calm' ? 'text-gray-500' : `font-bold ${toneClass}`}`}>
             {status.text}
             {row.deadlineSource === 'custom' && <span className="ml-1.5 font-normal text-gray-500">同事指定</span>}
@@ -368,7 +378,7 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
 
 export function AssetCard({
   asset, vendorName, posts, busy, onAdvance, onUpload, onUndoSubmit, onUndoUpload, showClientBadge,
-  selected, onToggleSelect, compact, stacked,
+  selected, onToggleSelect, compact, stacked, hideUrgentBadge,
 }: {
   // 這個專案沒有安裝 @types/react，JSX.IntrinsicAttributes 不存在，
   // 所以 key 要自己宣告成 prop，否則 tsc 會當成多餘屬性報錯。
@@ -396,6 +406,8 @@ export function AssetCard({
   compact?: boolean;
   /** 放在窄欄（電腦版右側欄）時不要排成左右一橫列，維持上下堆疊 */
   stacked?: boolean;
+  /** 排程清單那一列左邊已經寫了「急件」，卡片上就不再重複一個紅色標籤 */
+  hideUrgentBadge?: boolean;
 }) {
   const due = getFlowDueInfo(asset, posts);
   /** 電腦版精簡卡排成「資訊在左、按鈕在右」一橫列 */
@@ -429,7 +441,7 @@ export function AssetCard({
           <span className={compact
             ? 'text-[13px] lg:text-[15px] font-medium text-gray-500'
             : 'font-bold text-[#5A5A40] text-base'}>{vendorName}</span>
-          {asset.isUrgent && (
+          {asset.isUrgent && !hideUrgentBadge && (
             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-600 text-[13px] font-bold border border-red-200 ${compact ? 'lg:text-sm' : ''}`}>
               <Flame size={9} /> 急件
             </span>
@@ -1362,7 +1374,7 @@ export default function EditorAssetQueue({
                       : undefined
                   }
                   card={row.asset ? (
-                    <AssetCard {...cardProps(row.asset)} compact onAdvance={() => advance(row.asset!)} />
+                    <AssetCard {...cardProps(row.asset)} compact hideUrgentBadge onAdvance={() => advance(row.asset!)} />
                   ) : null}
                 />
               ))}
