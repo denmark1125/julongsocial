@@ -213,6 +213,11 @@ function ClientBadge({ asset }: { asset: Asset }) {
   return null;
 }
 
+/** 「09/28（一）」：日期欄的大字，不帶「前交片」（電腦版上方另有「交片期限」小標） */
+function dayLabel(d: Date): string {
+  return `${format(d, 'MM/dd')}（${'日一二三四五六'[d.getDay()]}）`;
+}
+
 /** 清單預設攤開幾筆。剩下的收在「後面還有 N 筆」底下 */
 const QUEUE_PREVIEW = 8;
 /** 電腦版一支一橫列、每列矮很多，同樣一個畫面放得下更多 */
@@ -333,6 +338,10 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
             ⚠️ 2026-10-03 老闆：急件底下列一個早就過去的推算日期（「09/24 前交片／盡快」）看不懂，
                同一件事講兩次。急件之間的先後仍照期限排（見 buildEditorQueue），只是不印出來。
                例外：同事親手指定的交片日要印，那是特別交代的日子。 */}
+        {/* 電腦版日期欄排成三層：小標「交片期限」→ 大字日期 → 倒數。「同事指定」獨立成一個小標籤。
+            ⚠️ 2026-10-03 老闆：「10/15（四）前交片・同事指定」一整串 nowrap 塞進 160px 欄位，
+               整段超出欄位壓到右邊卡片上。所以每一段各自一行，不再把整串鎖成一行。
+            手機版仍是同一行「09/28（一）前交片 已超過 5 天」：小標只在 lg 顯示，「前交片」只在手機顯示。 */}
         {row.urgent ? (
           <>
             <span className="inline-flex items-center gap-1 text-[13px] lg:text-[15px] font-bold text-orange-600 whitespace-nowrap">
@@ -340,19 +349,26 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
             </span>
             {row.deadline && row.deadlineSource === 'custom' && (
               <span className="text-[13px] lg:text-sm text-gray-500 whitespace-nowrap">
-                {formatDeadline(row.deadline)}・同事指定
+                {dayLabel(row.deadline)} 前交片
               </span>
             )}
           </>
         ) : row.deadline ? (
-          <span className={`text-[13px] lg:text-[15px] font-bold whitespace-nowrap ${status?.tone === 'late' ? 'text-red-600' : 'text-[#5A5A40]'}`}>
-            {formatDeadline(row.deadline)}
-          </span>
+          <>
+            <span className="hidden lg:block text-[13px] text-gray-500">交片期限</span>
+            <span className={`text-[13px] lg:text-[17px] lg:leading-tight font-bold whitespace-nowrap ${status?.tone === 'late' ? 'text-red-600' : 'text-[#5A5A40]'}`}>
+              {dayLabel(row.deadline)}<span className="lg:hidden">前交片</span>
+            </span>
+          </>
         ) : null}
         {status && !row.urgent && (
           <span className={`text-[13px] lg:text-sm whitespace-nowrap ${status.tone === 'calm' ? 'text-gray-500' : `font-bold ${toneClass}`}`}>
             {status.text}
-            {row.deadlineSource === 'custom' && <span className="ml-1.5 font-normal text-gray-500">同事指定</span>}
+          </span>
+        )}
+        {row.deadlineSource === 'custom' && (
+          <span className="inline-block lg:mt-1 px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[12px] lg:text-[13px] font-bold whitespace-nowrap">
+            同事指定
           </span>
         )}
         {row.kind !== 'to_edit' && <span className="text-[13px] lg:text-[15px] text-gray-500">{vendorName}</span>}
