@@ -656,6 +656,8 @@ app.post("/api/drive/commit-groups", async (req, res) => {
           approved: false,
           createdAt: now,
           createdBy: me.uid,
+          // 剪輯師讀不到 users 文件，名字要快照下來，他才知道有問題找誰
+          createdByName: me.displayName || me.email || '',
         });
 
         for (const c of checked) {
@@ -778,6 +780,8 @@ app.post("/api/drive/claim-folders", async (req, res) => {
           approved: false,
           createdAt: now,
           createdBy: me.uid,
+          // 剪輯師讀不到 users 文件，名字要快照下來，他才知道有問題找誰
+          createdByName: me.displayName || me.email || '',
         });
 
         // 跟 commit-groups 一樣留一筆資料夾紀錄，日後孤兒對帳才對得上。

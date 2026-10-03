@@ -11,7 +11,8 @@ import {
   setDoc,
   updateDoc,
   where,
-  getDocs
+  getDocs,
+  deleteField
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking, UserProfile, deriveFlowStage } from '../types';
@@ -248,7 +249,9 @@ export default function AssetDatabase() {
         status: 'available',
         approved: false,
         createdAt: new Date().toISOString(),
-        createdBy: auth.currentUser?.uid
+        createdBy: auth.currentUser?.uid,
+        // 剪輯師讀不到 users 文件，名字要快照下來，他才知道有問題找誰
+        createdByName: me?.displayName || me?.username || ''
       });
       if (newAsset.type === 'video') {
         await autoResolveBooking(newAsset.vendorId);
@@ -324,6 +327,16 @@ export default function AssetDatabase() {
         buildFlowUpdate(asset, to, { byUid: auth.currentUser?.uid })
       );
       toast.success(reviewPassed ? '已取消審核' : '已通過審核');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `assets/${asset.id}`);
+    }
+  };
+
+  /** 同事指定的預計交片日。空字串＝清除，回到「上片日往前推 7 個工作天」 */
+  const setEditDueDate = async (asset: Asset, date: string) => {
+    try {
+      await updateDoc(doc(db, 'assets', asset.id!), { editDueDate: date || deleteField() });
+      toast.success(date ? `交片日設為 ${format(parseISO(date), 'MM/dd')}` : '已清除交片日');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `assets/${asset.id}`);
     }
@@ -1148,6 +1161,45 @@ ${after}`)) return;
                     <Flame size={12} /><span>急件</span>
                   </button>
                   )}
+                  {/* 預計交片日：刻意做成跟「急件」同大小的一顆，不加表單欄位（老闆擔心畫面越來越複雜）。
+                      點了直接跳系統日期選擇器；設定後顯示日期，× 清除。剪輯師清單會照這個日子排。 */}
+                  {asset.stage === 'raw' && (
+                    <span className={cn(
+                      "relative shrink-0 whitespace-nowrap rounded-lg text-[13px] font-bold flex items-center",
+                      asset.editDueDate ? "bg-amber-50 text-amber-700" : "bg-gray-100 text-gray-400 hover:text-amber-600"
+                    )}>
+                      <button
+                        type="button"
+                        title="設定預計交片日"
+                        onClick={e => {
+                          const input = e.currentTarget.nextElementSibling as HTMLInputElement | null;
+                          try { input?.showPicker(); } catch { input?.focus(); }
+                        }}
+                        className="px-3 py-1 flex items-center space-x-1"
+                      >
+                        <Calendar size={12} />
+                        <span>{asset.editDueDate ? `${format(parseISO(asset.editDueDate), 'MM/dd')} 交片` : '交片日'}</span>
+                      </button>
+                      <input
+                        type="date"
+                        aria-hidden
+                        tabIndex={-1}
+                        value={asset.editDueDate || ''}
+                        onChange={e => setEditDueDate(asset, e.target.value)}
+                        className="absolute left-0 bottom-0 w-px h-px opacity-0 pointer-events-none"
+                      />
+                      {asset.editDueDate && (
+                        <button
+                          type="button"
+                          title="清除交片日"
+                          onClick={() => setEditDueDate(asset, '')}
+                          className="pr-2 pl-0.5 py-1 text-amber-700/70 hover:text-amber-900"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </span>
+                  )}
                   {/* 掛上檔案＝把已經在雲端的片段登記進來並逐片打標籤，順便解掉
                       「事後想補片段卻沒有入口」——以前只能整批重跑，那會建出重複素材。 */}
                   {asset.stage === 'raw' && asset.driveFolderId && (
@@ -1236,7 +1288,11 @@ ${after}`)) return;
                       {asset.recognizedMonth ? `已交・${Number(asset.recognizedMonth.slice(5))}月` : '未認列月份'}
                     </button>
                   )}
-                  <span className="shrink-0 whitespace-nowrap text-[13px] text-gray-400">{new Date(asset.createdAt).toLocaleDateString()}</span>
+                  {/* 原本這裡印建檔日，但沒寫是什麼日期、又跟右上角的拍攝日擺在一起，老闆看不懂。
+                      2026-10-03 改成建檔人（跟剪輯師看到的同一個名字）。舊素材沒有記名字就不顯示。 */}
+                  {asset.createdByName && (
+                    <span className="shrink-0 whitespace-nowrap text-[13px] text-gray-500">素材聯繫窗口：{asset.createdByName}</span>
+                  )}
                   {asset.voidedAt && (
                     <span className="text-[13px] font-bold text-red-500">已作廢{asset.voidReason ? `・${asset.voidReason}` : ''}</span>
                   )}

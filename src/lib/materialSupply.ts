@@ -155,6 +155,8 @@ interface VendorPool {
  */
 function queueOrder(a: Asset, b: Asset): number {
   if (!!a.isUrgent !== !!b.isUrgent) return a.isUrgent ? -1 : 1;
+  // ⚠️ 不要把 editDueDate（同事指定交片日）加進來：這支同時排「成片庫存」，
+  //    交片日在片交出去之後還留在文件上，加進來會改變小編排片建議用哪一支成片。
   return (a.createdAt || '').localeCompare(b.createdAt || '');
 }
 

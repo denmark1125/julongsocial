@@ -12,9 +12,12 @@
 export default function EditingBrief({
   brief,
   clipNotes,
+  desktopLarge,
 }: {
   brief?: string;
   clipNotes?: { fileName: string; note: string; kind?: 'raw' | 'broll' }[];
+  /** 剪輯師排程清單用：電腦版字放大到 15px。內部素材庫不傳，維持原樣 */
+  desktopLarge?: boolean;
 }) {
   const all = clipNotes || [];
   const raw = all.filter(c => c.kind !== 'broll');
@@ -25,10 +28,10 @@ export default function EditingBrief({
   return (
     <div className="mt-2 rounded-xl bg-sky-50/70 px-3 py-2">
       {brief?.trim() && (
-        <p className="text-[13px] leading-relaxed text-sky-900 whitespace-pre-wrap">{brief}</p>
+        <p className={`text-[13px] leading-relaxed text-sky-900 whitespace-pre-wrap ${desktopLarge ? 'lg:text-[15px]' : ''}`}>{brief}</p>
       )}
       {(raw.length > 0 || broll.length > 0) && (
-        <p className="mt-1 text-[13px] text-sky-700/80">
+        <p className={`mt-1 text-[13px] text-sky-700/80 ${desktopLarge ? 'lg:text-[15px]' : ''}`}>
           {raw.length} 個片段
           {labelled.map((c, i) => `　${i + 1}.${c.note}`).join('')}
           {broll.length > 0 && `　＋${broll.length} 個 B-roll`}
