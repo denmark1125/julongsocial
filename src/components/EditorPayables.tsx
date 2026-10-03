@@ -7,9 +7,9 @@ import {
 } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import {
-  billingMonthOptions, getAssetFee, getBillableEditorId, getBillingMonth,
+  billingMonthOptions, findFee950Issues, getAssetFee, getBillableEditorId, getBillingMonth,
   groupByVendor, isBillable, isLegacyNeverUploaded, monthLabel, needsLegacyReview,
-  summarizeByEditor,
+  summarizeByEditor, WRONG_OVER60_FEE,
 } from '../lib/editorBilling';
 import {
   Wallet, CheckCircle2, Clock, AlertCircle, Ban, ChevronDown, ChevronRight,
@@ -86,6 +86,49 @@ export default function EditorPayables() {
       getBillingMonth(a) === month &&
       (getBillableEditorId(a, vendors) || UNASSIGNED) === editorId
     );
+
+  // 剪輯費 950 → 900 一次性更正（見 findFee950Issues）。沒有受影響的單時整張卡片不出現。
+  const fee950 = useMemo(() => findFee950Issues(invoices, assets), [invoices, assets]);
+  const [fee950Confirm, setFee950Confirm] = useState(false);
+  const fee950Total = fee950.unpaid.length + fee950.processing.length + fee950.paid.length + fee950.strayAssetIds.length;
+
+  const fixFee950 = async () => {
+    setBusyId('fee950');
+    try {
+      const nowIso = new Date().toISOString();
+      for (const { invoice, wrongAssetIds } of fee950.unpaid) {
+        // 第一批：跟「作廢」按鈕一樣，整張單作廢、片放回可請款清單
+        const voidBatch = writeBatch(db);
+        voidBatch.update(doc(db, 'editorInvoices', invoice.id!), {
+          status: 'void',
+          voidedAt: nowIso,
+          voidReason: '剪輯費 950→900 更正，請重新送單',
+        });
+        for (const it of invoice.items || []) {
+          voidBatch.update(doc(db, 'assets', it.assetId), { editorInvoiceId: '' });
+        }
+        await voidBatch.commit();
+        // 第二批：清掉凍結的 950，讓它回到分級價。
+        // ⚠️ 不能跟第一批合併：規則的 internalUnlockingInvoice 要求解鎖那一筆「只動 editorInvoiceId」，
+        //    而且同一個 batch 裡規則看到的還是解鎖前的狀態（仍在請款單上 → 計費欄位凍結）。
+        const feeBatch = writeBatch(db);
+        for (const id of wrongAssetIds) feeBatch.update(doc(db, 'assets', id), { editorFee: deleteField() });
+        await feeBatch.commit();
+      }
+      if (fee950.strayAssetIds.length) {
+        const strayBatch = writeBatch(db);
+        for (const id of fee950.strayAssetIds) strayBatch.update(doc(db, 'assets', id), { editorFee: deleteField() });
+        await strayBatch.commit();
+      }
+      toast.success('更正完成，請通知剪輯師重新送單');
+      setFee950Confirm(false);
+    } catch (e) {
+      console.error('Fee 950 fix failed:', e);
+      toast.error('更正途中失敗，請截圖給工程師（已完成的部分不會重複處理）');
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const markPaid = async (inv: EditorInvoice) => {
     setBusyId(inv.id!);
@@ -349,6 +392,53 @@ export default function EditorPayables() {
           </div>
         ))}
       </div>
+
+      {fee950Total > 0 && (
+        <div className="bg-rose-50 rounded-2xl border border-rose-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-rose-200">
+            <h3 className="text-sm font-bold text-rose-800">剪輯費更正 · 60 秒以上應為 $900</h3>
+            <p className="text-[13px] text-rose-700 mt-1">9/11 起系統把 60 秒以上的片誤算成 ${WRONG_OVER60_FEE}。以下是受影響的單，每支多算 ${WRONG_OVER60_FEE - 900}。</p>
+          </div>
+          <div className="divide-y divide-rose-200/70">
+            {([
+              ['未付款 · 會作廢，剪輯師重新送單即照 $900 計', fee950.unpaid],
+              ['付款處理中 · 不會自動處理，請人工確認', fee950.processing],
+              ['已付款 · 只列出來，由老闆決定是否處理差額', fee950.paid],
+            ] as const).map(([label, rows]) => rows.length > 0 && (
+              <div key={label} className="px-5 py-3 bg-white/60">
+                <p className="text-xs font-bold text-gray-700 mb-1">{label}（{rows.length} 張）</p>
+                {rows.map(({ invoice, wrongAssetIds }) => (
+                  <p key={invoice.id} className="text-[13px] text-gray-600">
+                    {invoice.editorName}｜{monthLabel(invoice.billingMonth)}｜總額 {money(invoice.totalAmount)}｜60 秒以上 {wrongAssetIds.length} 支，多算 {money(wrongAssetIds.length * (WRONG_OVER60_FEE - 900))}
+                  </p>
+                ))}
+              </div>
+            ))}
+            {fee950.strayAssetIds.length > 0 && (
+              <div className="px-5 py-3 bg-white/60">
+                <p className="text-xs font-bold text-gray-700">還沒送單、但金額卡在 ${WRONG_OVER60_FEE} 的片：{fee950.strayAssetIds.length} 支（會改回 $900）</p>
+              </div>
+            )}
+          </div>
+          {(fee950.unpaid.length > 0 || fee950.strayAssetIds.length > 0) && (
+            <div className="px-5 py-4 border-t border-rose-200 flex items-center gap-3 flex-wrap">
+              {!fee950Confirm ? (
+                <button onClick={() => setFee950Confirm(true)} className="px-4 py-2 rounded-lg bg-rose-600 text-white text-[13px] font-bold">
+                  更正未付款的單
+                </button>
+              ) : (
+                <>
+                  <span className="text-[13px] text-rose-800 font-bold">確定作廢 {fee950.unpaid.length} 張未付款的單並改回 $900？</span>
+                  <button onClick={fixFee950} disabled={busyId === 'fee950'} className="px-4 py-2 rounded-lg bg-rose-600 text-white text-[13px] font-bold disabled:opacity-40">
+                    {busyId === 'fee950' ? '處理中…' : '確定更正'}
+                  </button>
+                  <button onClick={() => setFee950Confirm(false)} disabled={busyId === 'fee950'} className="px-4 py-2 rounded-lg bg-white border border-gray-300 text-[13px] font-bold">取消</button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {legacyUploaded.length > 0 && (
         <div className="bg-amber-50 rounded-2xl border border-amber-200 overflow-hidden">
