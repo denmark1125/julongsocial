@@ -4,6 +4,8 @@
 
 **正式站：** https://julongsocial.vercel.app
 
+**開發進度／換電腦接手：** 先讀 [`docs/進度紀錄.md`](docs/進度紀錄.md)
+
 ---
 
 ## 系統功能
