@@ -4,7 +4,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import {
-  Asset, DEFAULT_EDITOR_FEE, EDITOR_INVOICING_ENABLED, EditorInvoice, UserProfile, Vendor,
+  Asset, DURATION_TIER_LABEL, EDITOR_FEE_BY_TIER, EDITOR_INVOICING_ENABLED, EditorInvoice, UserProfile, Vendor,
 } from '../types';
 import {
   billingMonthOptions, buildInvoiceItems, getAssetFee, getBillingMonth,
@@ -67,7 +67,6 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
   const [invoices, setInvoices] = useState<EditorInvoice[]>([]);
   const [month, setMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [selected, setSelected] = useState<Record<string, boolean>>({});
-  const [fees, setFees] = useState<Record<string, number>>({});
   const [submitting, setSubmitting] = useState(false);
   // 送出後金額就凍結、而且是錢的事，所以中間一定要有一道「停下來看清楚」的關卡
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -147,7 +146,9 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
   const billable = useMemo(() => listBillable(myAssets, month), [myAssets, month]);
   const groups = useMemo(() => groupByVendor(billable, vendorName), [billable, vendors]);
 
-  const feeOf = (a: Asset) => fees[a.id!] ?? getAssetFee(a);
+  // 2026-10-05 老闆：剪輯費照長度分級（60 秒以下 700／以上 900），特殊情況由主管在「應付對帳」逐片調整。
+  // 所以剪輯師這頁**只顯示金額、不能自己改**——金額只有一個來源 getAssetFee()（分級價或主管指定）。
+  const feeOf = (a: Asset) => getAssetFee(a);
   const chosen = billable.filter(a => selected[a.id!]);
   const chosenTotal = chosen.reduce((acc, a) => acc + feeOf(a), 0);
   const billableTotal = billable.reduce((acc, a) => acc + feeOf(a), 0);
@@ -155,12 +156,6 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
   const monthInvoices = invoices
     .filter(i => i.billingMonth === month && i.status !== 'void')
     .sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
-
-  const setFee = (assetId: string, raw: string) => {
-    // parseInt('') → NaN 會讓 Firestore 規則的 is int 判定失敗，噴出看不懂的 permission-denied
-    const n = Number(raw);
-    setFees(prev => ({ ...prev, [assetId]: Number.isFinite(n) && n >= 0 ? Math.round(n) : DEFAULT_EDITOR_FEE }));
-  };
 
   const toggleAll = (list: Asset[], on: boolean) => {
     setSelected(prev => {
@@ -300,8 +295,8 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
               </span>
             </h3>
             <p className="text-[13px] text-gray-500 mt-0.5">
-              預設每支 {money(DEFAULT_EDITOR_FEE)}，未滿 60 秒的請改成 750。
-              送出後金額就凍結，請務必重新確認；若有問題請聯絡對接 PM。
+              {DURATION_TIER_LABEL.under60} {money(EDITOR_FEE_BY_TIER.under60)}、{DURATION_TIER_LABEL.over60} {money(EDITOR_FEE_BY_TIER.over60)}，特殊金額以主管確認為準。
+              送出後金額就凍結，金額有問題請先聯絡對接 PM 調整再送出。
             </p>
           </div>
           {billable.length > 0 && (
@@ -353,18 +348,9 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
                         {a.cloudUploadedAt ? `${format(parseISO(a.cloudUploadedAt), 'MM/dd')} 上傳雲端` : ''}
                       </p>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <span className="text-[13px] text-gray-500">$</span>
-                      <input
-                        type="number"
-                        min={0}
-                        step={50}
-                        value={feeOf(a)}
-                        onChange={e => setFee(a.id!, e.target.value)}
-                        onClick={e => e.preventDefault()}
-                        className="w-20 px-2 py-1 rounded-lg border border-black/10 text-base text-right font-bold text-[#5A5A40] focus:outline-none focus:border-[#5A5A40]"
-                      />
-                    </div>
+                    <span className="shrink-0 text-base font-bold text-[#5A5A40] tabular-nums">
+                      {money(feeOf(a))}
+                    </span>
                   </label>
                 ))}
               </div>
