@@ -15,7 +15,7 @@ import { fileURLToPath } from "url";
 import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVideoTrackingScope, getDeficitBreakdown } from "./src/lib/vendorStatus.js";
 // 交棒狀態的判定要跟前端同一份，不然推播說的「目前狀態」會跟畫面上不一致
 import { deriveFlowStage, FLOW_STAGE_LABEL } from "./src/types.js";
-import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFolderName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
+import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFolderName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, renameFile, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
 import { BROLL_FOLDER_NAME } from "./src/lib/driveNaming.js";
 
 dotenv.config();
@@ -947,6 +947,68 @@ app.post("/api/drive/attach-files", async (req, res) => {
     if (e?.httpStatus) return sendAuthError(res, e);
     console.error("drive/attach-files failed:", e?.message);
     return res.status(502).json({ error: e?.message || "掛上檔案失敗" });
+  }
+});
+
+/**
+ * 改素材／成片的片名。
+ *
+ * 片名只存在 assets.title 一處，剪輯師工作台、請款頁、上片排程都是即時讀它，
+ * 所以改這一欄剪輯師那邊就同步了。走後端是因為雲端那一組毛片資料夾也要跟著改名
+ *（資料夾名＝建檔時的片名），前端沒有 Drive 權限。
+ *
+ * ⚠️ 已送出的請款單明細（editorInvoices.items[].title）刻意不改：送出即凍結，是帳務紀錄。
+ * ⚠️ 雲端改名失敗不回滾系統片名 —— 系統這邊才是大家在看的，回 driveWarning 讓人手動補。
+ */
+app.post("/api/assets/rename", async (req, res) => {
+  try {
+    const me = await requireUser(req);
+    if (me.role === 'editor') return res.status(403).json({ error: "剪輯師無法修改片名" });
+
+    const { assetId } = req.body || {};
+    const title = String(req.body?.title ?? '').trim();
+    if (!assetId) return res.status(400).json({ error: "缺少 assetId" });
+    if (!title) return res.status(400).json({ error: "片名不能空白" });
+    if (title.length > 200) return res.status(400).json({ error: "片名最多 200 字" });
+
+    const assetRef = adminDb.collection("assets").doc(String(assetId));
+    const aSnap = await assetRef.get();
+    if (!aSnap.exists) return res.status(404).json({ error: "找不到這支素材" });
+    const asset: any = aSnap.data();
+    if (asset.title === title) return res.json({ ok: true, title, unchanged: true });
+
+    await assetRef.update({ title });
+
+    // 上傳紀錄的 groupName 是片名快照，跟著改才不會在對帳時出現兩個名字
+    const uploads = await adminDb.collection("assetUploads").where("assetId", "==", assetRef.id).get();
+    for (let i = 0; i < uploads.docs.length; i += 400) {
+      const batch = adminDb.batch();
+      uploads.docs.slice(i, i + 400).forEach((d: any) => batch.update(d.ref, { groupName: title }));
+      await batch.commit();
+    }
+
+    let driveRenamed = false;
+    let driveWarning: string | null = null;
+    const folderId = String(asset.driveFolderId || '');
+    if (folderId) {
+      if (!isDriveConfigured()) {
+        driveWarning = "片名已更新；雲端未設定，資料夾未同步。";
+      } else {
+        try {
+          await renameFile(folderId, sanitizeFolderName(title));
+          driveRenamed = true;
+        } catch (e: any) {
+          console.error("assets/rename drive failed:", e?.message);
+          driveWarning = "片名已更新；雲端資料夾同步失敗，請手動修改。";
+        }
+      }
+    }
+
+    return res.json({ ok: true, title, driveRenamed, driveWarning });
+  } catch (e: any) {
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("assets/rename failed:", e?.message);
+    return res.status(500).json({ error: e?.message || "改片名失敗" });
   }
 });
 
