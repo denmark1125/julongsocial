@@ -286,9 +286,10 @@ export function buildEditorQueue(opts: {
   /**
    * 急件最前，其餘照日期由近到遠。
    *
-   * ⚠️ **「沒片」不要沉到最後。** 試過一次，老闆的回應是「10/3 縈寶還沒片剪你也沒有上去，
-   *    你原本還比較對」——那一格就算現在動不了，它仍然是最近的截止日，
-   *    看得到才知道要去催料。清單照日子走，不照「能不能動手」走。
+   * ⚠️ 2026-10-06 改：「沒片」排在有片可剪的列後面，彼此照上片日排。
+   *    原因：沒片那一列畫面上顯示的是上片日（見 QueueRow），卻照看不到的交片期限排序，
+   *    10/16 的康青龍跑到 10/08 的片前面，老闆：「照理來說不是應該往下排？」
+   *    （10/02 老闆曾說沒片不要沉底 —— 這次是老闆本人看過新畫面後改的決定。仍在主清單、不收合。）
    */
   const byDate = (x: EditorQueueRow, y: EditorQueueRow) =>
     (x.date?.getTime() || 0) - (y.date?.getTime() || 0);
@@ -299,6 +300,9 @@ export function buildEditorQueue(opts: {
   // 急件之間也照期限排；急件沒有期限的排在急件最前面（「現在就要」）。
   rows.sort((x, y) => {
     if (x.urgent !== y.urgent) return x.urgent ? -1 : 1;
+    // 沒片的排在有片可剪的後面，彼此照畫面上顯示的上片日排
+    if ((x.kind === 'no_material') !== (y.kind === 'no_material')) return x.kind === 'no_material' ? 1 : -1;
+    if (x.kind === 'no_material') return byDate(x, y);
     if (!x.deadline || !y.deadline) {
       if (!x.deadline && !y.deadline) return 0;
       return !x.deadline ? -1 : 1;
