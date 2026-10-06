@@ -10,6 +10,7 @@
  * 用法（先 dry-run 看清單，確認後才寫入）：
  *   npx tsx scripts/close-finished-legacy.ts
  *   npx tsx scripts/close-finished-legacy.ts --apply
+ *   --exclude <片名>（可重複）：排除還沒上傳雲端、要留給剪輯師按的片
  * 需要環境變數 FIREBASE_SERVICE_ACCOUNT_KEY。寫入的 id 存到 scripts/close-finished-legacy.<時間>.json，可據以還原。
  */
 import { readFileSync, writeFileSync } from 'fs';
@@ -18,6 +19,7 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { deriveFlowStage, EDITOR_BILLING_CUTOVER_AT } from '../src/types';
 
 const APPLY = process.argv.includes('--apply');
+const EXCLUDE = process.argv.flatMap((v, i, all) => (all[i - 1] === '--exclude' ? [v.trim()] : []));
 const SOURCE = '2026-10 批次結案：系統外已付';
 
 const cfg = JSON.parse(readFileSync(new URL('../firebase-applet-config.json', import.meta.url), 'utf8'));
@@ -36,6 +38,7 @@ const cutover = Date.parse(EDITOR_BILLING_CUTOVER_AT);
 const targets = assetSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter(a => {
   if (a.type !== 'video' || a.voidedAt || a.status === 'archived') return false;
   if (a.cloudUploadedAt || a.editorInvoiceId || a.legacySettlementStatus) return false;
+  if (EXCLUDE.includes(String(a.title || '').trim())) return false;
   const stage = deriveFlowStage(a);
   if (stage !== 'client_review' && stage !== 'to_upload') return false;
   // 「已走完」的證據，三選一。「可使用」且切帳後建檔的片是真的還在流程中，不碰。
