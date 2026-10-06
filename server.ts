@@ -16,7 +16,7 @@ import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVide
 // 交棒狀態的判定要跟前端同一份，不然推播說的「目前狀態」會跟畫面上不一致
 import { deriveFlowStage, FLOW_STAGE_LABEL } from "./src/types.js";
 import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFolderName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, renameFile, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
-import { BROLL_FOLDER_NAME } from "./src/lib/driveNaming.js";
+import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
 
 dotenv.config();
 
@@ -989,17 +989,37 @@ app.post("/api/assets/rename", async (req, res) => {
 
     let driveRenamed = false;
     let driveWarning: string | null = null;
-    const folderId = String(asset.driveFolderId || '');
-    if (folderId) {
-      if (!isDriveConfigured()) {
-        driveWarning = "片名已更新；雲端未設定，資料夾未同步。";
+    // 系統建的素材有 driveFolderId；舊素材是手動貼資料夾連結，只能從 url 取 id。
+    const fromUrl = !asset.driveFolderId;
+    const folderId = String(asset.driveFolderId || driveFolderIdFromUrl(asset.url));
+    if (!folderId) {
+      driveWarning = "片名已更新；此素材未連結雲端資料夾。";
+    } else if (!isDriveConfigured()) {
+      driveWarning = "片名已更新；雲端未設定，資料夾未同步。";
+    } else {
+      // 手動貼的連結可能指到多支素材共用的上層資料夾，改了會把別支的資料夾名也換掉。
+      let shared = false;
+      if (fromUrl) {
+        const siblings = await adminDb.collection("assets").where("vendorId", "==", asset.vendorId).get();
+        shared = siblings.docs.some((d: any) => d.id !== assetRef.id
+          && (d.data().driveFolderId || driveFolderIdFromUrl(d.data().url)) === folderId);
+        // 貼成 IP 的毛片根目錄或 B-roll 資料夾也一樣不能改
+        const v = asset.vendorId
+          ? (await adminDb.collection("vendors").doc(String(asset.vendorId)).get()).data() || {}
+          : {};
+        if (folderId === v.rawFootageFolderId || folderId === v.brollFolderId) shared = true;
+      }
+      if (shared) {
+        driveWarning = "片名已更新；雲端資料夾由多支素材共用，未改名。";
       } else {
         try {
           await renameFile(folderId, sanitizeFolderName(title));
           driveRenamed = true;
         } catch (e: any) {
           console.error("assets/rename drive failed:", e?.message);
-          driveWarning = "片名已更新；雲端資料夾同步失敗，請手動修改。";
+          driveWarning = e?.reason === 'notFound'
+            ? "片名已更新；系統無權存取此雲端資料夾，請手動修改。"
+            : "片名已更新；雲端資料夾同步失敗，請手動修改。";
         }
       }
     }
