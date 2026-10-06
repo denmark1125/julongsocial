@@ -242,6 +242,18 @@ export async function getFile(fileId: string): Promise<DriveFileInfo> {
 }
 
 /**
+ * 改檔案／資料夾名稱。素材改片名時，用來讓雲端那一組毛片資料夾跟著改。
+ * 只動 metadata，資料夾裡的檔案完全不受影響。
+ */
+export async function renameFile(fileId: string, name: string): Promise<void> {
+  await driveFetch(`/files/${encodeURIComponent(fileId)}?fields=id,name`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+}
+
+/**
  * 把檔案搬進指定資料夾（已經在那裡就什麼都不做）。
  *
  * ⚠️ 這是 metadata 操作，**不會重傳位元組** —— 幾 GB 的毛片也是瞬間完成。

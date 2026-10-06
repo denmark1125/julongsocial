@@ -51,7 +51,8 @@ import {
   MessageSquareText,
   Flame,
   UploadCloud,
-  FolderOpen
+  FolderOpen,
+  Pencil
 } from 'lucide-react';
 import { toJpeg } from 'html-to-image';
 import download from 'downloadjs';
@@ -92,6 +93,10 @@ export default function AssetDatabase() {
   const posts = useLiveCollection<Post>('posts');
   const [reviewNotes, setReviewNotes] = useState<Record<string, { text: string; updatedAt: string; updatedByName: string }>>({});
   const [noteAsset, setNoteAsset] = useState<Asset | null>(null);
+  // 改片名。走後端 API：雲端那一組毛片資料夾要跟著改名，前端沒有 Drive 權限。
+  const [renamingAsset, setRenamingAsset] = useState<Asset | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const [savingRename, setSavingRename] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
   const [savingNote, setSavingNote] = useState(false);
   // 強制刪除只開給工程師，所以這頁要知道自己是誰（比照 ShootBookings 的做法）
@@ -168,6 +173,36 @@ export default function AssetDatabase() {
   const openReviewNote = (asset: Asset) => {
     setNoteAsset(asset);
     setNoteDraft(reviewNotes[asset.id!]?.text || '');
+  };
+
+  const openRename = (asset: Asset) => {
+    setRenamingAsset(asset);
+    setRenameDraft(asset.title || '');
+  };
+
+  const saveRename = async () => {
+    if (!renamingAsset?.id) return;
+    const title = renameDraft.trim();
+    if (!title) { toast.error('片名不能空白'); return; }
+    if (title === renamingAsset.title) { setRenamingAsset(null); return; }
+    setSavingRename(true);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      const res = await fetch('/api/assets/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+        body: JSON.stringify({ assetId: renamingAsset.id, title }),
+      });
+      const data: any = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || '改片名失敗');
+      if (data.driveWarning) toast(data.driveWarning, { icon: '⚠️', duration: 8000 });
+      else toast.success(data.driveRenamed ? '片名已更新，雲端資料夾已同步' : '片名已更新');
+      setRenamingAsset(null);
+    } catch (error: any) {
+      toast.error(error?.message || '改片名失敗');
+    } finally {
+      setSavingRename(false);
+    }
   };
 
   const saveReviewNote = async () => {
@@ -1118,10 +1153,22 @@ ${after}`)) return;
                     <p className="text-[13px] font-medium text-gray-400">拍攝: {asset.filmingDate}</p>
                   )}
                 </div>
-                <h4 className={cn(
-                  "font-bold leading-tight line-clamp-2",
-                  effStatus(asset) === 'used' ? "text-sm text-gray-500" : "text-lg"
-                )}>{asset.title}</h4>
+                <div className="flex items-start gap-1.5">
+                  <h4 className={cn(
+                    "min-w-0 font-bold leading-tight line-clamp-2",
+                    effStatus(asset) === 'used' ? "text-sm text-gray-500" : "text-lg"
+                  )}>{asset.title}</h4>
+                  {me?.role && me.role !== 'editor' && (
+                    <button
+                      type="button"
+                      onClick={() => openRename(asset)}
+                      className="mt-0.5 shrink-0 p-1 rounded-lg text-gray-300 hover:text-[#5A5A40] hover:bg-gray-50 transition-colors"
+                      title="修改片名"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                  )}
+                </div>
                 {/* 剪輯需求。刻意跟下面琥珀色的「審片備註」分開：
                     那是「為什麼還沒審」，這是「要怎麼剪」，兩件不同的事。 */}
                 <EditingBrief brief={asset.editingBrief} clipNotes={asset.clipNotes} />
@@ -2020,6 +2067,37 @@ ${after}`)) return;
                   </p>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {renamingAsset && (
+        <div className="fixed inset-0 z-[70] bg-black/40 p-4 flex items-center justify-center" onMouseDown={() => !savingRename && setRenamingAsset(null)}>
+          <div className="w-full max-w-lg rounded-[28px] bg-white p-6 shadow-2xl" onMouseDown={event => event.stopPropagation()}>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[13px] font-bold uppercase tracking-widest text-[#5A5A40]/70">修改片名</p>
+                <h3 className="mt-1 text-lg font-bold text-[#5A5A40] break-words">{renamingAsset.title}</h3>
+              </div>
+              <button type="button" onClick={() => setRenamingAsset(null)} disabled={savingRename} className="text-gray-300 hover:text-gray-500"><X size={20} /></button>
+            </div>
+            <input
+              autoFocus
+              type="text"
+              maxLength={200}
+              value={renameDraft}
+              onChange={event => setRenameDraft(event.target.value)}
+              onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) saveRename(); }}
+              placeholder="輸入新的片名"
+              className="mt-4 w-full rounded-2xl border border-black/10 bg-[#F5F5F0]/60 px-4 py-3 text-sm outline-none focus:border-[#5A5A40]/40"
+            />
+            <div className="mt-3 space-y-0.5 text-[13px] text-gray-400">
+              <p>{renamingAsset.driveFolderId ? '剪輯師系統及雲端資料夾一併修改。' : '剪輯師系統一併修改。'}</p>
+              <p>已送出請款單無法變更。</p>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setRenamingAsset(null)} disabled={savingRename} className="px-4 py-2 rounded-xl text-xs font-bold text-gray-500 hover:bg-gray-50">取消</button>
+              <button type="button" onClick={saveRename} disabled={savingRename || !renameDraft.trim()} className="px-5 py-2 rounded-xl bg-[#5A5A40] text-xs font-bold text-white disabled:opacity-50">{savingRename ? '儲存中…' : '儲存片名'}</button>
             </div>
           </div>
         </div>
