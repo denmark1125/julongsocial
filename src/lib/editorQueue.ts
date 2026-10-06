@@ -1,4 +1,4 @@
-import { differenceInCalendarDays, format, parseISO, startOfDay, subBusinessDays } from 'date-fns';
+import { addDays, differenceInCalendarDays, format, parseISO, startOfDay, subBusinessDays } from 'date-fns';
 import { Asset } from '../types';
 import { DemandItem } from './materialSupply';
 
@@ -10,6 +10,42 @@ import { DemandItem } from './materialSupply';
  * 工作天＝跳過週六、日。國定假日沒有排除（date-fns 不知道台灣的假日），遇到連假要靠同事指定交片日。
  */
 export const EDIT_LEAD_WORKDAYS = 7;
+
+/**
+ * 沒配到上片日的毛片：拍攝日（沒填就用建檔日）＋這麼多天＝交片期限。公司規則「拍回來 7 天內剪完」。
+ *
+ * 為什麼需要：清單是上片日驅動的，凍結中（杜永霖）或沒設上片週期（又生、小馬…）的 IP
+ * 永遠排不出上片日，毛片只會躲在折疊區，剪輯師得自己去「我的所有片」翻。
+ */
+export const EDIT_DAYS_AFTER_SHOOT = 7;
+
+/**
+ * 只有這天（含）之後建檔的毛片套「拍攝後 7 天」。之前的是積壓，留在折疊區。
+ *
+ * ⚠️ 2026-10-06 上線時又生 8 支、小馬 6 支已卡 30 天以上，全部套進來主清單會被一排
+ *    「已超過 N 天」淹掉。老闆決定舊的分開放，要誰優先由同事指定交片日。
+ *    取 09-29＝上線當天還在 7 天內的片都算新片（杜永霖那 4 支就是這種）。
+ */
+export const SHOOT_DEADLINE_SINCE = '2026-09-29';
+
+/**
+ * 毛片「拍回來」的那天＝拍攝日與建檔日取較晚的。積壓天數與「拍攝後 7 天」都從這天起算。
+ *
+ * ⚠️ 不能只看拍攝日：2026-10-06 實測極酵一支 07/31 拍、10/02 才進系統，
+ *    期限被算成 08/07，整份清單第一列就是一支剪輯師兩個月前根本拿不到的片。
+ */
+export function shootBaseDate(asset: Pick<Asset, 'filmingDate' | 'createdAt'>): Date | null {
+  const dates = [asset.filmingDate, asset.createdAt]
+    .map(v => (v ? parseISO(v) : null))
+    .filter((d): d is Date => !!d && !Number.isNaN(d.getTime()));
+  if (!dates.length) return null;
+  return startOfDay(new Date(Math.max(...dates.map(d => d.getTime()))));
+}
+
+/** 新進毛片（不是積壓）才套拍攝後 7 天 */
+function isFreshRaw(asset: Asset): boolean {
+  return (asset.createdAt || '').slice(0, 10) >= SHOOT_DEADLINE_SINCE;
+}
 
 /** 上片日往前推 EDIT_LEAD_WORKDAYS 個工作天＝交片期限 */
 export function deliveryDeadline(airDate: Date): Date {
@@ -92,8 +128,8 @@ export interface EditorQueueRow {
   date: Date | null;
   /** 交片期限：同事指定的交片日，沒有就是上片日往前推 7 個工作天。急件沒配到日子時為 null */
   deadline: Date | null;
-  /** 期限從哪來：'custom'＝同事指定，'air'＝由上片日推算 */
-  deadlineSource?: 'custom' | 'air';
+  /** 期限從哪來：'custom'＝同事指定，'air'＝由上片日推算，'shoot'＝沒有上片日，拍攝日＋7 天 */
+  deadlineSource?: 'custom' | 'air' | 'shoot';
   vendorId: string;
   kind: EditorQueueKind;
   asset?: Asset;
@@ -118,7 +154,10 @@ export interface EditorQueue {
    * 看起來就像系統漏算。三袋加起來要等於日曆上那一天的筆數，才對得起來。
    */
   settled: EditorQueueRow[];
-  /** 毛片比上片日多出來的那些。不要藏掉，只是排在後面 */
+  /**
+   * 積壓：沒配到上片日、又不是新進毛片（見 SHOOT_DEADLINE_SINCE）、也沒急件或指定交片日。
+   * 卡最久的排前面。不要藏掉，只是不進主清單。
+   */
   unassigned: Asset[];
 }
 
@@ -136,11 +175,13 @@ function rawOrder(a: Asset, b: Asset): number {
   return (a.createdAt || '').localeCompare(b.createdAt || '');
 }
 
-/** 這一列的期限：素材有指定交片日就用它，否則由上片日推算 */
+/** 這一列的期限：素材有指定交片日就用它，否則由上片日推算；都沒有時新進毛片用拍攝日＋7 天 */
 function rowDeadline(asset: Asset | undefined, airDate: Date | null): Pick<EditorQueueRow, 'deadline' | 'deadlineSource'> {
   const custom = customDeadline(asset);
   if (custom) return { deadline: custom, deadlineSource: 'custom' };
   if (airDate) return { deadline: deliveryDeadline(airDate), deadlineSource: 'air' };
+  const shot = asset && isFreshRaw(asset) ? shootBaseDate(asset) : null;
+  if (shot) return { deadline: addDays(shot, EDIT_DAYS_AFTER_SHOOT), deadlineSource: 'shoot' };
   return { deadline: null };
 }
 
@@ -227,17 +268,20 @@ export function buildEditorQueue(opts: {
     raws.slice(Math.max(0, dates.length - delivered.length)).forEach(a => unassigned.push(a));
   }
 
-  // 急件、或同事指定了交片日，但沒配到任何一天：一樣要進主清單。
-  // 標了急件／指定了日子卻看不到，等於這個標記沒有用。
+  // 沒配到任何一天，但急件、同事指定了交片日、或是新進毛片（拍攝後 7 天）：一樣要進主清單。
+  // 標了急件／指定了日子卻看不到，等於這個標記沒有用；
+  // 凍結或沒設上片週期的 IP 永遠沒有上片日，不靠拍攝日的話毛片永遠進不來。
   for (let i = unassigned.length - 1; i >= 0; i--) {
     const a = unassigned[i];
-    if (!a.isUrgent && !customDeadline(a)) continue;
+    if (!a.isUrgent && !customDeadline(a) && !isFreshRaw(a)) continue;
     unassigned.splice(i, 1);
     rows.push({
       key: `${a.isUrgent ? 'urgent' : 'due'}_${a.id}`, date: null, ...rowDeadline(a, null), vendorId: a.vendorId,
       kind: 'to_edit', asset: a, urgent: Boolean(a.isUrgent),
     });
   }
+  // 積壓：卡最久的排前面
+  unassigned.sort((x, y) => (shootBaseDate(x)?.getTime() ?? 0) - (shootBaseDate(y)?.getTime() ?? 0));
 
   /**
    * 急件最前，其餘照日期由近到遠。

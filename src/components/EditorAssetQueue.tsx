@@ -12,13 +12,14 @@ import {
   buildSubmitUndoUpdate,
   getFlowDaysStuck,
   getFlowDueInfo,
+  isClosedOutsideSystem,
   isFlowStale,
   sortFlowColumn,
 } from '../lib/assetFlow';
 import { visibleVendors } from '../lib/vendorStatus';
 import EditingBrief from './EditingBrief';
 import {
-  buildEditorQueue, customDeadline, deadlineStatus, deliveryDeadline, EditorQueueRow, formatDeadline,
+  buildEditorQueue, customDeadline, deadlineStatus, deliveryDeadline, EditorQueueRow, formatDeadline, shootBaseDate,
 } from '../lib/editorQueue';
 import {
   buildHorizonDemands, buildSupplyPlan, describeSupply, SUPPLY_HORIZON_DAYS,
@@ -369,6 +370,12 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
         {row.deadlineSource === 'custom' && (
           <span className="inline-block lg:mt-1 px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[12px] lg:text-[13px] font-bold whitespace-nowrap">
             同事指定
+          </span>
+        )}
+        {/* 沒有上片日（凍結、沒設上片週期、或毛片比上片日多），期限由拍攝日推算 */}
+        {row.deadlineSource === 'shoot' && (
+          <span className="inline-block lg:mt-1 px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-600 text-[12px] lg:text-[13px] font-bold whitespace-nowrap">
+            拍攝後 7 天
           </span>
         )}
         {row.kind !== 'to_edit' && <span className="text-[13px] lg:text-[15px] text-gray-500">{vendorName}</span>}
@@ -792,7 +799,7 @@ export default function EditorAssetQueue({
     !(a.usedInPostId && settledPostIds.has(a.usedInPostId)) &&
     // 從沒上傳過、但已被後台盤點成「舊制已結清」＝當年在系統外就領過錢了，這支已經結案。
     // 沒有這條的話那批片會永遠掛在待辦裡（沒人會去按上傳雲端，按了反而變成重複請款）。
-    !(a.legacySettlementStatus === 'paid' && !a.cloudUploadedAt)
+    !isClosedOutsideSystem(a)
   );
 
   // 指名給我、但廠商不在我範圍內的片讀不到 vendor 文件，退回素材上的名稱快照
@@ -1272,23 +1279,31 @@ export default function EditorAssetQueue({
   // 還沒排到上片日
   const unassignedBlock = (
     <>
-          {/* 庫存比格子多出來的片。藏起來會讓剪輯師以為沒事做，所以收合而不是拿掉。 */}
+          {/* 積壓：沒排上片日、又不是新進毛片（見 editorQueue 的 SHOOT_DEADLINE_SINCE）。
+              藏起來會讓剪輯師以為沒事做，所以收合而不是拿掉。 */}
           {queue.unassigned.length > 0 && (
             <>
               <FoldHeader
                 open={showUnscheduled}
-                title="還沒排到上片日"
-                hint="手上有這幾支，但接下來的日子已經排滿了。"
+                title="積壓待剪"
+                hint="未排上片日。指定交片日或標急件後移入任務清單。"
                 count={queue.unassigned.length}
                 onToggle={() => setShowUnscheduled(v => !v)}
               />
               {showUnscheduled && (
                 <div className="space-y-3">
-                  {queue.unassigned.map(a => (
-                    <div key={a.id} className="bg-white/70 rounded-2xl border border-black/5 overflow-hidden">
-                      <AssetCard {...cardProps(a)} compact onAdvance={() => advance(a)} />
-                    </div>
-                  ))}
+                  {queue.unassigned.map(a => {
+                    const base = shootBaseDate(a);
+                    const stuck = base ? differenceInCalendarDays(new Date(), base) : null;
+                    return (
+                      <div key={a.id} className="bg-white/70 rounded-2xl border border-black/5 overflow-hidden">
+                        {stuck !== null && stuck > 0 && (
+                          <p className="px-4 pt-3 text-[13px] font-bold text-amber-700 whitespace-nowrap">已卡 {stuck} 天</p>
+                        )}
+                        <AssetCard {...cardProps(a)} compact onAdvance={() => advance(a)} />
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </>

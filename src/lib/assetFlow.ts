@@ -49,9 +49,24 @@ export function getClientApprovalTarget(asset: Pick<Asset, 'cloudUploadedAt'>): 
 }
 
 /** 業主是否已通過。不能只看 approved：to_upload 代表已通過、但尚未上傳，approved 仍為 false。 */
-export function isClientApproved(asset: Pick<Asset, 'stage' | 'approved' | 'flowStage'>): boolean {
+export function isClientApproved(
+  asset: Pick<Asset, 'stage' | 'approved' | 'flowStage'> & Partial<Pick<Asset, 'legacySettlementStatus' | 'cloudUploadedAt'>>
+): boolean {
+  // 系統外已結案的片早就發布／結清了，業主當然同意過。不放行的話這批會永遠掛在「待審核」。
+  if (isClosedOutsideSystem(asset)) return true;
   const stage = deriveFlowStage(asset);
   return stage === 'to_upload' || stage === 'ready';
+}
+
+/**
+ * 系統外已結案：流程在這套系統上線前（或沒按按鈕）就走完，剪輯費也在系統外付過，
+ * 只是從沒按過「上傳雲端」。由管理端盤點成「舊制已結清」。
+ *
+ * 這種片不該再出現在任何待辦：剪輯師工作台、製作進度、素材資料庫的待審核。
+ * ⚠️ 不要為了讓它消失去補 cloudUploadedAt —— 那會讓它變成可請款，等於重複付錢。
+ */
+export function isClosedOutsideSystem(asset: Partial<Pick<Asset, 'legacySettlementStatus' | 'cloudUploadedAt'>>): boolean {
+  return asset.legacySettlementStatus === 'paid' && !asset.cloudUploadedAt;
 }
 
 /**
