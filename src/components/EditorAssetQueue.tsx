@@ -317,8 +317,13 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
    */
   onOpenLibrary?: () => void;
 }) {
-  // 剪輯師只看交片期限，不看上片日（見 editorQueue.ts 的 EDIT_LEAD_WORKDAYS）
-  const raw = row.deadline ? deadlineStatus(row.deadline, row.asset?.createdAt) : null;
+  // 剪輯師只看交片期限，不看上片日（見 editorQueue.ts 的 EDIT_LEAD_WORKDAYS）。
+  // ⚠️ 例外：「沒片」那一列顯示上片日。2026-10-06 老闆：康青龍只排週五，畫面卻寫「10/07（三）」，
+  //    看起來像週三要發、週五不見了 —— 那是 10/16（五）往回推的交片期限。沒片可剪時交片期限沒有意義，
+  //    這一列是讓人知道哪天要上、去催料。
+  const showAirDate = row.kind === 'no_material' && !!row.date;
+  const raw = showAirDate ? deadlineStatus(row.date!, undefined)
+    : row.deadline ? deadlineStatus(row.deadline, row.asset?.createdAt) : null;
   // 「沒片」那一列逾期不標紅：剪輯師手上沒料可剪，紅字等於怪錯人。改成橘色「盡快」，提醒同事去催料。
   const status = raw && row.kind === 'no_material' && raw.tone === 'late' ? { text: '盡快', tone: 'soon' as const } : raw;
   const toneClass = status?.tone === 'late' ? 'text-red-600' : status?.tone === 'soon' ? 'text-amber-600' : 'text-[#5A5A40]';
@@ -353,6 +358,13 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
                 {dayLabel(row.deadline)} 前交片
               </span>
             )}
+          </>
+        ) : showAirDate ? (
+          <>
+            <span className="hidden lg:block text-[13px] text-gray-500">上片日</span>
+            <span className="text-[13px] lg:text-[17px] lg:leading-tight font-bold whitespace-nowrap text-[#5A5A40]">
+              {dayLabel(row.date!)}<span className="lg:hidden">要上</span>
+            </span>
           </>
         ) : row.deadline ? (
           <>
