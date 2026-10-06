@@ -22,6 +22,7 @@ import { buildFlowUpdate, buildSubmitUndoUpdate, getClientApprovalTarget, isClie
 import { getWorkingEditorId, canReassignEditor, getAssetEditorOwner } from '../lib/editorBilling';
 import { isPickerConfigured } from '../lib/drivePicker';
 import { ASSET_CATEGORIES, ASSET_CATEGORY_DATALIST_ID } from '../lib/assetCategories';
+import { driveFolderIdFromUrl } from '../lib/driveNaming';
 import EditingBrief from './EditingBrief';
 import AttachFilesModal from './AttachFilesModal';
 import ClaimFoldersModal from './ClaimFoldersModal';
@@ -2092,7 +2093,7 @@ ${after}`)) return;
               className="mt-4 w-full rounded-2xl border border-black/10 bg-[#F5F5F0]/60 px-4 py-3 text-sm outline-none focus:border-[#5A5A40]/40"
             />
             <div className="mt-3 space-y-0.5 text-[13px] text-gray-400">
-              <p>{renamingAsset.driveFolderId ? '剪輯師系統及雲端資料夾一併修改。' : '剪輯師系統一併修改。'}</p>
+              <p>{(renamingAsset.driveFolderId || driveFolderIdFromUrl(renamingAsset.url)) ? '剪輯師系統及雲端資料夾一併修改。' : '剪輯師系統一併修改。'}</p>
               <p>已送出請款單無法變更。</p>
             </div>
             <div className="mt-4 flex justify-end gap-2">

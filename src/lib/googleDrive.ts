@@ -51,10 +51,35 @@ export function isDriveConfigured(): boolean {
 // 模組層快取。serverless 實例很短命，預期每隔幾分鐘就要重換一次，多 200ms 可以接受。
 // ⚠️ 不要把 access token 存進 Firestore 來跨實例共用 —— 那是把密鑰放進一個靠規則保護的資料庫。
 let cachedToken: { value: string; expiresAt: number } | null = null;
+let cachedFullToken: { value: string; expiresAt: number } | null = null;
 
 export async function getAccessToken(): Promise<string> {
   if (cachedToken && Date.now() < cachedToken.expiresAt) return cachedToken.value;
   const { id, secret, refresh } = readConfig();
+  cachedToken = await exchangeRefreshToken(id, secret, refresh);
+  return cachedToken.value;
+}
+
+/**
+ * 整個雲端硬碟範圍（`drive`）的第二把 token，**只在後端用來改舊素材的資料夾名**。
+ *
+ * 為什麼要第二把：手動貼連結的舊素材資料夾不是這個 app 建的，drive.file 看不到（Google 回 notFound）。
+ * ⚠️ **絕對不要回傳給前端，也不要拿去取代 getAccessToken()。** picker-auth 等路由會把
+ *    getAccessToken() 的值交給每個非剪輯師的瀏覽器；那把維持 drive.file，
+ *    換成這把等於讓所有同事的瀏覽器都能讀寫、刪除公司帳號整個雲端硬碟。
+ */
+export function isFullDriveConfigured(): boolean {
+  return isDriveConfigured() && !!process.env.GOOGLE_DRIVE_FULL_REFRESH_TOKEN;
+}
+
+async function getFullAccessToken(): Promise<string> {
+  if (cachedFullToken && Date.now() < cachedFullToken.expiresAt) return cachedFullToken.value;
+  const { id, secret } = readConfig();
+  cachedFullToken = await exchangeRefreshToken(id, secret, process.env.GOOGLE_DRIVE_FULL_REFRESH_TOKEN!);
+  return cachedFullToken.value;
+}
+
+async function exchangeRefreshToken(id: string, secret: string, refresh: string): Promise<{ value: string; expiresAt: number }> {
 
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
@@ -71,12 +96,11 @@ export async function getAccessToken(): Promise<string> {
       `最常見原因：同意畫面退回 Testing（token 7 天失效）、或授權被撤銷。`);
   }
   // 提早 60 秒過期，避免剛好卡在邊界
-  cachedToken = { value: data.access_token, expiresAt: Date.now() + (data.expires_in - 60) * 1000 };
-  return cachedToken.value;
+  return { value: data.access_token, expiresAt: Date.now() + (data.expires_in - 60) * 1000 };
 }
 
-async function driveFetch(path: string, init: RequestInit = {}): Promise<any> {
-  const token = await getAccessToken();
+async function driveFetch(path: string, init: RequestInit = {}, token?: string): Promise<any> {
+  token = token || await getAccessToken();
   const res = await fetch(`${DRIVE_API}${path}`, {
     ...init,
     headers: { Authorization: `Bearer ${token}`, ...(init.headers || {}) },
@@ -244,13 +268,16 @@ export async function getFile(fileId: string): Promise<DriveFileInfo> {
 /**
  * 改檔案／資料夾名稱。素材改片名時，用來讓雲端那一組毛片資料夾跟著改。
  * 只動 metadata，資料夾裡的檔案完全不受影響。
+ *
+ * 有設整個雲端硬碟範圍的 token 就用它（舊素材手動建的資料夾才改得到），沒有就退回 drive.file。
  */
 export async function renameFile(fileId: string, name: string): Promise<void> {
-  await driveFetch(`/files/${encodeURIComponent(fileId)}?fields=id,name`, {
+  const token = isFullDriveConfigured() ? await getFullAccessToken() : undefined;
+  await driveFetch(`/files/${encodeURIComponent(fileId)}?fields=id,name&supportsAllDrives=true`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
-  });
+  }, token);
 }
 
 /**

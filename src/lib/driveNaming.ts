@@ -7,3 +7,12 @@
 
 /** 每支素材底下放補充畫面的子資料夾。祥濱既有的就是這個寫法。 */
 export const BROLL_FOLDER_NAME = 'B-roll';
+
+/**
+ * 從素材的 url 取出雲端資料夾 id（`.../folders/<id>`）。
+ * 舊素材是人手動貼資料夾連結建檔的，沒有 driveFolderId，改片名時靠這個找到資料夾。
+ * 不是資料夾連結（檔案連結、其他網址、空白）就回空字串。
+ */
+export function driveFolderIdFromUrl(url?: string): string {
+  return String(url || '').match(/\/folders\/([A-Za-z0-9_-]{10,})/)?.[1] || '';
+}

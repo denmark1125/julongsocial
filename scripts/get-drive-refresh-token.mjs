@@ -8,6 +8,10 @@
  *
  * 用法（在這個資料夾下）：
  *   node scripts/get-drive-refresh-token.mjs
+ * 換「整個雲端硬碟」範圍的第二把（只給後端改舊素材資料夾名用）：
+ *   node scripts/get-drive-refresh-token.mjs --full
+ *   → 印出 GOOGLE_DRIVE_FULL_REFRESH_TOKEN，**不會取代**原本的 GOOGLE_DRIVE_REFRESH_TOKEN。
+ *   ⚠️ 跑 --full 時不要去 myaccount 移除 app 權限，那會連原本那把一起撤銷。
  * 或先設好環境變數再跑：
  *   GOOGLE_OAUTH_CLIENT_ID=xxx GOOGLE_OAUTH_CLIENT_SECRET=yyy node scripts/get-drive-refresh-token.mjs
  *
@@ -35,7 +39,10 @@ const PORT = 5555;
 const REDIRECT_URI = `http://localhost:${PORT}/oauth2callback`;
 // 只要 drive.file：非敏感範圍，不需要 Google 審核，也不需要每年數千美金的 CASA 安全評估。
 // 代價是「只看得到這個 app 自己建立的檔案」—— 所以根資料夾必須由 API 自己建。
-const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+// --full：整個雲端硬碟範圍，給後端改「不是這個 app 建的」舊資料夾名。這把絕對不能交給前端。
+const FULL = process.argv.includes('--full');
+const SCOPE = FULL ? 'https://www.googleapis.com/auth/drive' : 'https://www.googleapis.com/auth/drive.file';
+const TOKEN_VAR = FULL ? 'GOOGLE_DRIVE_FULL_REFRESH_TOKEN' : 'GOOGLE_DRIVE_REFRESH_TOKEN';
 
 async function ask(rl, label, envValue) {
   if (envValue) return envValue;
@@ -145,10 +152,14 @@ if (!res.ok || !data.refresh_token) {
   process.exit(1);
 }
 
-console.log('\n✅ 拿到了。把這三個值加進 Vercel 的環境變數（Production）：\n');
-console.log(`GOOGLE_OAUTH_CLIENT_ID=${clientId}`);
-console.log(`GOOGLE_OAUTH_CLIENT_SECRET=${clientSecret}`);
-console.log(`GOOGLE_DRIVE_REFRESH_TOKEN=${data.refresh_token}`);
+if (FULL) {
+  console.log('\n✅ 拿到了。只要新增這一個 Vercel 環境變數（Production），其他兩個不用動：\n');
+} else {
+  console.log('\n✅ 拿到了。把這三個值加進 Vercel 的環境變數（Production）：\n');
+  console.log(`GOOGLE_OAUTH_CLIENT_ID=${clientId}`);
+  console.log(`GOOGLE_OAUTH_CLIENT_SECRET=${clientSecret}`);
+}
+console.log(`${TOKEN_VAR}=${data.refresh_token}`);
 console.log('\n⚠️ 三個都不要加 VITE_ 前綴，也不要貼進任何會進版控的檔案。');
 console.log('⚠️ 如果同意畫面還停在 Testing，這把 token 7 天後會失效 —— 記得去 Audience 按發布。');
 process.exit(0);
