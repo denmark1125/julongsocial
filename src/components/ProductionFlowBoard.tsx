@@ -15,7 +15,7 @@ import {
 } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import AirPlanModal from './AirPlanModal';
-import { buildFlowUpdate, getClientApprovalTarget, getFlowDaysStuck, getFlowDueInfo, isClosedOutsideSystem, isFlowStale, sortFlowColumn } from '../lib/assetFlow';
+import { buildFlowUpdate, getClientApprovalTarget, getFlowDaysStuck, getFlowDueInfo, isClosedOutsideSystem, isFlowStale, isMarkedDoneManually, sortFlowColumn } from '../lib/assetFlow';
 import { getAssetEditorOwner } from '../lib/editorBilling';
 import { Scissors, UserCheck, PenLine, Clock, Flame, CalendarClock, ThumbsUp, CalendarDays } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
@@ -92,6 +92,8 @@ export default function ProductionFlowBoard({
     !(a.usedInPostId && settledPostIds.has(a.usedInPostId)) &&
     // 系統外已結案（舊制結清、從沒按上傳雲端）的片流程早就走完，不再佔「待上傳」欄
     !isClosedOutsideSystem(a) &&
+    // 已標完成（系統外發布）的成片不是可排程庫存，不再佔「可排程」欄
+    !(deriveFlowStage(a) === 'ready' && isMarkedDoneManually(a)) &&
     (vendorFilter === 'all' || a.vendorId === vendorFilter) &&
     (editorFilter === 'all' || ownerKey(a) === editorFilter)
   );

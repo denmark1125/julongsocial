@@ -70,6 +70,14 @@ export function isClosedOutsideSystem(asset: Partial<Pick<Asset, 'legacySettleme
 }
 
 /**
+ * 成片已在素材資料庫按過「標記完成」（在系統外發布，沒掛貼文）＝已經用掉，不是可排程庫存。
+ * 只拿來判斷「可排程」欄：還沒上傳雲端的片就算標完成，剪輯師仍要按上傳才能請款，不能藏。
+ */
+export function isMarkedDoneManually(asset: Pick<Asset, 'status'> & Partial<Pick<Asset, 'usedInPostId'>>): boolean {
+  return asset.status === 'used' && !asset.usedInPostId;
+}
+
+/**
  * 產生推進到下一棒要寫進 Firestore 的欄位。
  * 一定會連帶寫入 FLOW_STAGE_COMPAT 對應的 stage/approved，
  * 讓 vendorStatus 的庫存/欠片計算不受 flowStage 影響（尤其 revising 必須把 stage 寫回 'raw'，
