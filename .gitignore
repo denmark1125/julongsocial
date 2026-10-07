@@ -15,3 +15,7 @@ _stage_backfill_backup.json
 
 # 本機驗證用的暫存預覽/測試輸出，不進版控
 .preview-tmp/
+
+# Firestore 模擬器（npm run test:rules）留下的 log
+firestore-debug.log
+firebase-debug.log

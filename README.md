@@ -83,8 +83,17 @@ npm run dev        # http://localhost:3000
 
 ```bash
 npm run lint       # TypeScript 型別檢查
+npm test           # 商業邏輯測試（剪輯清單、交片期限、剪輯費、欠片／庫存）
+npm run test:rules # 權限規則測試，跑在本機 Firestore 模擬器（需要 Java 21）
 npm run build      # 確認可以正常打包
 ```
+
+推分支、開 PR 時，GitHub Actions 會自動跑上面全部（`.github/workflows/ci.yml`），
+PR 頁面上全綠才合併。兩種測試都**不會連到正式資料庫**：
+商業邏輯測試只測純函式，規則測試用 `demo-` 開頭的假專案跑在模擬器裡。
+
+老闆指正過的情境（例如「祥濱有庫存時毛片不能消失」）要寫成測試放進
+`src/lib/__tests__/`，改權限規則時要在 `tests/rules/` 補上預期的允許／拒絕情境。
 
 ---
 
@@ -95,7 +104,7 @@ npm run build      # 確認可以正常打包
 `main` 分支 = 正式站。推上 `main` 後，Vercel 會自動建置並上線，大約 1–2 分鐘。
 
 1. 從最新的 `main` 開新分支開發
-2. 本機跑過 `npm run lint` 和 `npm run build`
+2. 本機跑過 `npm run lint`、`npm test` 和 `npm run build`
 3. 開 Pull Request，**經負責人確認後才合併進 `main`**
 4. 新畫面或流程有改動，上線前先給主管看過
 

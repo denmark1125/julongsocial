@@ -1,0 +1,52 @@
+name: CI
+
+# 每次推分支、開 PR 都自動檢查：型別、商業邏輯測試、權限規則測試、建置。
+# ⚠️ 這個 workflow 刻意**不使用任何 secret**：repo 是公開的，別人 fork 後開的 PR 也會跑這裡。
+#    測試只碰純函式與本機的 Firestore 模擬器（專案 id 是 demo- 開頭），不會連到正式資料庫。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 型別＋測試＋建置
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Taipei
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  rules:
+    name: 權限規則測試（Firestore 模擬器）
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Taipei
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - run: npm run test:rules
