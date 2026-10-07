@@ -135,6 +135,23 @@ describe('剪輯師', () => {
   });
 });
 
+describe('剪輯順序：公司排、剪輯師不能改', () => {
+  it('員工可以排剪輯順序，剪輯師不行（同一支片、同一個欄位）', async () => {
+    await assertSucceeds(updateDoc(doc(as('staff'), 'assets', 'a1'), { editOrder: 1 }));
+    await assertFails(updateDoc(doc(as('ed'), 'assets', 'a1'), { editOrder: 2 }));
+    // 對照組：剪輯師對這支片本來就有權限，被擋的是 editOrder 這個欄位
+    await assertSucceeds(updateDoc(doc(as('ed'), 'assets', 'a1'), {
+      stage: 'finished', flowStage: 'client_review', submittedAt: NOW, submittedBy: 'ed',
+    }));
+  });
+
+  it('順序要是整數', async () => {
+    await assertFails(updateDoc(doc(as('staff'), 'assets', 'a1'), { editOrder: '1' }));
+    await assertFails(updateDoc(doc(as('staff'), 'assets', 'a1'), { batchIndex: 1.5 }));
+    await assertSucceeds(updateDoc(doc(as('staff'), 'assets', 'a1'), { batchIndex: 2 }));
+  });
+});
+
 describe('請款鎖：已入單的片金額凍結', () => {
   // 每條「應該被拒絕」都配一個只差一點、應該通過的對照組：
   // 被拒絕的原因可能是別條規則（例如運算式上限），對照組通過才證明擋下的是這條鎖。

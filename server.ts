@@ -591,7 +591,7 @@ app.post("/api/drive/commit-groups", async (req, res) => {
     const created: any[] = [];
     const failed: any[] = [];
 
-    for (const g of groups) {
+    for (const [batchIndex, g] of groups.entries()) {
       const groupName = sanitizeFolderName(String(g.name || '').trim());
       const groupFolderId = String(g.groupFolderId || '');
       if (!groupName || !groupFolderId) {
@@ -655,6 +655,8 @@ app.post("/api/drive/commit-groups", async (req, res) => {
           status: 'available',
           approved: false,
           createdAt: now,
+          // 同一批共用同一個 createdAt，誰先剪就靠這個（＝同事在畫面上排的順序）。見 lib/editOrder.ts
+          batchIndex,
           createdBy: me.uid,
           // 剪輯師讀不到 users 文件，名字要快照下來，他才知道有問題找誰
           createdByName: me.displayName || me.email || '',
@@ -741,7 +743,7 @@ app.post("/api/drive/claim-folders", async (req, res) => {
     const skipped: any[] = [];
     const failed: any[] = [];
 
-    for (const f of folders) {
+    for (const [batchIndex, f] of folders.entries()) {
       const folderId = String(f?.id || '');
       if (!folderId) { failed.push({ name: f?.name || '(未命名)', reason: "沒有資料夾 id" }); continue; }
       try {
@@ -779,6 +781,8 @@ app.post("/api/drive/claim-folders", async (req, res) => {
           status: 'available',
           approved: false,
           createdAt: now,
+          // 同一批共用同一個 createdAt，誰先剪就靠這個（＝同事在畫面上排的順序）。見 lib/editOrder.ts
+          batchIndex,
           createdBy: me.uid,
           // 剪輯師讀不到 users 文件，名字要快照下來，他才知道有問題找誰
           createdByName: me.displayName || me.email || '',

@@ -2,6 +2,7 @@ import { addDays, format, parseISO, startOfDay } from 'date-fns';
 import { Asset, Post, ShootBooking, deriveFlowStage } from '../types';
 import { buildPostIndex, isAssetSelectable, PostIndex } from './vendorStatus';
 import { PlannedSlot } from './plannedSlots';
+import { compareRawEditOrder, compareUploadOrder } from './editOrder';
 
 /**
  * 「這一格排程，素材從哪裡來」的唯一計算入口。
@@ -157,7 +158,8 @@ function queueOrder(a: Asset, b: Asset): number {
   if (!!a.isUrgent !== !!b.isUrgent) return a.isUrgent ? -1 : 1;
   // ⚠️ 不要把 editDueDate（同事指定交片日）加進來：這支同時排「成片庫存」，
   //    交片日在片交出去之後還留在文件上，加進來會改變小編排片建議用哪一支成片。
-  return (a.createdAt || '').localeCompare(b.createdAt || '');
+  //    editOrder（同事排的剪輯順序）同理，只用在待剪池（見 compareRawEditOrder）。
+  return compareUploadOrder(a, b);
 }
 
 /**
@@ -207,7 +209,7 @@ function buildPools(
   for (const pool of pools.values()) {
     pool.ready.sort(queueOrder);
     pool.inProgress.sort(queueOrder);
-    pool.toEdit.sort(queueOrder);
+    pool.toEdit.sort(compareRawEditOrder);
     pool.bookings.sort((a, b) => a.date.localeCompare(b.date));
   }
 

@@ -612,6 +612,16 @@ export interface Asset {
    */
   plannedAirDate?: string;
   /**
+   * 上片／歸片時這支在這一批裡的位置（0 起算）。一批片共用同一個 createdAt，
+   * 同一批誰先剪靠它。server 建檔時寫入。見 lib/editOrder.ts。
+   */
+  batchIndex?: number;
+  /**
+   * 同事在「排剪輯順序」調過的位置（1 起算，同一個 IP 的待剪片之間比）。
+   * 有值的排在沒調過的前面。剪輯師改不了（不在 isEditorAssetUpdate 白名單）。
+   */
+  editOrder?: number;
+  /**
    * 同事指定的「預計交片日」（YYYY-MM-DD）。有值時取代「上片日往前推 7 個工作天」，
    * 並參與剪輯師清單的排序（急件仍最優先）。剪輯師改不了（不在 isEditorAssetUpdate 白名單）。
    */

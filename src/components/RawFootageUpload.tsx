@@ -8,8 +8,9 @@ import BrollLibraryUpload from './BrollLibraryUpload';
 import {
   openUploadPicker, openFolderPicker, getPickerApiKey, PickedFile,
 } from '../lib/drivePicker';
+import { moveInList } from '../lib/editOrder';
 import {
-  X, UploadCloud, FolderOpen, Loader2, CheckCircle2, AlertTriangle, Plus, Trash2, FilePlus2,
+  X, UploadCloud, FolderOpen, Loader2, CheckCircle2, AlertTriangle, Plus, Trash2, FilePlus2, ChevronUp, ChevronDown,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -396,6 +397,29 @@ export default function RawFootageUpload({
                           寬度不夠時讓按鈕自己換到下一行，而不是壓縮輸入框。 */}
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm font-medium text-slate-500 shrink-0 whitespace-nowrap">第 {gi + 1} 支</span>
+                        {/* 第幾支＝剪輯順序（同一批照這個順序配上片日，1 最先剪） */}
+                        {groups.length > 1 && (
+                          <span className="flex items-center shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setGroups(prev => moveInList(prev, gi, -1))}
+                              disabled={gi === 0}
+                              className="p-1 text-slate-500 hover:text-blue-600 disabled:opacity-25"
+                              aria-label="剪輯順序往前" title="剪輯順序往前"
+                            >
+                              <ChevronUp className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setGroups(prev => moveInList(prev, gi, 1))}
+                              disabled={gi === groups.length - 1}
+                              className="p-1 text-slate-500 hover:text-blue-600 disabled:opacity-25"
+                              aria-label="剪輯順序往後" title="剪輯順序往後"
+                            >
+                              <ChevronDown className="w-4 h-4" />
+                            </button>
+                          </span>
+                        )}
                         <input
                           value={g.name}
                           onChange={e => patch(g.key, { name: e.target.value })}

@@ -5,7 +5,8 @@ import { openMultiFolderPicker, getPickerApiKey } from '../lib/drivePicker';
 import { visibleVendors } from '../lib/vendorStatus';
 import { ASSET_CATEGORIES, ASSET_CATEGORY_DATALIST_ID } from '../lib/assetCategories';
 import toast from 'react-hot-toast';
-import { X, Loader2, CheckCircle2, FolderOpen, Trash2 } from 'lucide-react';
+import { moveInList } from '../lib/editOrder';
+import { X, Loader2, CheckCircle2, FolderOpen, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 
 /** 下拉選單裡代表「內部剪輯」的值。不是真的 editorId，送出前轉成 internalEdit 旗標（同 RawFootageUpload） */
 const INTERNAL = '__internal__';
@@ -268,11 +269,43 @@ export default function ClaimFoldersModal({
 
               {picked.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-sm font-medium text-slate-700">會建立這 {picked.length} 支素材：</p>
-                  {picked.map(f => (
+                  <p className="text-sm font-medium text-slate-700">
+                    會建立這 {picked.length} 支素材{picked.length > 1 && '（照這個順序剪，1 最先）'}：
+                  </p>
+                  {picked.map((f, i) => (
                     <div key={f.id} className="bg-slate-50 rounded-lg px-3 py-2.5 space-y-2">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-sm text-slate-800 break-all">{f.name}</span>
+                      <span className="flex items-center gap-2 min-w-0">
+                        {picked.length > 1 && (
+                          <span className="shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-[13px] font-bold flex items-center justify-center">
+                            {i + 1}
+                          </span>
+                        )}
+                        <span className="text-sm text-slate-800 break-all">{f.name}</span>
+                      </span>
+                      <span className="flex items-center gap-1 shrink-0">
+                      {picked.length > 1 && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setPicked(prev => moveInList(prev, i, -1))}
+                            disabled={i === 0}
+                            className="p-1 text-slate-500 hover:text-blue-600 disabled:opacity-25"
+                            aria-label="往前"
+                          >
+                            <ChevronUp className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPicked(prev => moveInList(prev, i, 1))}
+                            disabled={i === picked.length - 1}
+                            className="p-1 text-slate-500 hover:text-blue-600 disabled:opacity-25"
+                            aria-label="往後"
+                          >
+                            <ChevronDown className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
                       <button
                         type="button"
                         onClick={() => {
@@ -287,6 +320,7 @@ export default function ClaimFoldersModal({
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
+                      </span>
                     </div>
                     <div className="flex gap-1.5 flex-wrap">
                       {ASSET_CATEGORIES.map(c => (
