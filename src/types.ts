@@ -38,6 +38,7 @@ export interface BillingRecord {
 
 /**
  * 剪輯費分級。60 秒是分界，由剪輯師在「交片送審」時標記，管帳（manager 以上）可再修改。
+ * 特殊情況（剪輯漲價、這支價格不一樣）由主管在「應付對帳」逐片指定金額（寫進 editorFee，優先於分級價）。
  *
  * 為什麼要有分級而不是只留一個預設價：2026-09-11 之前只有 DEFAULT_EDITOR_FEE 一個值，
  * 「<60 秒 750、>60 秒 900」只寫在這行註解裡，實際上每支都算 900，要靠剪輯師在請款頁
@@ -46,7 +47,7 @@ export interface BillingRecord {
 export type DurationTier = 'under60' | 'over60';
 
 export const EDITOR_FEE_BY_TIER: Record<DurationTier, number> = {
-  under60: 750,   // 60 秒以下
+  under60: 700,   // 60 秒以下。2026-10-05 老闆確認是 700（之前誤寫成 750；當時請款功能還沒開放，沒有送出過任何請款單）
   over60: 900,    // 60 秒（含）以上。2026-09-11～10-03 這裡誤寫成 950，未付款的單已用 scripts/fix-fee-950.mjs 更正
 };
 
