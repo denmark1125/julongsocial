@@ -21,6 +21,7 @@ import EditingBrief from './EditingBrief';
 import {
   buildEditorQueue, customDeadline, deadlineStatus, deliveryDeadline, EditorQueueRow, formatDeadline, shootBaseDate,
 } from '../lib/editorQueue';
+import { rankByVendor } from '../lib/editOrder';
 import {
   buildHorizonDemands, buildSupplyPlan, describeSupply, SUPPLY_HORIZON_DAYS,
 } from '../lib/materialSupply';
@@ -300,17 +301,28 @@ function FoldDayRow({ row, vendorName }: {
   );
 }
 
+/** 「順序 N」：同事排的剪輯順序，樣式比照「同事指定」「拍攝後 7 天」那排小標籤 */
+function EditRankBadge({ rank }: { rank: number }) {
+  return (
+    <span className="inline-block lg:mt-1 px-1.5 py-0.5 rounded-md bg-[#5A5A40]/10 text-[#5A5A40] text-[12px] lg:text-[13px] font-bold whitespace-nowrap">
+      順序 {rank}
+    </span>
+  );
+}
+
 /**
  * 清單的一列＝社群日曆上的一格「哪天哪個 IP 要上片」。
  *
  * 三種樣子：有料要剪（帶素材卡）／還沒有片（只有一行字）／急件沒配到日期。
  * ⚠️ 用詞一律陳述事實（「10/06 要上」），不要祈使句。順序本身已經表達了先後。
  */
-function QueueRow({ row, vendorName, card, onOpenLibrary }: {
+function QueueRow({ row, vendorName, card, onOpenLibrary, editRank }: {
   key?: string;
   row: EditorQueueRow;
   vendorName: string;
   card: ReactNode;
+  /** 這支在它那個 IP 的剪輯順序（同事在「排剪輯順序」排的，見 rankByVendor） */
+  editRank?: number;
   /**
    * 「沒片」那一列的出口。老闆：「可以引導她去素材庫」。
    * ⚠️ 只在那個 IP 的素材庫**真的有東西**時才傳進來 —— 點過去是空白頁等於又一條死路。
@@ -390,6 +402,9 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
             拍攝後 7 天
           </span>
         )}
+        {/* 清單照交片期限排、不同 IP 會交錯；同事指定交片日或排進積壓時日期也跟順序對不上。
+            直接印出同事排的第幾支，剪輯師不用從日期倒推。⚠️ 只陳述事實，不寫「先剪這支」。 */}
+        {row.kind === 'to_edit' && editRank && <EditRankBadge rank={editRank} />}
         {row.kind !== 'to_edit' && <span className="text-[13px] lg:text-[15px] text-gray-500">{vendorName}</span>}
       </div>
 
@@ -866,6 +881,9 @@ export default function EditorAssetQueue({
    *    剪完的片留在上面只會佔位置。它們改用底下那一行提示帶過去。
    */
   const queuePending = displayed.filter(a => bucketOf(a) === 'to_edit');
+  // 每支待剪片在它那個 IP 排第幾。⚠️ 只在這位剪輯師看得到的片裡排：同一個 IP 分給兩個人時各自從 1 起算
+  //（剪輯師讀不到別人的片，算不出全 IP 的序號）。
+  const editRank = rankByVendor(queuePending);
 
   /**
    * 排程驅動的清單：一列＝社群日曆上的一格（哪天哪個 IP 要上片）。
@@ -1309,8 +1327,13 @@ export default function EditorAssetQueue({
                     const stuck = base ? differenceInCalendarDays(new Date(), base) : null;
                     return (
                       <div key={a.id} className="bg-white/70 rounded-2xl border border-black/5 overflow-hidden">
-                        {stuck !== null && stuck > 0 && (
-                          <p className="px-4 pt-3 text-[13px] font-bold text-amber-700 whitespace-nowrap">已卡 {stuck} 天</p>
+                        {((stuck !== null && stuck > 0) || editRank.has(a.id!)) && (
+                          <div className="px-4 pt-3 flex items-center gap-2">
+                            {stuck !== null && stuck > 0 && (
+                              <span className="text-[13px] font-bold text-amber-700 whitespace-nowrap">已卡 {stuck} 天</span>
+                            )}
+                            {editRank.has(a.id!) && <EditRankBadge rank={editRank.get(a.id!)!} />}
+                          </div>
                         )}
                         <AssetCard {...cardProps(a)} compact onAdvance={() => advance(a)} />
                       </div>
@@ -1417,6 +1440,7 @@ export default function EditorAssetQueue({
                   key={row.key}
                   row={row}
                   vendorName={vendorName(row.vendorId)}
+                  editRank={row.asset?.id ? editRank.get(row.asset.id) : undefined}
                   onOpenLibrary={
                     // 只有那個 IP 在「我的所有片」裡真的有東西才給連結
                     onOpenAllAssets && displayed.some(a => a.vendorId === row.vendorId)

@@ -40,3 +40,15 @@ export function moveInList<T>(list: T[], index: number, delta: -1 | 1): T[] {
   [next[index], next[to]] = [next[to], next[index]];
   return next;
 }
+
+/**
+ * 每支待剪片在它那個 IP 裡排第幾（1 起算）。同事的「排剪輯順序」與剪輯師清單上的「順序 N」都用這支，
+ * 兩邊的數字才保證一樣。傳進來的必須是待剪的片（理由見 compareRawEditOrder）。
+ */
+export function rankByVendor(assets: (OrderFields & Pick<Asset, 'vendorId'>)[]): Map<string, number> {
+  const groups = new Map<string, typeof assets>();
+  assets.forEach(a => groups.set(a.vendorId, [...(groups.get(a.vendorId) || []), a]));
+  const rank = new Map<string, number>();
+  groups.forEach(list => [...list].sort(compareRawEditOrder).forEach((a, i) => a.id && rank.set(a.id, i + 1)));
+  return rank;
+}

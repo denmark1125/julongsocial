@@ -309,5 +309,20 @@ export function buildEditorQueue(opts: {
     return 0;
   });
 
-  return { rows, stocked, settled, unassigned };
+  // 同一個 IP 的待剪列，畫面上的先後一律照同事排的剪輯順序（剪輯師卡片上的「順序 N」）。
+  // 上面照期限排完之後，同一家的片可能倒過來：急件之間照期限、同事指定交片日也會插隊，
+  // 結果「順序 2」排在「順序 1」上面（2026-10-07 極酵文創兩支急件）。
+  // 做法：各 IP 保留它原本佔的那幾個位置，只在那幾個位置之間照順序重新放 ——
+  // 跨 IP 的交錯不變，急件也仍在最上面（急件在順序裡本來就排最前，佔的也正好是最上面那幾格）。
+  const slotsByVendor = new Map<string, number[]>();
+  rows.forEach((r, i) => {
+    if (r.kind === 'to_edit' && r.asset) slotsByVendor.set(r.vendorId, [...(slotsByVendor.get(r.vendorId) || []), i]);
+  });
+  const reordered = [...rows];
+  slotsByVendor.forEach(slots => {
+    const ordered = slots.map(i => rows[i]).sort((x, y) => rawOrder(x.asset!, y.asset!));
+    slots.forEach((slot, k) => { reordered[slot] = ordered[k]; });
+  });
+
+  return { rows: reordered, stocked, settled, unassigned };
 }
