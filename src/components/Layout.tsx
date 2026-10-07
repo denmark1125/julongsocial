@@ -200,9 +200,6 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     { id: 'editorQueue', label: '我的剪輯任務', icon: Scissors, roles: ['editor'] },
     { id: 'editorAssets', label: '我的所有片', icon: Film, roles: ['editor'] },
     { id: 'editorSchedule', label: '上片排程', icon: CalendarDays, roles: ['editor'] },
-    // ⚠️ 請款功能還沒開（EDITOR_INVOICING_ENABLED=false），點進去只有一句「準備中」。
-    //    2026-10-02 我一度把它藏起來，老闆要求放回來 —— 讓剪輯師知道這件事在路上，
-    //    比少一個項目重要。要藏請先問過他。
     { id: 'editorInvoice', label: '我的請款', icon: Receipt, roles: ['editor'] },
   ];
 
