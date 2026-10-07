@@ -47,13 +47,13 @@ describe('buildEditorQueue', () => {
     expectConservation(demands, q);
   });
 
-  it('「沒片」不沉到最後：照期限排，比後面有片的日子早就排前面', () => {
+  it('「沒片」排在有片可剪的後面（2026-10-06 老闆看過新畫面改的），仍留在主清單', () => {
     const demands = [demand('yb', day(10, 3)), demand('gx', day(10, 20))];
     const raw = asset({ vendorId: 'gx' });
 
     const q = buildEditorQueue({ demands, pendingAssets: [raw] });
 
-    expect(q.rows.map(r => r.kind)).toEqual(['no_material', 'to_edit']);
+    expect(q.rows.map(r => r.kind)).toEqual(['to_edit', 'no_material']);
     expectConservation(demands, q);
   });
 

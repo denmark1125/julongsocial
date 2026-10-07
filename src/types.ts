@@ -78,8 +78,8 @@ export const EDITOR_BILLING_START_MONTH = '2026-08';
  * 必須先由管理端逐支標成 legacySettlementStatus=unpaid；已用舊制付過的標成 paid。
  */
 export const EDITOR_BILLING_CUTOVER_AT = '2026-08-21T00:00:00+08:00';
-/** 部署與資料遷移完成前維持 false；最後一道人工開關。 */
-export const EDITOR_INVOICING_ENABLED = false;
+/** 最後一道人工開關。2026-10-07 開通：舊帳盤點完（待盤點 0 支）、60 秒以下 700 與請款頁金額唯讀已上線。 */
+export const EDITOR_INVOICING_ENABLED = true;
 export type LegacySettlementStatus = 'paid' | 'unpaid' | 'needs_review';
 
 /**
