@@ -289,7 +289,11 @@ service cloud.firestore {
              (!('internalEdit' in data) || data.internalEdit is bool) &&
              // 同事在排片頁確認的上片日。不在 isEditorAssetUpdate 白名單＝剪輯師天生改不了，
              // 所以「先剪哪一支」的順序只有公司這邊決定得了。
-             (!('plannedAirDate' in data) || data.plannedAirDate is string);
+             (!('plannedAirDate' in data) || data.plannedAirDate is string) &&
+             // 剪輯順序：batchIndex＝上片時這一批裡的第幾支（後端寫）；editOrder＝同事事後排的位置。
+             // 兩個都不在 isEditorAssetUpdate 白名單＝剪輯師改不了先剪哪一支。
+             (!('batchIndex' in data) || data.batchIndex is int) &&
+             (!('editOrder' in data) || data.editOrder is int);
     }
 
     function isValidDismissedHabit(data) {

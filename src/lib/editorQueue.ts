@@ -1,6 +1,7 @@
 import { addDays, differenceInCalendarDays, format, parseISO, startOfDay, subBusinessDays } from 'date-fns';
 import { Asset } from '../types';
 import { DemandItem } from './materialSupply';
+import { compareRawEditOrder } from './editOrder';
 
 /**
  * 交片後要留幾個工作天走完「業主審稿 → 修改 → 上傳雲端」。
@@ -162,18 +163,13 @@ export interface EditorQueue {
 }
 
 /**
- * 毛片之間的順序：急件最前，其餘照建檔時間由舊到新。
+ * 毛片之間的順序＝配上片日的順序：急件最前，再來是同事排的剪輯順序，沒排過的照上片時的順序。
+ * 規則只寫在 lib/editOrder.ts，materialSupply 的待剪池也用同一支，兩邊不要分岔。
  *
- * 老闆：「同事後來會排序，如果沒排序就依照上片時的順序」——
- * 同事手動排序的欄位**先不做**，等他真的要排再加。
- * 規則跟 materialSupply 的 queueOrder 一致，兩邊不要分岔。
+ * ⚠️ 不要用 editDueDate 決定「哪支毛片配哪一天」：指定 10/30 交片的片會插隊搶走 10/06 那格，
+ *    沒指定的片反而被推到後面。交片日只影響這一列的期限，以及主清單照期限的排序。
  */
-function rawOrder(a: Asset, b: Asset): number {
-  if (!!a.isUrgent !== !!b.isUrgent) return a.isUrgent ? -1 : 1;
-  // ⚠️ 不要用 editDueDate 決定「哪支毛片配哪一天」：指定 10/30 交片的片會插隊搶走 10/06 那格，
-  //    沒指定的片反而被推到後面。交片日只影響這一列的期限，以及主清單照期限的排序。
-  return (a.createdAt || '').localeCompare(b.createdAt || '');
-}
+const rawOrder = compareRawEditOrder;
 
 /** 這一列的期限：素材有指定交片日就用它，否則由上片日推算；都沒有時新進毛片用拍攝日＋7 天 */
 function rowDeadline(asset: Asset | undefined, airDate: Date | null): Pick<EditorQueueRow, 'deadline' | 'deadlineSource'> {

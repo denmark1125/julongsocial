@@ -15,9 +15,10 @@ import {
 } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import AirPlanModal from './AirPlanModal';
+import EditOrderModal from './EditOrderModal';
 import { buildFlowUpdate, getClientApprovalTarget, getFlowDaysStuck, getFlowDueInfo, isClosedOutsideSystem, isFlowStale, isMarkedDoneManually, sortFlowColumn } from '../lib/assetFlow';
 import { getAssetEditorOwner } from '../lib/editorBilling';
-import { Scissors, UserCheck, PenLine, Clock, Flame, CalendarClock, ThumbsUp, CalendarDays } from 'lucide-react';
+import { Scissors, UserCheck, PenLine, Clock, Flame, CalendarClock, ThumbsUp, CalendarDays, ListOrdered } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -62,6 +63,7 @@ export default function ProductionFlowBoard({
   const [editorFilter, setEditorFilter] = useState<string>('all');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [isPlanning, setIsPlanning] = useState(false);
+  const [isOrdering, setIsOrdering] = useState(false);
 
   const vendorMap = new Map(vendors.map(v => [v.id, v]));
 
@@ -156,6 +158,12 @@ export default function ProductionFlowBoard({
             className="bg-[#5A5A40] text-white px-4 py-2 rounded-2xl shadow-sm font-bold flex items-center gap-2 hover:bg-[#4a4a35] transition-colors whitespace-nowrap"
           >
             <CalendarDays size={16} /> 排接下來要上的片
+          </button>
+          <button
+            onClick={() => setIsOrdering(true)}
+            className="bg-white text-[#5A5A40] border border-[#5A5A40]/30 px-4 py-2 rounded-2xl shadow-sm font-bold flex items-center gap-2 hover:bg-[#5A5A40]/5 transition-colors whitespace-nowrap"
+          >
+            <ListOrdered size={16} /> 排剪輯順序
           </button>
         {stuckCount > 0 && (
           <div className="bg-white px-4 py-2 rounded-2xl border border-red-200 shadow-sm flex items-center gap-3">
@@ -317,6 +325,14 @@ export default function ProductionFlowBoard({
       </div>
 
       {isPlanning && <AirPlanModal onClose={() => setIsPlanning(false)} />}
+      {isOrdering && (
+        <EditOrderModal
+          vendors={vendors}
+          assets={assets}
+          defaultVendorId={vendorFilter === 'all' ? undefined : vendorFilter}
+          onClose={() => setIsOrdering(false)}
+        />
+      )}
     </div>
   );
 }
