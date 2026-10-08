@@ -3,12 +3,12 @@ import { findFee950Issues, getAssetFee, getBillingMonth, isBillable, feeForTier 
 import { EditorInvoice } from '../../types';
 import { asset } from './fixtures';
 
-// 剪輯費：60 秒以下 700、60 秒以上 900（over60 2026-10-03 從誤寫的 950 改回；under60 2026-10-05 從誤寫的 750 改回）
+// 剪輯費：60 秒以下 750、60 秒以上 900（over60 2026-10-03 從誤寫的 950 改回；under60 2026-10-05 誤改成 700、10-08 更正回 750）
 // 特殊情況由主管逐片指定金額（editorFee），優先於分級價。
 
 describe('剪輯費', () => {
-  it('分級價：700／900', () => {
-    expect(feeForTier('under60')).toBe(700);
+  it('分級價：750／900', () => {
+    expect(feeForTier('under60')).toBe(750);
     expect(feeForTier('over60')).toBe(900);
   });
 
@@ -19,12 +19,12 @@ describe('剪輯費', () => {
   it('優先序：人工指定 editorFee → 分級價 → 預設 900', () => {
     expect(getAssetFee({ editorFee: 800, durationTier: 'over60' })).toBe(800);
     expect(getAssetFee({ editorFee: 0, durationTier: 'over60' })).toBe(0);
-    expect(getAssetFee({ durationTier: 'under60' })).toBe(700);
+    expect(getAssetFee({ durationTier: 'under60' })).toBe(750);
     expect(getAssetFee({})).toBe(900);
   });
 
   it('壞掉的 editorFee（負數、NaN）不採用', () => {
-    expect(getAssetFee({ editorFee: -1, durationTier: 'under60' })).toBe(700);
+    expect(getAssetFee({ editorFee: -1, durationTier: 'under60' })).toBe(750);
     expect(getAssetFee({ editorFee: Number.NaN })).toBe(900);
   });
 });

@@ -146,7 +146,7 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
   const billable = useMemo(() => listBillable(myAssets, month), [myAssets, month]);
   const groups = useMemo(() => groupByVendor(billable, vendorName), [billable, vendors]);
 
-  // 2026-10-05 老闆：剪輯費照長度分級（60 秒以下 700／以上 900），特殊情況由主管在「應付對帳」逐片調整。
+  // 剪輯費照長度分級（60 秒以下 750／以上 900，2026-10-08 確認），特殊情況由主管在「應付對帳」逐片調整。
   // 所以剪輯師這頁**只顯示金額、不能自己改**——金額只有一個來源 getAssetFee()（分級價或主管指定）。
   const feeOf = (a: Asset) => getAssetFee(a);
   const chosen = billable.filter(a => selected[a.id!]);

@@ -23,7 +23,7 @@ export function feeForTier(tier: DurationTier): number {
 /**
  * 這支多少錢。優先序刻意是這個順序，不要在各處各自寫 ?? 900：
  *   1. editorFee —— 人工指定過（管帳調價、或已入單凍結的金額），最優先
- *   2. durationTier —— 60 秒以下 700 / 以上 900
+ *   2. durationTier —— 60 秒以下 750 / 以上 900
  *   3. DEFAULT_EDITOR_FEE —— 兩者都沒有的舊素材
  *
  * ⚠️ editorFee 要排在 durationTier 前面：請款送出時會把當下算出的金額寫回 editorFee 凍結，
