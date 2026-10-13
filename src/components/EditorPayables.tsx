@@ -440,9 +440,20 @@ export default function EditorPayables() {
   const pdfRef = useRef<HTMLDivElement>(null);
   const [pdfJob, setPdfJob] = useState<{ meta: StatementMeta; rows: StatementRow[] } | null>(null);
 
+  // IP 篩選：'all'＝全部總覽。換月份時回到全部，避免停在一個這個月沒有片的 IP 上。
+  const [ipFilter, setIpFilter] = useState<string>('all');
+  useEffect(() => { setIpFilter('all'); }, [month]);
+  const inFilter = (r: StatementRow) => ipFilter === 'all' || r.vendorName === ipFilter;
+
+  /** 本月所有剪輯師的片依 IP 彙總，給篩選列用 */
+  const ipOverview = useMemo(
+    () => groupRowsByVendor(summaries.flatMap(r => statementOf(r.editorId).flatMap(g => g.rows))),
+    [summaries, monthInvoices, videoAssets, vendors]
+  );
+
   const exportStatementPdf = (editorId: string, name: string) => {
     const rows: StatementRow[] = statementOf(editorId)
-      .flatMap(g => g.rows.map(({ asset: _asset, ...row }) => row))
+      .flatMap(g => g.rows.filter(inFilter).map(({ asset: _asset, ...row }) => row))
       .sort((a, b) => (a.uploadedAt || '').localeCompare(b.uploadedAt || ''));
     setPdfJob({
       meta: {
@@ -450,6 +461,7 @@ export default function EditorPayables() {
         editorName: name,
         statementNo: `${month.replace('-', '')}-${editorId.slice(-4).toUpperCase()}`,
         preparedAt: new Date(),
+        scope: ipFilter === 'all' ? undefined : ipFilter,
       },
       rows,
     });
@@ -471,7 +483,7 @@ export default function EditorPayables() {
           if (i > 0) pdf.addPage();
           pdf.addImage(url, 'JPEG', 0, 0, 210, 297);
         }
-        if (!cancelled) pdf.save(`剪輯費對帳單_${pdfJob.meta.editorName}_${pdfJob.meta.month}.pdf`);
+        if (!cancelled) pdf.save(`剪輯費對帳單_${pdfJob.meta.editorName}_${pdfJob.meta.month}${pdfJob.meta.scope ? `_${pdfJob.meta.scope}` : ''}.pdf`);
         toast.success('PDF 已下載', { id: t });
       } catch (e) {
         console.error('statement pdf failed:', e);
@@ -532,6 +544,26 @@ export default function EditorPayables() {
             </div>
           ))}
         </div>
+        {ipOverview.length > 0 && (
+          <div className="px-5 py-3 border-t border-black/5 flex items-center gap-2 flex-wrap">
+            <span className="text-[13px] font-bold text-gray-400 shrink-0 whitespace-nowrap mr-1">依 IP 檢視</span>
+            {[{ vendorName: 'all', rows: ipOverview.flatMap(g => g.rows), subtotal: totals.all }, ...ipOverview].map(g => {
+              const on = ipFilter === g.vendorName;
+              return (
+                <button
+                  key={g.vendorName}
+                  onClick={() => setIpFilter(g.vendorName)}
+                  className={`px-3 py-1.5 rounded-xl text-[13px] border whitespace-nowrap transition-colors ${on
+                    ? 'bg-[#5A5A40] border-[#5A5A40] text-white'
+                    : 'bg-white border-black/10 text-gray-600 hover:border-[#5A5A40]/40'}`}
+                >
+                  <span className="font-bold">{g.vendorName === 'all' ? '全部' : g.vendorName}</span>
+                  <span className={`ml-1.5 tabular-nums ${on ? 'text-white/80' : 'text-gray-400'}`}>{g.rows.length} 支 · {money(g.subtotal)}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {fee950Total > 0 && (
@@ -656,8 +688,12 @@ export default function EditorPayables() {
           {monthLabel(month)}沒有任何應付款項
         </div>
       ) : summaries.map(r => {
-        const groups = statementOf(r.editorId);
+        const groups = statementOf(r.editorId)
+          .map(g => ({ ...g, rows: g.rows.filter(inFilter) }))
+          .filter(g => g.rows.length > 0);
+        if (groups.length === 0) return null;
         const count = groups.reduce((n, g) => n + g.rows.length, 0);
+        const shownTotal = groups.reduce((n, g) => n + g.rows.reduce((m, x) => m + x.amount, 0), 0);
         let seq = 0;
         return (
           <section key={r.editorId} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
@@ -668,8 +704,10 @@ export default function EditorPayables() {
               </div>
               <div className="flex items-center gap-4">
                 <div className="text-right">
-                  <p className="text-[13px] text-gray-400 whitespace-nowrap">{monthLabel(month)}應付 · {count} 支</p>
-                  <p className="text-lg font-bold tabular-nums whitespace-nowrap">{money(r.totalAmount)}</p>
+                  <p className="text-[13px] text-gray-400 whitespace-nowrap">
+                    {ipFilter === 'all' ? `${monthLabel(month)}應付` : ipFilter} · {count} 支
+                  </p>
+                  <p className="text-lg font-bold tabular-nums whitespace-nowrap">{money(shownTotal)}</p>
                 </div>
                 <button
                   onClick={() => exportStatementPdf(r.editorId, r.editorName)}
@@ -697,6 +735,10 @@ export default function EditorPayables() {
                       <span className={`px-2 py-0.5 rounded-full text-[13px] font-bold border whitespace-nowrap ${STATUS_BADGE[g.status]}`}>
                         {STATEMENT_STATUS_LABEL[g.status]}
                       </span>
+                      {/* 篩選時只看到單的一部分，但核准／付款／作廢是整張單一起動，要讓人知道整張有多少 */}
+                      {inv && g.rows.length < inv.itemCount && (
+                        <span className="text-gray-500 whitespace-nowrap">整張單 {inv.itemCount} 支 · {money(inv.totalAmount)}</span>
+                      )}
                     </div>
                     {inv && inv.status !== 'paid' && (
                       <div className="flex items-center gap-1.5">
@@ -788,8 +830,8 @@ export default function EditorPayables() {
             })}
 
             <footer className="px-5 py-3 border-t border-black/10 flex items-center justify-between">
-              <span className="text-[13px] text-gray-500 whitespace-nowrap">合計 {count} 支</span>
-              <span className="text-base font-bold tabular-nums whitespace-nowrap">{money(r.totalAmount)}</span>
+              <span className="text-[13px] text-gray-500 whitespace-nowrap">{ipFilter === 'all' ? '' : `${ipFilter} `}合計 {count} 支</span>
+              <span className="text-base font-bold tabular-nums whitespace-nowrap">{money(shownTotal)}</span>
             </footer>
           </section>
         );

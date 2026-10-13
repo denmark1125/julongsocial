@@ -28,6 +28,8 @@ export interface StatementMeta {
   editorName: string;
   statementNo: string;
   preparedAt: Date;
+  /** 只匯出單一 IP 時填 IP 名稱；全部則留空 */
+  scope?: string;
 }
 
 export interface VendorGroup<R extends StatementRow = StatementRow> {
@@ -142,6 +144,9 @@ const EditorStatementPdf = forwardRef<HTMLDivElement, { meta: StatementMeta; row
                   <p><span className="text-gray-500 inline-block w-20">製表日</span>{format(meta.preparedAt, 'yyyy/MM/dd')}</p>
                   <p><span className="text-gray-500 inline-block w-20">對帳期間</span>{format(monthStart, 'yyyy/MM/dd')} ～ {format(endOfMonth(monthStart), 'yyyy/MM/dd')}</p>
                   <p><span className="text-gray-500 inline-block w-20">計費標準</span>60 秒以下 750／60 秒以上 900</p>
+                  {meta.scope && (
+                    <p><span className="text-gray-500 inline-block w-20">IP 範圍</span>{meta.scope}</p>
+                  )}
                 </div>
               </>
             ) : (
