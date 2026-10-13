@@ -16,7 +16,7 @@
 import { readFileSync, writeFileSync } from 'fs';
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { deriveFlowStage, EDITOR_BILLING_CUTOVER_AT } from '../src/types';
+import { deriveFlowStage, LEGACY_NEVER_UPLOADED_CUTOFF } from '../src/types';
 
 const APPLY = process.argv.includes('--apply');
 const EXCLUDE = process.argv.flatMap((v, i, all) => (all[i - 1] === '--exclude' ? [v.trim()] : []));
@@ -33,7 +33,7 @@ const vendorName: Record<string, string> = {};
 vendorSnap.docs.forEach(d => { vendorName[d.id] = d.data().name; });
 const postStatus: Record<string, string> = {};
 postSnap.docs.forEach(d => { postStatus[d.id] = d.data().status; });
-const cutover = Date.parse(EDITOR_BILLING_CUTOVER_AT);
+const cutover = Date.parse(LEGACY_NEVER_UPLOADED_CUTOFF);
 
 const targets = assetSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter(a => {
   if (a.type !== 'video' || a.voidedAt || a.status === 'archived') return false;

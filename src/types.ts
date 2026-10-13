@@ -77,7 +77,14 @@ export const EDITOR_BILLING_START_MONTH = '2026-08';
  * 新舊帳的精確切點（台北時間）。這個時間以前上傳的片不會因為「剛好同月」就自動進請款，
  * 必須先由管理端逐支標成 legacySettlementStatus=unpaid；已用舊制付過的標成 paid。
  */
-export const EDITOR_BILLING_CUTOVER_AT = '2026-08-21T00:00:00+08:00';
+// 2026-10-13 從 08-21 移到 10-06：謝謝 9 月（含 10/2～10/5 上傳）改用人工請款單結清，
+// 10/6 起上傳的才走系統。表上最晚 10/5 23:36 上傳、表外最早 10/6 13:54，剛好切開。
+export const EDITOR_BILLING_CUTOVER_AT = '2026-10-06T00:00:00+08:00';
+/**
+ * 「從沒上傳過雲端的舊帳」用建檔日判斷，維持原本的 08-21。
+ * ⚠️ 不能跟著 EDITOR_BILLING_CUTOVER_AT 移：移到 10-06 會把 10/6 前建檔、還在剪的片全部當成舊帳彈出來。
+ */
+export const LEGACY_NEVER_UPLOADED_CUTOFF = '2026-08-21T00:00:00+08:00';
 /** 最後一道人工開關。2026-10-07 開通：舊帳盤點完（待盤點 0 支）、60 秒以下 700 與請款頁金額唯讀已上線。 */
 export const EDITOR_INVOICING_ENABLED = true;
 export type LegacySettlementStatus = 'paid' | 'unpaid' | 'needs_review';

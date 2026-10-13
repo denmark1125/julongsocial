@@ -5,6 +5,7 @@ import {
   DEFAULT_EDITOR_FEE,
   DurationTier,
   EDITOR_BILLING_CUTOVER_AT,
+  LEGACY_NEVER_UPLOADED_CUTOFF,
   EDITOR_BILLING_START_MONTH,
   EDITOR_FEE_BY_TIER,
   EditorInvoice,
@@ -96,7 +97,7 @@ export function isLegacyNeverUploaded(asset: LegacyReviewAsset): boolean {
   const stage = deriveFlowStage(asset);
   if (stage !== 'client_review' && stage !== 'to_upload') return false;
   const created = Date.parse(asset.createdAt || '');
-  const cutover = Date.parse(EDITOR_BILLING_CUTOVER_AT);
+  const cutover = Date.parse(LEGACY_NEVER_UPLOADED_CUTOFF);
   return Number.isFinite(created) && created < cutover;
 }
 

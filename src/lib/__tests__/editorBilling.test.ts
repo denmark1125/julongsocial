@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findFee950Issues, getAssetFee, getBillingMonth, isBillable, feeForTier } from '../editorBilling';
+import { findFee950Issues, getAssetFee, getBillingMonth, isBillable, isLegacyNeverUploaded, feeForTier } from '../editorBilling';
 import { EditorInvoice } from '../../types';
 import { asset } from './fixtures';
 
@@ -40,7 +40,7 @@ describe('請款月份', () => {
 });
 
 describe('isBillable', () => {
-  const uploaded = '2026-09-15T10:00:00+08:00';
+  const uploaded = '2026-10-15T10:00:00+08:00';
 
   it('切帳日後上傳、沒入單、沒作廢 → 可以請款', () => {
     expect(isBillable({ cloudUploadedAt: uploaded })).toBe(true);
@@ -53,9 +53,14 @@ describe('isBillable', () => {
   });
 
   it('切帳日前的存量片：只有確認「舊制尚未付」才轉入', () => {
-    const before = '2026-08-15T10:00:00+08:00';
+    const before = '2026-09-15T10:00:00+08:00';
     expect(isBillable({ cloudUploadedAt: before })).toBe(false);
     expect(isBillable({ cloudUploadedAt: before, legacySettlementStatus: 'unpaid' })).toBe(true);
+  });
+
+  it('切帳日 10/6（台北）：10/5 23:59 上傳走人工，10/6 00:00 起走系統', () => {
+    expect(isBillable({ cloudUploadedAt: '2026-10-05T23:59:59+08:00' })).toBe(false);
+    expect(isBillable({ cloudUploadedAt: '2026-10-05T16:00:00.000Z' })).toBe(true);
   });
 
   it('系統外已付的片，切帳日後才上傳也不能再請', () => {
@@ -85,5 +90,14 @@ describe('findFee950Issues', () => {
     expect(r.paid.map(x => x.wrongAssetIds)).toEqual([['a3']]);
     expect(r.processing).toEqual([]);
     expect(r.strayAssetIds).toEqual(['a4']);
+  });
+});
+
+describe('isLegacyNeverUploaded', () => {
+  const base = { stage: 'finished', approved: false, flowStage: 'to_upload', status: 'used' } as const;
+
+  it('切帳日移到 10/6 後，9 月建檔、還在剪的片不會被當成舊帳', () => {
+    expect(isLegacyNeverUploaded({ ...base, createdAt: '2026-09-20T10:00:00+08:00' })).toBe(false);
+    expect(isLegacyNeverUploaded({ ...base, createdAt: '2026-08-10T10:00:00+08:00' })).toBe(true);
   });
 });

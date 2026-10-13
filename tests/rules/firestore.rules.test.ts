@@ -56,6 +56,7 @@ beforeEach(async () => {
     await setDoc(doc(db, 'assets', 'a2'), asset({ vendorId: 'v2' }));
     await setDoc(doc(db, 'assets', 'a3'), asset({ vendorId: 'v2', editorId: 'E1' }));
     await setDoc(doc(db, 'assets', 'invoiced'), asset({ stage: 'finished', editorFee: 900, editorInvoiceId: 'inv1', cloudUploadedAt: NOW }));
+    await setDoc(doc(db, 'assets', 'paidOutside'), asset({ stage: 'finished', cloudUploadedAt: NOW, legacySettlementStatus: 'paid' }));
     await setDoc(doc(db, 'vendorSecrets', 'v1'), { passwords: { 'IG␟xb': 'secret' } });
   });
 });
@@ -164,6 +165,12 @@ describe('請款鎖：已入單的片金額凍結', () => {
     await assertFails(updateDoc(doc(as('staff'), 'assets', 'invoiced'), { editorInvoiceId: '' }));
     await assertSucceeds(updateDoc(doc(as('staff'), 'assets', 'invoiced'), { isUrgent: true }));
     await assertSucceeds(updateDoc(doc(as('mgr'), 'assets', 'invoiced'), { editorInvoiceId: '' }));
+  });
+
+  it('人工請款單已付過的片，誰都不能再放進系統請款單（沒標已付的可以）', async () => {
+    await assertFails(updateDoc(doc(as('ed'), 'assets', 'paidOutside'), { editorFee: 750, editorInvoiceId: 'inv9' }));
+    await assertFails(updateDoc(doc(as('boss'), 'assets', 'paidOutside'), { editorInvoiceId: 'inv9' }));
+    await assertSucceeds(updateDoc(doc(as('ed'), 'assets', 'a1'), { editorFee: 750, editorInvoiceId: 'inv9' }));
   });
 
   it('已上傳雲端或已入單的片不能刪', async () => {
