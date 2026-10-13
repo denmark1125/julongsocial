@@ -57,6 +57,12 @@ describe('isBillable', () => {
     expect(isBillable({ cloudUploadedAt: before })).toBe(false);
     expect(isBillable({ cloudUploadedAt: before, legacySettlementStatus: 'unpaid' })).toBe(true);
   });
+
+  it('系統外已付的片，切帳日後才上傳也不能再請', () => {
+    expect(isBillable({ cloudUploadedAt: uploaded, legacySettlementStatus: 'paid' })).toBe(false);
+    expect(isBillable({ cloudUploadedAt: '2026-10-20T10:00:00+08:00', legacySettlementStatus: 'paid' })).toBe(false);
+    expect(isBillable({ cloudUploadedAt: uploaded, legacySettlementStatus: 'unpaid' })).toBe(true);
+  });
 });
 
 describe('findFee950Issues', () => {
