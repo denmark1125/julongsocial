@@ -22,6 +22,7 @@ import {
   buildEditorQueue, customDeadline, deadlineStatus, deliveryDeadline, EditorQueueRow, formatDeadline, shootBaseDate,
 } from '../lib/editorQueue';
 import { rankByVendor } from '../lib/editOrder';
+import { isBillable } from '../lib/editorBilling';
 import {
   buildHorizonDemands, buildSupplyPlan, describeSupply, SUPPLY_HORIZON_DAYS,
 } from '../lib/materialSupply';
@@ -923,7 +924,10 @@ export default function EditorAssetQueue({
   //    隊伍頁的「要剪／剪好待傳」數字跟「剪好了，還沒傳雲端」那一區會被篩掉，看起來像片不見了。
   const queueToEdit = displayed.filter(a => bucketOf(a) === 'to_edit');
   const queueToUpload = sortFlowColumn(displayed.filter(a => bucketOf(a) === 'to_upload'), posts);
-  const done = inBucket('done');
+  // 「已完成」只留還沒請款的片：送出請款單、或已在系統外（人工請款單）付過的就離開這裡，
+  // 不然這區只會越堆越多。請過的片到「我的請款」看紀錄。
+  // ⚠️ 只在這裡濾，不要改 bucketOf：隊伍頁的 deliveredAssets 要靠已上傳的片算成片庫存。
+  const done = inBucket('done').filter(isBillable);
 
   // 預設落在第一個有東西的待辦頁；兩邊都空才停在待剪
   const activeTab: Bucket =
@@ -1650,7 +1654,7 @@ export default function EditorAssetQueue({
       {activeView === 'list' && activeTab === 'done' && (
         <Section
           title="已完成"
-          hint="你這邊都處理完了。這些就是本月請款的依據，可對照「我的請款」核對。"
+          hint="做完、還沒請款的片。送出請款後會移到「我的請款」。"
           count={done.length}
           tone="muted"
           icon={<PackageCheck size={14} />}
