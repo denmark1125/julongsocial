@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, deleteField, doc, onSnapshot, updateDoc, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import {
@@ -12,14 +12,27 @@ import {
   summarizeByEditor, WRONG_OVER60_FEE,
 } from '../lib/editorBilling';
 import {
-  Wallet, CheckCircle2, Clock, AlertCircle, Ban, ChevronDown, ChevronRight,
-  FileSpreadsheet, Users as UsersIcon,
+  CheckCircle2, Ban,
+  FileSpreadsheet, FileDown,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
+import { toJpeg } from 'html-to-image';
+import { jsPDF } from 'jspdf';
+import EditorStatementPdf, {
+  STATEMENT_STATUS_LABEL, groupRowsByVendor, type StatementMeta, type StatementRow, type StatementStatus,
+} from './EditorStatementPdf';
 
 const money = (n: number) => `$${n.toLocaleString()}`;
 const UNASSIGNED = '__unassigned__';
+
+const STATUS_BADGE: Record<StatementStatus, string> = {
+  unsubmitted: 'bg-[#A67C52]/10 text-[#8B5E34] border-[#A67C52]/30',
+  submitted: 'bg-amber-50 text-amber-700 border-amber-200',
+  approved: 'bg-blue-50 text-blue-700 border-blue-200',
+  payment_processing: 'bg-purple-50 text-purple-700 border-purple-200',
+  paid: 'bg-green-50 text-green-700 border-green-200',
+};
 
 export default function EditorPayables() {
   // 共用即時資料層：整個 session 只訂閱一次，切分頁不再重讀
@@ -28,7 +41,7 @@ export default function EditorPayables() {
   const editors = useLiveCollection<Editor>('editors');
   const [invoices, setInvoices] = useState<EditorInvoice[]>([]);
   const [month, setMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
   const [busyId, setBusyId] = useState<string | null>(null);
   // 管帳調價：只有還沒納入請款單的片可以改（入單後規則層也會擋）
   const [feeAsset, setFeeAsset] = useState<Asset | null>(null);
@@ -371,26 +384,154 @@ export default function EditorPayables() {
     }
   };
 
-  const stats = [
-    { label: '未請款（等剪輯師送單）', value: totals.unsubmitted, icon: AlertCircle, color: 'text-[#A67C52]', bg: 'bg-[#A67C52]/10' },
-    { label: '待公司核准', value: totals.submitted, icon: Clock, color: 'text-[#8B7355]', bg: 'bg-[#8B7355]/10' },
-    { label: '公司已核准', value: totals.approved, icon: CheckCircle2, color: 'text-blue-700', bg: 'bg-blue-50' },
-    { label: '付款處理中', value: totals.processing, icon: Wallet, color: 'text-purple-700', bg: 'bg-purple-50' },
-    { label: '已請款', value: totals.paid, icon: CheckCircle2, color: 'text-[#8A8A6A]', bg: 'bg-[#8A8A6A]/10' },
+  /** 對帳單逐列：已入單的取請款單快照（金額已凍結），未送單的取素材現值 */
+  type StatementGroup = {
+    key: string;
+    status: StatementStatus;
+    invoice?: EditorInvoice;
+    rows: (StatementRow & { asset?: Asset })[];
+  };
+  const statementOf = (editorId: string): StatementGroup[] => {
+    const groups: StatementGroup[] = monthInvoices
+      .filter(i => i.editorId === editorId)
+      .sort((a, b) => (a.submittedAt || '').localeCompare(b.submittedAt || ''))
+      .map(inv => ({
+        key: inv.id!,
+        status: inv.status as StatementStatus,
+        invoice: inv,
+        rows: (inv.items || []).map(it => {
+          const live = assets.find(a => a.id === it.assetId);
+          return {
+            key: it.assetId,
+            vendorName: it.vendorName,
+            title: it.title,
+            uploadedAt: it.cloudUploadedAt,
+            tierLabel: live?.durationTier ? DURATION_TIER_LABEL[live.durationTier] : undefined,
+            amount: it.amount,
+            status: inv.status as StatementStatus,
+            note: !live ? '素材已刪除' : live.status === 'archived' ? '未使用' : undefined,
+          };
+        }),
+      }));
+    const pending = unsubmittedOf(editorId)
+      .sort((a, b) => (a.cloudUploadedAt || '').localeCompare(b.cloudUploadedAt || ''));
+    if (pending.length > 0) {
+      groups.push({
+        key: 'pending',
+        status: 'unsubmitted',
+        rows: pending.map(a => ({
+          key: a.id!,
+          vendorName: vendors.find(v => v.id === a.vendorId)?.name || '未知 IP',
+          title: a.title,
+          uploadedAt: a.cloudUploadedAt,
+          tierLabel: a.durationTier ? DURATION_TIER_LABEL[a.durationTier] : undefined,
+          amount: getAssetFee(a),
+          status: 'unsubmitted' as const,
+          note: a.status === 'archived' ? '未使用' : undefined,
+          asset: a,
+        })),
+      });
+    }
+    return groups;
+  };
+
+  // PDF：先把對帳單排成 A4 頁面（放在畫面外），逐頁截圖再組成 PDF。
+  // 不用 jsPDF 直接畫字：專案沒有註冊中文字型，直接畫會是亂碼。
+  const pdfRef = useRef<HTMLDivElement>(null);
+  const [pdfJob, setPdfJob] = useState<{ meta: StatementMeta; rows: StatementRow[] } | null>(null);
+
+  const exportStatementPdf = (editorId: string, name: string) => {
+    const rows: StatementRow[] = statementOf(editorId)
+      .flatMap(g => g.rows.map(({ asset: _asset, ...row }) => row))
+      .sort((a, b) => (a.uploadedAt || '').localeCompare(b.uploadedAt || ''));
+    setPdfJob({
+      meta: {
+        month,
+        editorName: name,
+        statementNo: `${month.replace('-', '')}-${editorId.slice(-4).toUpperCase()}`,
+        preparedAt: new Date(),
+      },
+      rows,
+    });
+  };
+
+  useEffect(() => {
+    if (!pdfJob) return;
+    let cancelled = false;
+    (async () => {
+      const t = toast.loading('正在產生 PDF…');
+      try {
+        await document.fonts.ready;
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const pages: HTMLElement[] = pdfRef.current ? Array.from(pdfRef.current.querySelectorAll<HTMLElement>('[data-pdf-page]')) : [];
+        if (pages.length === 0) throw new Error('沒有可輸出的頁面');
+        const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+        for (let i = 0; i < pages.length; i++) {
+          const url = await toJpeg(pages[i], { quality: 0.95, pixelRatio: 2, backgroundColor: '#ffffff' });
+          if (i > 0) pdf.addPage();
+          pdf.addImage(url, 'JPEG', 0, 0, 210, 297);
+        }
+        if (!cancelled) pdf.save(`剪輯費對帳單_${pdfJob.meta.editorName}_${pdfJob.meta.month}.pdf`);
+        toast.success('PDF 已下載', { id: t });
+      } catch (e) {
+        console.error('statement pdf failed:', e);
+        toast.error('PDF 產生失敗', { id: t });
+      } finally {
+        if (!cancelled) setPdfJob(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [pdfJob]);
+
+  const countOf = (k: 'unsubmittedCount' | 'submittedCount' | 'approvedCount' | 'processingCount' | 'paidCount') =>
+    summaries.reduce((n, r) => n + r[k], 0);
+  const summaryCells = [
+    { label: '未送單', count: countOf('unsubmittedCount'), amount: totals.unsubmitted },
+    { label: '待核准', count: countOf('submittedCount'), amount: totals.submitted },
+    { label: '已核准', count: countOf('approvedCount'), amount: totals.approved },
+    { label: '付款中', count: countOf('processingCount'), amount: totals.processing },
+    { label: '已付款', count: countOf('paidCount'), amount: totals.paid },
   ];
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        {stats.map((s, i) => (
-          <div key={i} className="bg-white p-4 rounded-2xl border border-black/5 shadow-sm">
-            <div className={`p-2 rounded-lg w-fit mb-2 ${s.bg}`}>
-              <s.icon className={`w-5 h-5 ${s.color}`} />
-            </div>
-            <p className="text-xs text-gray-500 font-medium">{s.label}</p>
-            <p className="text-lg font-bold">{money(s.value)}</p>
+      <div className="bg-white rounded-2xl border border-black/5 shadow-sm">
+        <div className="px-5 py-4 border-b border-black/5 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-base font-bold text-[#1a1a1a] whitespace-nowrap">剪輯費應付對帳</h2>
+            <p className="text-[13px] text-gray-400 mt-0.5">以成片上傳雲端日期認列月份</p>
           </div>
-        ))}
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={month}
+              onChange={e => setMonth(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-black/10 bg-white text-[13px] font-bold text-[#1a1a1a]"
+            >
+              {monthOptions.map(m => (
+                <option key={m} value={m}>{m.slice(0, 4)} 年 {monthLabel(m)}</option>
+              ))}
+            </select>
+            <button
+              onClick={exportExcel}
+              disabled={summaries.length === 0}
+              className="flex items-center gap-1.5 bg-white border border-black/10 text-[#5A5A40] px-3 py-2 rounded-xl text-[13px] font-bold hover:bg-black/[0.02] disabled:opacity-40 whitespace-nowrap"
+            >
+              <FileSpreadsheet size={14} /> 匯出 Excel
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 border-black/5">
+          <div className="px-5 py-4 col-span-2 sm:col-span-3 lg:col-span-1 bg-[#F5F5F0]/60">
+            <p className="text-[13px] text-gray-500 whitespace-nowrap">{monthLabel(month)}應付合計</p>
+            <p className="text-xl font-bold tabular-nums mt-1 whitespace-nowrap">{money(totals.all)}</p>
+          </div>
+          {summaryCells.map(c => (
+            <div key={c.label} className="px-5 py-4 border-l border-t lg:border-t-0 border-black/5">
+              <p className="text-[13px] text-gray-500 whitespace-nowrap">{c.label} · {c.count} 支</p>
+              <p className={`text-base font-bold tabular-nums mt-1 whitespace-nowrap ${c.amount ? 'text-[#1a1a1a]' : 'text-gray-300'}`}>{money(c.amount)}</p>
+            </div>
+          ))}
+        </div>
       </div>
 
       {fee950Total > 0 && (
@@ -509,189 +650,152 @@ export default function EditorPayables() {
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[13px] font-bold text-gray-400 w-10 shrink-0">月份</span>
-          {monthOptions.map(m => (
-            <button
-              key={m}
-              onClick={() => setMonth(m)}
-              className={month === m
-                ? 'px-3 py-1 rounded-full text-[13px] font-bold bg-[#5A5A40] text-white'
-                : 'px-3 py-1 rounded-full text-[13px] font-bold bg-white border border-black/5 text-gray-500 hover:text-[#5A5A40]'}
-            >
-              {monthLabel(m)}<span className="ml-1 opacity-60">{m.slice(0, 4)}</span>
-            </button>
-          ))}
-        </div>
-        <button
-          onClick={exportExcel}
-          disabled={summaries.length === 0}
-          className="flex items-center gap-1.5 bg-white border border-black/10 text-[#5A5A40] px-4 py-2 rounded-xl text-xs font-bold hover:bg-black/[0.02] disabled:opacity-40"
-        >
-          <FileSpreadsheet size={14} /> 下載對帳清單
-        </button>
-      </div>
 
-      <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
-        <div className="px-5 pt-4 pb-3 border-b border-black/5">
-          <h3 className="text-sm font-bold text-[#5A5A40] flex items-center gap-2">
-            <UsersIcon size={14} /> {monthLabel(month)}各剪輯師應付
-            <span className="text-[13px] font-bold px-2 py-0.5 rounded-full bg-black/5 text-gray-500">
-              {summaries.length}
-            </span>
-          </h3>
-          <p className="text-[13px] text-gray-400 mt-0.5">
-            「未請款」代表片已上傳但剪輯師還沒送單，要催的是他；「已送出待付款」代表球在我們這邊。
-          </p>
+      {summaries.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-10 text-center text-gray-400 text-[13px]">
+          {monthLabel(month)}沒有任何應付款項
         </div>
+      ) : summaries.map(r => {
+        const groups = statementOf(r.editorId);
+        const count = groups.reduce((n, g) => n + g.rows.length, 0);
+        let seq = 0;
+        return (
+          <section key={r.editorId} className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+            <header className="px-5 py-4 border-b border-black/5 flex items-center justify-between gap-3 flex-wrap">
+              <div className="min-w-0">
+                <p className="text-[13px] text-gray-400">剪輯師</p>
+                <h3 className="text-base font-bold text-[#1a1a1a] truncate">{r.editorName}</h3>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <p className="text-[13px] text-gray-400 whitespace-nowrap">{monthLabel(month)}應付 · {count} 支</p>
+                  <p className="text-lg font-bold tabular-nums whitespace-nowrap">{money(r.totalAmount)}</p>
+                </div>
+                <button
+                  onClick={() => exportStatementPdf(r.editorId, r.editorName)}
+                  disabled={!!pdfJob}
+                  className="flex items-center gap-1.5 bg-[#5A5A40] text-white px-3 py-2 rounded-xl text-[13px] font-bold disabled:opacity-40 whitespace-nowrap"
+                >
+                  <FileDown size={14} /> 對帳單 PDF
+                </button>
+              </div>
+            </header>
 
-        {summaries.length === 0 ? (
-          <div className="p-10 text-center text-gray-400 italic text-xs">
-            {monthLabel(month)}沒有任何應付款項
-          </div>
-        ) : (
-          <div className="divide-y divide-black/5">
-            {summaries.map(r => {
-              const open = !!expanded[r.editorId];
-              const myInvoices = monthInvoices.filter(i => i.editorId === r.editorId);
-              const pending = unsubmittedOf(r.editorId);
+            {groups.map(g => {
+              const subtotal = g.rows.reduce((n, x) => n + x.amount, 0);
+              const inv = g.invoice;
               return (
-                <div key={r.editorId}>
-                  <button
-                    onClick={() => setExpanded(p => ({ ...p, [r.editorId]: !open }))}
-                    className="w-full text-left px-5 py-3 hover:bg-black/[0.015] flex items-center gap-3"
-                  >
-                    {open ? <ChevronDown size={14} className="text-gray-400 shrink-0" />
-                          : <ChevronRight size={14} className="text-gray-400 shrink-0" />}
-                    <span className="font-bold text-sm text-[#5A5A40] w-32 shrink-0 truncate">{r.editorName}</span>
-                    <div className="flex-1 flex items-center gap-4 flex-wrap text-[13px]">
-                      {r.unsubmittedCount > 0 && (
-                        <span className="text-[#A67C52] font-bold">
-                          未請款 {r.unsubmittedCount} 支 {money(r.unsubmittedAmount)}
-                        </span>
-                      )}
-                      {r.submittedCount > 0 && (
-                        <span className="text-[#8B7355] font-bold">
-                          待核准 {r.submittedCount} 支 {money(r.submittedAmount)}
-                        </span>
-                      )}
-                      {r.approvedCount > 0 && <span className="text-blue-700 font-bold">已核准 {r.approvedCount} 支 {money(r.approvedAmount)}</span>}
-                      {r.processingCount > 0 && <span className="text-purple-700 font-bold">付款中 {r.processingCount} 支 {money(r.processingAmount)}</span>}
-                      {r.paidCount > 0 && (
-                        <span className="text-[#8A8A6A]">
-                          已請款 {r.paidCount} 支 {money(r.paidAmount)}
-                        </span>
-                      )}
+                <div key={g.key} className="border-b border-black/5 last:border-b-0">
+                  <div className="px-5 py-2.5 bg-[#F5F5F0]/70 flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 text-[13px] flex-wrap">
+                      <span className="font-bold text-gray-700 whitespace-nowrap">
+                        {inv ? `請款單 ${inv.id?.slice(-8).toUpperCase()}` : '尚未送單'}
+                      </span>
+                      <span className="text-gray-400 whitespace-nowrap">
+                        {inv ? `${inv.submittedAt ? format(parseISO(inv.submittedAt), 'yyyy/MM/dd') : ''} 送出` : '片已上傳，等剪輯師送出請款'}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-full text-[13px] font-bold border whitespace-nowrap ${STATUS_BADGE[g.status]}`}>
+                        {STATEMENT_STATUS_LABEL[g.status]}
+                      </span>
                     </div>
-                    <span className="font-bold text-sm shrink-0">{money(r.totalAmount)}</span>
-                  </button>
-
-                  {open && (
-                    <div className="px-5 pb-4 space-y-3 bg-black/[0.01]">
-                      {myInvoices.map(inv => (
-                        <div key={inv.id} className="bg-white rounded-xl border border-black/5 p-3 space-y-2">
-                          <div className="flex items-center justify-between gap-3 flex-wrap">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs font-bold text-[#5A5A40]">
-                                單號 {inv.id?.slice(-8).toUpperCase()}
-                              </span>
-                              <span className="text-[13px] text-gray-400">
-                                {inv.itemCount} 支 · {money(inv.totalAmount)}
-                              </span>
-                              {inv.status === 'paid' ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 text-[13px] font-bold border border-green-200">
-                                  <CheckCircle2 size={9} /> 已請款
-                                </span>
-                              ) : inv.status === 'approved' ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[13px] font-bold border border-blue-200">公司已核准</span>
-                              ) : inv.status === 'payment_processing' ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 text-[13px] font-bold border border-purple-200">付款處理中</span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[13px] font-bold border border-amber-200">
-                                  <Clock size={9} /> 待公司核准
-                                </span>
-                              )}
-                            </div>
-                            {inv.status !== 'paid' && (
-                              <div className="flex items-center gap-1.5">
-                                {inv.status === 'submitted' && <button onClick={() => advanceInvoice(inv, 'approved')} disabled={busyId === inv.id} className="flex items-center gap-1 bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[13px] font-bold disabled:opacity-40">公司核准</button>}
-                                {inv.status === 'approved' && <button onClick={() => advanceInvoice(inv, 'payment_processing')} disabled={busyId === inv.id} className="flex items-center gap-1 bg-purple-700 text-white px-3 py-1.5 rounded-lg text-[13px] font-bold disabled:opacity-40">開始付款處理</button>}
-                                {inv.status === 'payment_processing' && <button onClick={() => markPaid(inv)} disabled={busyId === inv.id} className="flex items-center gap-1 bg-[#5A5A40] text-white px-3 py-1.5 rounded-lg text-[13px] font-bold disabled:opacity-40"><CheckCircle2 size={10} /> 確認已付款</button>}
-                                <button
-                                  onClick={() => voidInvoice(inv)}
-                                  disabled={busyId === inv.id}
-                                  className="flex items-center gap-1 bg-white border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-[13px] font-bold hover:bg-red-50 disabled:opacity-40"
-                                >
-                                  <Ban size={10} /> 作廢
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                          <div className="space-y-0.5">
-                            {inv.items.map(it => {
-                              const live = assets.find(a => a.id === it.assetId);
-                              const unused = live?.status === 'archived';
-                              return (
-                                <div key={it.assetId} className="text-[13px] text-gray-500 flex items-center gap-1.5">
-                                  <span className="truncate">
-                                    {it.vendorName}｜{it.title}（{money(it.amount)}）
-                                  </span>
-                                  {!live && (
-                                    <span className="shrink-0 px-1.5 py-0.5 rounded bg-gray-100 text-gray-400 text-[13px] font-bold">
-                                      素材已刪除
-                                    </span>
+                    {inv && inv.status !== 'paid' && (
+                      <div className="flex items-center gap-1.5">
+                        {inv.status === 'submitted' && <button onClick={() => advanceInvoice(inv, 'approved')} disabled={busyId === inv.id} className="bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[13px] font-bold disabled:opacity-40 whitespace-nowrap">核准</button>}
+                        {inv.status === 'approved' && <button onClick={() => advanceInvoice(inv, 'payment_processing')} disabled={busyId === inv.id} className="bg-purple-700 text-white px-3 py-1.5 rounded-lg text-[13px] font-bold disabled:opacity-40 whitespace-nowrap">開始付款</button>}
+                        {inv.status === 'payment_processing' && <button onClick={() => markPaid(inv)} disabled={busyId === inv.id} className="flex items-center gap-1 bg-[#5A5A40] text-white px-3 py-1.5 rounded-lg text-[13px] font-bold disabled:opacity-40 whitespace-nowrap"><CheckCircle2 size={12} /> 確認已付款</button>}
+                        <button onClick={() => voidInvoice(inv)} disabled={busyId === inv.id} className="flex items-center gap-1 bg-white border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-[13px] font-bold hover:bg-red-50 disabled:opacity-40 whitespace-nowrap">
+                          <Ban size={12} /> 作廢
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[640px] text-[13px] tabular-nums" style={{ tableLayout: 'fixed' }}>
+                      <colgroup>
+                        <col style={{ width: 56 }} />
+                        <col />
+                        <col style={{ width: 80 }} />
+                        <col style={{ width: 96 }} />
+                        <col style={{ width: 112 }} />
+                      </colgroup>
+                      <thead>
+                        <tr className="text-left text-gray-400 border-b border-black/5">
+                          <th className="px-5 py-2 font-medium text-center">序</th>
+                          <th className="px-2 py-2 font-medium">片名</th>
+                          <th className="px-2 py-2 font-medium">上傳日</th>
+                          <th className="px-2 py-2 font-medium">長度</th>
+                          <th className="px-5 py-2 font-medium text-right">金額</th>
+                        </tr>
+                      </thead>
+                      {groupRowsByVendor(g.rows).map(vg => (
+                        <tbody key={vg.vendorName} className="border-b border-black/5 last:border-b-0">
+                          <tr>
+                            <td colSpan={5} className="px-5 pt-3 pb-1.5">
+                              <span className="font-bold text-[#1a1a1a] whitespace-nowrap">{vg.vendorName}</span>
+                              <span className="ml-2 text-gray-400 whitespace-nowrap">{vg.rows.length} 支</span>
+                            </td>
+                          </tr>
+                          {vg.rows.map(row => {
+                            seq += 1;
+                            return (
+                              <tr key={row.key} className="border-t border-black/[0.04]">
+                                <td className="px-5 py-2 text-center text-gray-400">{seq}</td>
+                                <td className="px-2 py-2">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="truncate whitespace-nowrap text-[#1a1a1a]" title={row.title}>{row.title}</span>
+                                    {row.note && (
+                                      <span className="shrink-0 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[13px] font-bold whitespace-nowrap">{row.note}</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-2 py-2 whitespace-nowrap text-gray-600">{row.uploadedAt ? format(parseISO(row.uploadedAt), 'MM/dd') : '—'}</td>
+                                <td className="px-2 py-2 whitespace-nowrap text-gray-600">{row.tierLabel || '—'}</td>
+                                <td className="px-5 py-2 text-right whitespace-nowrap">
+                                  {row.asset ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => { setFeeCustom(''); setFeeAsset(row.asset!); }}
+                                      className="font-bold text-[#5A5A40] underline decoration-dotted underline-offset-4 hover:text-[#1a1a1a]"
+                                      title="調整這支的剪輯費"
+                                    >
+                                      {money(row.amount)}
+                                    </button>
+                                  ) : (
+                                    <span className="font-bold">{money(row.amount)}</span>
                                   )}
-                                  {unused && (
-                                    <span className="shrink-0 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[13px] font-bold">
-                                      未使用
-                                    </span>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          <tr className="border-t border-black/[0.06] bg-[#F5F5F0]/50">
+                            <td colSpan={4} className="px-5 py-2 text-right text-gray-500 whitespace-nowrap">{vg.vendorName} 小計 {vg.rows.length} 支</td>
+                            <td className="px-5 py-2 text-right font-bold whitespace-nowrap">{money(vg.subtotal)}</td>
+                          </tr>
+                        </tbody>
                       ))}
-
-                      {pending.length > 0 && (
-                        <div className="bg-white rounded-xl border border-dashed border-[#A67C52]/40 p-3">
-                          <p className="text-xs font-bold text-[#A67C52] mb-1.5">
-                            尚未送單 {pending.length} 支（片已上傳，等他自己送出請款）
-                          </p>
-                          <div className="space-y-0.5">
-                            {pending.map(a => (
-                              <div key={a.id} className="text-[13px] text-gray-500 flex items-center gap-1.5">
-                                <span className="truncate">
-                                  {vendors.find(v => v.id === a.vendorId)?.name || '未知 IP'}｜{a.title}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => { setFeeCustom(''); setFeeAsset(a); }}
-                                  className="shrink-0 px-1.5 py-0.5 rounded border border-[#5A5A40]/30 text-[#5A5A40] text-[13px] font-bold hover:bg-[#5A5A40]/5"
-                                  title="調整這支的剪輯費"
-                                >
-                                  {money(getAssetFee(a))}
-                                  {a.durationTier && <span className="ml-1 opacity-60">{DURATION_TIER_LABEL[a.durationTier]}</span>}
-                                </button>
-                                {a.status === 'archived' && (
-                                  <span className="shrink-0 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[13px] font-bold">
-                                    未使用
-                                  </span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                      <tfoot>
+                        <tr className="border-t border-black/10">
+                          <td colSpan={4} className="px-5 py-2.5 text-right text-gray-600 font-bold whitespace-nowrap">
+                            {inv ? '本單合計' : '未送單合計'} {g.rows.length} 支
+                          </td>
+                          <td className="px-5 py-2.5 text-right font-bold whitespace-nowrap">{money(subtotal)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
                 </div>
               );
             })}
-          </div>
-        )}
-      </div>
+
+            <footer className="px-5 py-3 border-t border-black/10 flex items-center justify-between">
+              <span className="text-[13px] text-gray-500 whitespace-nowrap">合計 {count} 支</span>
+              <span className="text-base font-bold tabular-nums whitespace-nowrap">{money(r.totalAmount)}</span>
+            </footer>
+          </section>
+        );
+      })}
+
+      {pdfJob && <EditorStatementPdf ref={pdfRef} meta={pdfJob.meta} rows={pdfJob.rows} />}
 
       {/* 管帳調價。分級與自訂金額是兩條路：選分級＝跟著公司定價走（日後調價會一起變），
           填自訂金額＝這一支特例（寫死在素材上）。已納入請款單的片不會出現在這裡。 */}
