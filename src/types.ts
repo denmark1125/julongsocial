@@ -47,7 +47,7 @@ export interface BillingRecord {
 export type DurationTier = 'under60' | 'over60';
 
 export const EDITOR_FEE_BY_TIER: Record<DurationTier, number> = {
-  under60: 700,   // 60 秒以下。2026-10-05 老闆確認是 700（之前誤寫成 750；當時請款功能還沒開放，沒有送出過任何請款單）
+  under60: 750,   // 60 秒以下。2026-10-05 一度改成 700（PR #17），2026-10-08 使用者更正：正確是 750
   over60: 900,    // 60 秒（含）以上。2026-09-11～10-03 這裡誤寫成 950，未付款的單已用 scripts/fix-fee-950.mjs 更正
 };
 
