@@ -5,6 +5,7 @@ import {
   DEFAULT_EDITOR_FEE,
   DurationTier,
   EDITOR_BILLING_CUTOVER_AT,
+  LEGACY_NEVER_UPLOADED_CUTOFF,
   EDITOR_BILLING_START_MONTH,
   EDITOR_FEE_BY_TIER,
   EditorInvoice,
@@ -96,7 +97,7 @@ export function isLegacyNeverUploaded(asset: LegacyReviewAsset): boolean {
   const stage = deriveFlowStage(asset);
   if (stage !== 'client_review' && stage !== 'to_upload') return false;
   const created = Date.parse(asset.createdAt || '');
-  const cutover = Date.parse(EDITOR_BILLING_CUTOVER_AT);
+  const cutover = Date.parse(LEGACY_NEVER_UPLOADED_CUTOFF);
   return Number.isFinite(created) && created < cutover;
 }
 
@@ -122,6 +123,9 @@ export function isBillable(asset: Pick<Asset,
   if (asset.editorInvoiceId) return false; // 已經請過款
   const month = getBillingMonth(asset);
   if (!month || month < EDITOR_BILLING_START_MONTH) return false;
+  // 已在系統外付過的片，不管哪天上傳都不能再請。不擋的話，標了 paid 卻還沒上傳的片，
+  // 剪輯師一按「上傳雲端」就會變成切帳日後的新片而重複付錢（2026-09 人工請款單那批就是這種）。
+  if (asset.legacySettlementStatus === 'paid') return false;
   // 切帳日前的存量片逐支盤點：只有明確確認「舊制尚未付」才轉入系統請款。
   if (isBeforeBillingCutover(asset)) return asset.legacySettlementStatus === 'unpaid';
   return true;

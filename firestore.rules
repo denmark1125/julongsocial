@@ -458,6 +458,9 @@ service cloud.firestore {
         // 請款鎖：已入單的片，金額與綁定關係一律凍結（不分角色，老闆自己也不行 —— 這是帳務完整性，
         // 不是權限問題）。editorInvoiceId 因此只能 unset→set 一次，剪輯師無法清掉重複請款。
         && (!touchesBillingFields() || !assetInvoiced() || internalUnlockingInvoice())
+        // 系統外（人工請款單）已付過的片，任何人都不能再把它放進系統請款單 —— 防重複付錢的最後一道鎖。
+        && !(request.resource.data.get('editorInvoiceId', '') != ''
+             && resource.data.get('legacySettlementStatus', '') == 'paid')
         && billableEditorIsSelf()
         // 一般 employee 可以維護素材流程，但不能碰剪輯費、請款鎖或新舊帳結算。
         // editor 需要在自己的請款流程寫 editorFee/editorInvoiceId；manager 以上負責財務覆核。
