@@ -114,8 +114,10 @@ export function buildFlowUpdate(
     // 那個日期是請款月份的認定依據，絕不能被業主通過的時間蓋掉。
     if (!asset.cloudUploadedAt) update.cloudUploadedAt = nowIso;
   }
-  // 剪輯師交片：沿用既有的 submittedBy/submittedAt，不另造欄位
-  if (to === 'client_review' && opts.byUid) {
+  // 剪輯師交片：沿用既有的 submittedBy/submittedAt，不另造欄位。
+  // ⚠️ 只有從「待剪／修改中」進來才算交片。取消審核（ready/to_upload → client_review）、取消上傳也會回到這一棒，
+  //    以前沒擋，主管按一次取消審核就把送審人改成主管、送審時間改成當下（大發 8891 那支就是這樣被改掉的）。
+  if (to === 'client_review' && opts.byUid && (from === 'to_edit' || from === 'revising')) {
     update.submittedBy = opts.byUid;
     update.submittedAt = nowIso;
   }
@@ -123,14 +125,19 @@ export function buildFlowUpdate(
   return update;
 }
 
+/** 剪輯師在「業主審核中」按上傳、因而視同業主通過時，寫進 flowLog 的註記。撤回上傳靠它判斷要退回哪一棒 */
+export const UPLOAD_IMPLIES_APPROVAL_NOTE = '已上傳雲端（視同業主通過）';
+
 /**
- * 剪輯師標記「已上傳雲端」。
+ * 剪輯師標記「已上傳雲端」（不論系統代傳或自己傳好只標記，都走這裡）。
  *
- * 這是獨立於審核軸的一條事實線，不是交棒鏈上的一棒：
- * - 業主已經通過了（to_upload）→ 兩個條件都成立，直接進 ready（可排程）。
- * - 業主還在審（client_review）→ **只記錄上傳事實，棒次不動**。
- *   絕不能在這裡寫 approved=true —— 那等於冒用業主的通過，會讓沒審過的片
- *   直接掉進可排程庫存（vendorStatus 是用 approved 判定成片的）。
+ * 2026-10-15 改：上傳＝業主通過。公司實際流程是「我們審片沒問題 → 剪輯師才上傳」，
+ * 剪輯師會按上傳就代表已經過審，所以 client_review 也直接進 ready（可排程、會送客戶資料夾）。
+ * 8/11 起原本設計成兩條獨立的軸（client_review 時只記上傳事實、棒次不動），
+ * 但那不是當初溝通的流程，同事得再回後台按一次「待審核」才會變綠，常常漏按。
+ * - client_review → ready，flowLog 記 UPLOAD_IMPLIES_APPROVAL_NOTE（撤回時退回業主審核中）
+ * - to_upload（業主先通過了）→ ready
+ * - 其他（理論上按不到）→ 只記上傳事實，棒次不動
  *
  * 上傳日期 cloudUploadedAt 是請款月份的唯一認定依據，所以只寫一次、之後不覆蓋。
  */
@@ -151,6 +158,10 @@ export function buildCloudUploadUpdate(
   // 業主已通過 → 這一按就補齊最後一個條件，直接可排程
   if (current === 'to_upload') {
     return { ...buildFlowUpdate(asset, 'ready', opts), ...billing };
+  }
+  // 業主審核中 → 剪輯師上傳＝審過了（見上方說明），一起補齊
+  if (current === 'client_review') {
+    return { ...buildFlowUpdate(asset, 'ready', { ...opts, note: UPLOAD_IMPLIES_APPROVAL_NOTE }), ...billing };
   }
 
   const now = opts.now ?? new Date();
@@ -196,9 +207,13 @@ export function buildCloudUploadUndoUpdate(
 
   // ready 的定義是「業主過了 **且** 已上傳」，少一個條件就不該再留在 ready，
   // 否則它會繼續待在可排程庫存裡，小編排下去才發現雲端根本沒檔案。
+  // 退回哪一棒看當初怎麼進 ready 的：是上傳順便視同通過的 → 通過也一起收回（業主審核中）；
+  // 是我們先按通過、剪輯師後傳的 → 保留通過（待上傳）。
   if (current === 'ready') {
+    const enteredReady = [...(asset.flowLog ?? [])].reverse().find(e => e.to === 'ready');
+    const back = enteredReady?.note === UPLOAD_IMPLIES_APPROVAL_NOTE ? 'client_review' : 'to_upload';
     return {
-      ...buildFlowUpdate(asset, 'to_upload', { ...opts, note: '取消上傳雲端' }),
+      ...buildFlowUpdate(asset, back, { ...opts, note: '取消上傳雲端' }),
       cloudUploadedAt: '',
     };
   }

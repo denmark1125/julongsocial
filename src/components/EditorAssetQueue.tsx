@@ -23,6 +23,7 @@ import {
 } from '../lib/editorQueue';
 import { rankByVendor } from '../lib/editOrder';
 import { isBillable } from '../lib/editorBilling';
+import { canUploadFinishedInApp, uploadFinishedFiles, requestClientCopy, fetchFinishedUploadVendors } from '../lib/finishedUpload';
 import {
   buildHorizonDemands, buildSupplyPlan, describeSupply, SUPPLY_HORIZON_DAYS,
 } from '../lib/materialSupply';
@@ -87,7 +88,7 @@ function stepStates(asset: Asset): { convert: StepState; upload: StepState } {
 }
 
 function Step({
-  state, label, caption, icon, tone, busy, onClick, compact,
+  state, label, caption, icon, tone, busy, onClick, compact, tight,
 }: {
   state: StepState;
   label: string;
@@ -98,6 +99,8 @@ function Step({
   onClick?: () => void;
   /** 排程清單裡的精簡版：電腦版收掉說明小字（那一頁上方已經講過流程），字放大 */
   compact?: boolean;
+  /** 跟兩顆上傳按鈕三格並排時用：內距收小，跟旁邊兩格對齊 */
+  tight?: boolean;
 }) {
   const clickable = state === 'active' && !!onClick;
   const style =
@@ -113,9 +116,9 @@ function Step({
     <button
       onClick={clickable ? onClick : undefined}
       disabled={!clickable || busy}
-      className={`flex-1 min-w-0 rounded-xl px-3 py-2 text-left transition-all border ${style} disabled:opacity-100 ${clickable ? '' : 'cursor-default'}`}
+      className={`flex-1 min-w-0 rounded-xl ${tight ? 'px-2' : 'px-3'} py-2 text-left transition-all border ${style} disabled:opacity-100 ${clickable ? '' : 'cursor-default'}`}
     >
-      <span className={`flex items-center gap-1.5 text-[13px] font-bold ${compact ? 'lg:text-[15px] lg:justify-center lg:py-1' : ''}`}>
+      <span className={`flex items-center ${tight ? 'gap-1 whitespace-nowrap' : 'gap-1.5'} text-[13px] font-bold ${compact ? 'lg:text-[15px] lg:justify-center lg:py-1' : ''}`}>
         {state === 'done' ? <CheckCircle2 size={12} /> : icon}
         {busy && clickable ? '處理中...' : label}
       </span>
@@ -127,12 +130,18 @@ function Step({
 }
 
 function FlowSteps({
-  asset, busy, onAdvance, onUpload, compact,
+  asset, busy, onAdvance, onUpload, onUploadFiles, compact,
 }: {
   asset: Asset;
   busy: boolean;
   onAdvance?: () => void;
   onUpload?: () => void;
+  /**
+   * 有傳＝這個 IP 設了成片夾，可以在系統裡直接傳（系統代傳，檔案算聚浪的）。
+   * 這時上傳那一步變成兩顆並排：「上傳雲端」（開上傳視窗）與「已自行上傳」（只標記，舊流程）。
+   * ⚠️ 不能把「只標記」拿掉：09-30 毛片上傳就是因為只剩一條路、被綁在上傳視窗前，同事整個棄用。
+   */
+  onUploadFiles?: () => void;
   /**
    * 排程清單裡只留當下能按的那一步。
    * ⚠️ 那邊每一張卡都停在「待剪」，第二步永遠是灰的卻佔掉一半寬度 ——
@@ -152,7 +161,57 @@ function FlowSteps({
   const uploadCaption =
     upload === 'done'
       ? asset.cloudUploadedAt ? `${format(parseISO(asset.cloudUploadedAt), 'MM/dd')} 已上傳` : '已上傳'
-      : upload === 'active' ? '傳完雲端按這裡，不用等業主' : '送審後才需要上傳';
+      : upload === 'active'
+        ? '審片通過、傳完雲端後按這裡'
+        : '送審後才需要上傳';
+
+  // IP 有設成片夾＝兩條路並排：系統代傳（主）、自己傳好只標記（次）。
+  // ⚠️ 兩顆一樣大、並排，而不是一顆大按鈕＋一行小字：10-15 實測時使用者反映按了就直接跳上傳視窗，
+  //    習慣自己丟檔的人找不到另一條路（09-30 毛片上傳就是只剩一條路、同事整個棄用）。
+  const uploadChoice = !!onUploadFiles && !!onUpload && upload === 'active';
+
+  if (uploadChoice) {
+    // 三格並排：交片送審｜上傳雲端｜已自行上傳，一樣大。
+    // ⚠️ 10-15 試過「送審縮成一行小字」（被說弱化了已送審）和「右半邊兩顆直疊」（被說醜），都退掉了。
+    // 排程清單（compact）本來就收掉做完的那一步，剩兩顆左右各半，說明可以寫長一點。
+    const showConvert = !(compact && convert === 'done');
+    return (
+      <div className="flex items-stretch gap-1.5 max-w-lg">
+        {showConvert && (
+          <Step
+            state={convert}
+            label="交片送審"
+            caption={convertCaption}
+            icon={<Film size={12} />}
+            tone="primary"
+            busy={busy}
+            onClick={onAdvance}
+            compact={compact}
+            tight
+          />
+        )}
+        <ChoiceButton
+          label="上傳雲端"
+          caption={showConvert ? '系統直接傳' : '選檔案，系統直接傳'}
+          icon={<UploadCloud size={12} />}
+          solid
+          busy={busy}
+          onClick={onUploadFiles!}
+          compact={compact}
+          tight={showConvert}
+        />
+        <ChoiceButton
+          label="已自行上傳"
+          caption={showConvert ? '只標記' : '自己傳好了，只要標記'}
+          icon={<CheckCircle2 size={12} />}
+          busy={busy}
+          onClick={onUpload!}
+          compact={compact}
+          tight={showConvert}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-stretch gap-2 max-w-lg">
@@ -173,7 +232,20 @@ function FlowSteps({
         compact={compact}
       />
       )}
-      {!(compact && upload !== 'active') && (
+      {/* IP 還沒設成片資料夾：系統傳不了，只剩「自己傳好、回來標記」。
+          ⚠️ 用跟三格版同一顆「已自行上傳」，不要叫「上傳雲端」——10-15 實測時同一個人看到兩種長相、
+             同一個名字一個會開上傳視窗一個不會，以為壞了。 */}
+      {upload === 'active' && onUpload && (
+        <ChoiceButton
+          label="已自行上傳"
+          caption="傳完雲端後按這裡標記"
+          icon={<CheckCircle2 size={12} />}
+          busy={busy}
+          onClick={onUpload}
+          compact={compact}
+        />
+      )}
+      {!(compact && upload !== 'active') && !(upload === 'active' && onUpload) && (
         <Step
           state={upload}
           label="上傳雲端"
@@ -186,6 +258,41 @@ function FlowSteps({
         />
       )}
     </div>
+  );
+}
+
+/** 上傳雲端的兩條路之一。實心＝系統代傳（建議），外框＝自己傳好只標記；同尺寸並排，讓兩條路一樣找得到 */
+function ChoiceButton({
+  label, caption, icon, solid, busy, onClick, compact, tight,
+}: {
+  label: string;
+  caption: string;
+  icon: ReactNode;
+  solid?: boolean;
+  busy: boolean;
+  onClick: () => void;
+  compact?: boolean;
+  /** 三格並排時每格只剩約 95px：內距、圖示間距收小，「已自行上傳」五個字才放得下一行 */
+  tight?: boolean;
+}) {
+  const style = solid
+    ? 'bg-sky-600 border-sky-600 text-white shadow-sm hover:bg-sky-700'
+    : 'bg-white border-sky-600 text-sky-700 hover:bg-sky-50';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      className={`flex-1 min-w-0 rounded-xl ${tight ? 'px-2' : 'px-3'} py-2 text-left transition-all border ${style} disabled:opacity-60`}
+    >
+      <span className={`flex items-center ${tight ? 'gap-1' : 'gap-1.5'} text-[13px] font-bold whitespace-nowrap ${compact ? 'lg:text-[15px] lg:justify-center lg:py-1' : ''}`}>
+        {icon}
+        {busy ? '處理中...' : label}
+      </span>
+      <span className={`block text-[9.5px] mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis ${solid ? 'text-white/70' : 'text-sky-700/70'} ${compact ? 'lg:hidden' : ''}`}>
+        {caption}
+      </span>
+    </button>
   );
 }
 
@@ -430,7 +537,7 @@ function QueueRow({ row, vendorName, card, onOpenLibrary, editRank }: {
 }
 
 export function AssetCard({
-  asset, vendorName, posts, busy, onAdvance, onUpload, onUndoSubmit, onUndoUpload, showClientBadge,
+  asset, vendorName, posts, busy, onAdvance, onUpload, onUploadFiles, onUndoSubmit, onUndoUpload, showClientBadge,
   selected, onToggleSelect, compact, stacked, hideUrgentBadge,
 }: {
   // 這個專案沒有安裝 @types/react，JSX.IntrinsicAttributes 不存在，
@@ -442,6 +549,8 @@ export function AssetCard({
   busy: boolean;
   onAdvance?: () => void;
   onUpload?: () => void;
+  /** 見 FlowSteps：IP 有設成片夾時才傳 */
+  onUploadFiles?: () => void;
   onUndoSubmit?: () => void;
   onUndoUpload?: () => void;
   showClientBadge?: boolean;
@@ -571,7 +680,7 @@ export function AssetCard({
       {/* 按鈕與「按錯了」連結包成同一欄：電腦版精簡卡把這一欄放在右側固定寬度。
           手機版這層 div 的 space-y-3 跟外層一樣，間距不變。 */}
       <div className={rowOnDesktop ? 'space-y-3 lg:w-52 lg:shrink-0' : 'space-y-3'}>
-      <FlowSteps asset={asset} busy={busy} onAdvance={onAdvance} onUpload={onUpload} compact={compact} />
+      <FlowSteps asset={asset} busy={busy} onAdvance={onAdvance} onUpload={onUpload} onUploadFiles={onUploadFiles} compact={compact} />
 
       {onUndoSubmit && deriveFlowStage(asset) === 'client_review' && !asset.cloudUploadedAt && !asset.editorInvoiceId && !asset.usedInPostId && (
         <button
@@ -792,6 +901,19 @@ export default function EditorAssetQueue({
     for (const a of assignedAssets) m.set(a.id!, a);
     return [...m.values()];
   }, [vendorAssets, assignedAssets]);
+
+  // 逐支指名給我、但 IP 不在我負責清單裡的片：讀不到那家的廠商文件，改問後端那家有沒有設成片夾
+  const foreignVendorKey = useMemo(() => {
+    const own = new Set(vendorIds);
+    return [...new Set(assignedAssets.map(a => a.vendorId).filter(v => v && !own.has(v)))].sort().join(',');
+  }, [assignedAssets, vendorIdsKey]);
+  const [foreignFinishedVendors, setForeignFinishedVendors] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    let alive = true;
+    fetchFinishedUploadVendors(foreignVendorKey ? foreignVendorKey.split(',') : [])
+      .then(set => { if (alive) setForeignFinishedVendors(set); });
+    return () => { alive = false; };
+  }, [foreignVendorKey]);
 
   useEffect(() => {
     if (vendorIds.length === 0) { setPosts([]); return; }
@@ -1111,6 +1233,8 @@ export default function EditorAssetQueue({
         }
         await batch.commit();
       }
+      // 業主早就通過的片，這一下就變成 ready ⇒ 請後端看要不要送客戶（沒通過的後端會自己跳過）
+      targets.forEach(a => requestClientCopy(a.id));
       toast.success(`已標記 ${targets.length} 支上傳完成`);
       setSelectedIds({});
     } catch (error) {
@@ -1119,6 +1243,27 @@ export default function EditorAssetQueue({
     } finally {
       setBatchBusy(false);
     }
+  };
+
+  /**
+   * 系統內上傳：開上傳視窗 → 後端登記檔案 → 走原本的 markUploaded（請款依據只有那一條路）。
+   * 取消視窗＝什麼都不做；上傳失敗＝不標記，讓剪輯師重試或改走「直接標記」。
+   */
+  const uploadAndMark = async (asset: Asset) => {
+    if (!auth.currentUser) return;
+    setBusyId(asset.id!);
+    let files;
+    try {
+      files = await uploadFinishedFiles(asset);
+    } catch (error: any) {
+      console.error('In-app finished upload failed:', error);
+      toast.error(error?.message || '上傳失敗，請再試一次，或自己上傳後按「已自行上傳」');
+      setBusyId(null);
+      return;
+    }
+    setBusyId(null);
+    if (files.length === 0) return;
+    await markUploaded(asset);
   };
 
   const markUploaded = async (asset: Asset) => {
@@ -1134,11 +1279,9 @@ export default function EditorAssetQueue({
           billableEditorId: myEditorId,
         })
       );
-      toast.success(
-        deriveFlowStage(asset) === 'to_upload'
-          ? '已標記上傳完成，小編可以排程了'
-          : '已標記上傳完成，這支列入本月請款'
-      );
+      // 上傳＝業主通過（見 buildCloudUploadUpdate），標記後就是 ready ⇒ 送客戶資料夾
+      requestClientCopy(asset.id);
+      toast.success('已上傳完成，這支已完成、列入本月請款');
       // 同上，不推即時通知，交給每日彙總
     } catch (error) {
       console.error('Mark uploaded failed:', error);
@@ -1248,7 +1391,7 @@ export default function EditorAssetQueue({
               <FoldHeader
                 open={showToUpload}
                 title="剪好了，還沒傳雲端"
-                hint="檔案傳上雲端後按「上傳雲端」，不用等業主審完。"
+                hint="審片通過後上傳，並按「上傳雲端」，這支就完成了。"
                 count={queueToUpload.length}
                 tone="cloud"
                 icon={<UploadCloud size={14} />}
@@ -1294,6 +1437,7 @@ export default function EditorAssetQueue({
                           {...cardProps(a)}
                           compact
                           onUpload={() => markUploaded(a)}
+                          onUploadFiles={canUploadFinishedInApp(a, vendors, foreignFinishedVendors) ? () => uploadAndMark(a) : undefined}
                           onUndoSubmit={() => undoSubmit(a)}
                           onUndoUpload={() => undoUploaded(a)}
                           showClientBadge
@@ -1385,7 +1529,7 @@ export default function EditorAssetQueue({
               // ⚠️ 陳述句，不要祈使句。「從上面開始剪」等於系統在派工，
               //    而派工是同事在做的事（見 feedback_editor_facing_wording）。
               ? '照交片期限排好，最近的在最上面；沒片的排在最後。'
-              : '手上全部的片。剪完按「交片送審」；檔案傳上雲端後就按「上傳雲端」，不用等我們通知。'}
+              : '手上全部的片。剪完按「交片送審」；審片通過後上傳並按「上傳雲端」，這支就完成了。'}
           </p>
         </div>
         <div className={`flex items-center gap-2 shrink-0 ${activeView === 'queue' ? 'lg:hidden' : ''}`}>
@@ -1630,7 +1774,7 @@ export default function EditorAssetQueue({
       {activeView === 'list' && activeTab === 'to_upload' && (
         <Section
           title="待上傳雲端"
-          hint="已交片的都在這。檔案傳上雲端後就按「上傳雲端」，不用等業主審完 —— 這一步決定這支算不算你這個月的請款。"
+          hint="已交片的都在這。審片通過後上傳並按「上傳雲端」，這支就完成了 —— 這一步決定這支算不算你這個月的請款。"
           count={toUpload.length}
           tone="cloud"
           icon={<UploadCloud size={14} />}
@@ -1640,6 +1784,7 @@ export default function EditorAssetQueue({
             <AssetCard
               {...cardProps(a)}
               onUpload={() => markUploaded(a)}
+              onUploadFiles={canUploadFinishedInApp(a, vendors, foreignFinishedVendors) ? () => uploadAndMark(a) : undefined}
               onUndoSubmit={() => undoSubmit(a)}
               onUndoUpload={() => undoUploaded(a)}
               showClientBadge

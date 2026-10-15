@@ -15,7 +15,7 @@ import { fileURLToPath } from "url";
 import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVideoTrackingScope, getDeficitBreakdown } from "./src/lib/vendorStatus.js";
 // 交棒狀態的判定要跟前端同一份，不然推播說的「目前狀態」會跟畫面上不一致
 import { deriveFlowStage, FLOW_STAGE_LABEL } from "./src/types.js";
-import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFolderName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, renameFile, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
+import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFolderName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, renameFile, copyFile, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
 import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
 
 dotenv.config();
@@ -250,7 +250,14 @@ app.post("/api/drive/set-vendor-folder", async (req, res) => {
     // field 決定寫哪一個欄位：毛片根或共用 B-roll 素材庫。**不要為了第二個欄位複製一支路由。**
     const { vendorId, folderId, field } = req.body || {};
     if (!folderId) return res.status(400).json({ error: "缺少 folderId" });
-    const target = field === 'broll' ? 'broll' : 'raw';
+    // 毛片根／共用 B-roll／剪輯師成片／客戶端。不認得的值一律當毛片根（舊前端只送 raw/broll）
+    const FIELD_KEYS = {
+      raw: ['rawFootageFolderId', 'rawFootageFolderName'],
+      broll: ['brollFolderId', 'brollFolderName'],
+      finished: ['finishedFolderId', 'finishedFolderName'],
+      client: ['clientFolderId', 'clientFolderName'],
+    } as const;
+    const target: keyof typeof FIELD_KEYS = field in FIELD_KEYS ? field : 'raw';
 
     if (vendorId) {
       const vSnap = await adminDb.collection("vendors").doc(vendorId).get();
@@ -276,10 +283,9 @@ app.post("/api/drive/set-vendor-folder", async (req, res) => {
     }
 
     if (vendorId) {
+      const [idKey, nameKey] = FIELD_KEYS[target];
       await adminDb.collection("vendors").doc(vendorId).set(
-        target === 'broll'
-          ? { brollFolderId: info.id, brollFolderName: info.name }
-          : { rawFootageFolderId: info.id, rawFootageFolderName: info.name },
+        { [idKey]: info.id, [nameKey]: info.name },
         { merge: true }
       );
     }
@@ -849,6 +855,245 @@ app.post("/api/drive/asset-picker-auth", async (req, res) => {
     if (e?.httpStatus) return sendAuthError(res, e);
     console.error("drive/asset-picker-auth failed:", e?.message);
     return res.status(502).json({ error: e?.message || "取得憑證失敗" });
+  }
+});
+
+/**
+ * 剪輯師在系統內上傳成片：找出「這支片要傳去哪」，並確認這個人有資格傳。
+ *
+ * 2026-10-15 使用者定案：**系統代傳**。剪輯師用自己的剪輯系統帳號登入，不登入 Google、
+ * 不拿聚浪帳密，也不再需要開資料夾權限給他；檔案以公司身分落地 ⇒ 算聚浪的、佔聚浪容量、
+ * 剪輯師刪不掉。代價是上傳那段時間他的瀏覽器裡有一顆 1 小時的 drive.file token。
+ * 所以這裡把範圍收到最小：只限**他自己看得到的片**、只限**已送審還沒上傳**的那一刻、
+ * 只回**該 IP 的成片夾**。上面 group-folder 那段「剪輯師完全不碰 Drive」說的是毛片流程，仍然成立。
+ *
+ * 剪輯師的存取判斷照抄 firestore.rules 的 editorCanAccessAsset()，兩邊必須一致：
+ * 廠商在他的 assignedVendorIds 裡，或這支片指名給他（editorId == linkedEditorId）。
+ */
+async function loadFinishedUploadTarget(me: AuthedUser, assetId: string) {
+  if (!assetId) throw Object.assign(new Error("缺少 assetId"), { httpStatus: 400 });
+  if (me.role !== 'editor' && me.role !== 'manager' && me.role !== 'engineer') {
+    throw Object.assign(new Error("只有剪輯師可以上傳成片"), { httpStatus: 403 });
+  }
+  const aSnap = await adminDb.collection("assets").doc(String(assetId)).get();
+  if (!aSnap.exists) throw Object.assign(new Error("找不到這支素材"), { httpStatus: 404 });
+  const asset = { id: aSnap.id, ...(aSnap.data() as any) };
+
+  if (me.role === 'editor') {
+    const byVendor = (me.assignedVendorIds || []).includes(asset.vendorId);
+    const byAssign = !!me.linkedEditorId && asset.editorId === me.linkedEditorId;
+    if (!byVendor && !byAssign) throw Object.assign(new Error("這支片不是派給你的"), { httpStatus: 403 });
+  }
+  if (asset.voidedAt) throw Object.assign(new Error("這支片已作廢"), { httpStatus: 409 });
+  // 已上傳過就不再開上傳視窗：cloudUploadedAt 一寫下去就是請款依據，重傳要先「取消已上傳」
+  if (asset.cloudUploadedAt) throw Object.assign(new Error("這支片已經標記上傳過了"), { httpStatus: 409 });
+  const stage = deriveFlowStage(asset);
+  if (stage !== 'client_review' && stage !== 'to_upload') {
+    throw Object.assign(new Error("要先交片送審，才能上傳成片"), { httpStatus: 409 });
+  }
+
+  const vSnap = await adminDb.collection("vendors").doc(String(asset.vendorId)).get();
+  const folderId = String(vSnap.data()?.finishedFolderId || '');
+  if (!folderId) {
+    throw Object.assign(new Error("FINISHED_FOLDER_UNSET"), {
+      httpStatus: 409,
+      userMessage: "這個 IP 還沒設定成片資料夾，請先自己上傳後按「已自行上傳」，並通知主管設定。",
+    });
+  }
+  return { asset, folderId };
+}
+
+function sendUploadTargetError(res: any, e: any) {
+  if (e?.userMessage) return res.status(e.httpStatus || 409).json({ error: e.message, message: e.userMessage });
+  return sendAuthError(res, e);
+}
+
+/**
+ * 逐支指派到「不是自己負責的 IP」的片：剪輯師依規則讀不到那家的廠商文件，前端就不知道它有沒有設成片夾，
+ * 只會顯示「已自行上傳」（10-15 又生實測踩到）。這支只回「哪幾家有成片夾」，不吐資料夾 id 或其他廠商資料。
+ * 剪輯師只問得到「有片指名給他」的 IP。
+ */
+app.post("/api/drive/editor-upload-vendors", async (req, res) => {
+  try {
+    const me = await requireUser(req);
+    const asked: string[] = Array.isArray(req.body?.vendorIds)
+      ? [...new Set<string>(req.body.vendorIds.map(String))].slice(0, 30)
+      : [];
+    let allowed = asked;
+    if (me.role === 'editor') {
+      if (!me.linkedEditorId) return res.json({ vendorIds: [] });
+      const mine = await adminDb.collection("assets").where("editorId", "==", me.linkedEditorId).select("vendorId").get();
+      const mineVendors = new Set(mine.docs.map(d => String(d.get("vendorId") || '')));
+      allowed = asked.filter(v => mineVendors.has(v) || (me.assignedVendorIds || []).includes(v));
+    }
+    const snaps = await Promise.all(allowed.map(v => adminDb.collection("vendors").doc(v).get()));
+    return res.json({ vendorIds: snaps.filter(s => s.exists && s.get("finishedFolderId")).map(s => s.id) });
+  } catch (e: any) {
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("drive/editor-upload-vendors failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "查詢失敗" });
+  }
+});
+
+app.post("/api/drive/editor-upload-auth", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    const me = await requireUser(req);
+    const { folderId } = await loadFinishedUploadTarget(me, req.body?.assetId);
+
+    const quota = await getQuota();
+    if (quota.freeBytes < DRIVE_MIN_FREE_BYTES) {
+      return res.status(507).json({
+        error: "DRIVE_QUOTA_LOW",
+        message: `公司雲端硬碟只剩 ${Math.round(quota.freeBytes / 1024 ** 3)} GB，已暫停上傳以免塞爆。請先自己上傳後按「已經傳好了，直接標記」。`,
+      });
+    }
+    return res.json({
+      folderId,
+      accessToken: await getAccessToken(),
+      appId: (process.env.GOOGLE_OAUTH_CLIENT_ID || '').split('-')[0],
+    });
+  } catch (e: any) {
+    if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
+    if (e?.httpStatus) return sendUploadTargetError(res, e);
+    console.error("drive/editor-upload-auth failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "取得上傳憑證失敗" });
+  }
+});
+
+/**
+ * 上傳視窗關掉之後，把傳了哪些檔登記到素材上。
+ *
+ * ⚠️ 不相信前端給的 fileId：每一個都向 Google 確認真的落在這個 IP 的成片夾，
+ *    否則任何拿得到 token 的人都能把別的檔案登記成「這支片的成片」，再被自動複製給客戶。
+ * 標記「已上傳雲端」（請款依據）**不在這裡做**，前端接著走原本的 markUploaded ——
+ * 請款那條路的兩個坑（|| 不用 ??、billableEditorId 只寫一次）只維護一份。
+ */
+app.post("/api/drive/editor-upload-done", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    const me = await requireUser(req);
+    const { asset, folderId } = await loadFinishedUploadTarget(me, req.body?.assetId);
+    const fileIds: string[] = Array.isArray(req.body?.fileIds) ? req.body.fileIds.map(String).slice(0, 20) : [];
+    if (fileIds.length === 0) return res.status(400).json({ error: "沒有檔案" });
+
+    const now = new Date().toISOString();
+    const files: { id: string; name: string; uploadedAt: string }[] = [];
+    for (const id of fileIds) {
+      const f = await getFile(id);
+      if (!f.parents?.includes(folderId)) {
+        return res.status(400).json({ error: `「${f.name}」不在這個 IP 的成片資料夾裡` });
+      }
+      files.push({ id: f.id, name: f.name, uploadedAt: now });
+    }
+    await adminDb.collection("assets").doc(asset.id).set(
+      { finishedFiles: files, clientCopyPending: true },
+      { merge: true }
+    );
+    return res.json({ files });
+  } catch (e: any) {
+    if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
+    if (e?.httpStatus) return sendUploadTargetError(res, e);
+    console.error("drive/editor-upload-done failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "登記成片失敗" });
+  }
+});
+
+/**
+ * 業主通過後，把成片複製一份到這個 IP 的客戶資料夾。冪等，重複呼叫安全。
+ *
+ * 2026-10-15 使用者定案：**業主通過（ready）才送**，不是一上傳就送 ——
+ * 剪輯師是在業主審完之前就上傳的，客戶不能看到未定稿。
+ * 觸發點：前端各個「讓片子變 ready」的寫入之後順手呼叫一次，加上每日 cron 補漏。
+ *
+ * 回傳的 status：copied／already（早就送過）／not_ready／no_files（手動傳的片，系統不知道是哪個檔）
+ *               ／no_client_folder（IP 沒設客戶夾）／busy（另一個呼叫正在送）
+ */
+async function copyAssetToClient(assetId: string): Promise<{ status: string; copied?: number }> {
+  const ref = adminDb.collection("assets").doc(assetId);
+  // 先用交易搶一把 5 分鐘的鎖：前端觸發與 cron 可能同時到，不鎖會複製出兩份給客戶
+  const claim = await adminDb.runTransaction(async (tx: any) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return { status: 'missing' };
+    const a = snap.data();
+    const files: any[] = a.finishedFiles || [];
+    if (files.length === 0) return { status: 'no_files' };
+    const done = new Set((a.clientCopies || []).map((c: any) => c.sourceId));
+    const todo = files.filter(f => !done.has(f.id));
+    if (todo.length === 0) {
+      if (a.clientCopyPending) tx.update(ref, { clientCopyPending: false });
+      return { status: 'already' };
+    }
+    if (deriveFlowStage(a) !== 'ready') return { status: 'not_ready' };
+    const lockedAt = a.clientCopyingAt ? Date.parse(a.clientCopyingAt) : 0;
+    if (lockedAt && Date.now() - lockedAt < 5 * 60 * 1000) return { status: 'busy' };
+    tx.update(ref, { clientCopyingAt: new Date().toISOString() });
+    return { status: 'go', asset: a, todo };
+  });
+  if (claim.status !== 'go') return { status: claim.status };
+
+  const a: any = (claim as any).asset;
+  try {
+    const vSnap = await adminDb.collection("vendors").doc(String(a.vendorId)).get();
+    const clientFolderId = String(vSnap.data()?.clientFolderId || '');
+    // 沒設客戶夾：保留 pending，主管之後補設定，cron 就會把舊的補送過去
+    if (!clientFolderId) return { status: 'no_client_folder' };
+
+    const copies: { id: string; sourceId: string; name: string }[] = [];
+    for (const f of (claim as any).todo) {
+      const c = await copyFile(f.id, clientFolderId, f.name);
+      copies.push({ id: c.id, sourceId: f.id, name: c.name });
+    }
+    await ref.update({
+      clientCopies: FieldValue.arrayUnion(...copies),
+      clientCopiedAt: new Date().toISOString(),
+      clientCopyPending: false,
+    });
+    return { status: 'copied', copied: copies.length };
+  } finally {
+    await ref.update({ clientCopyingAt: FieldValue.delete() }).catch(() => {});
+  }
+}
+
+app.post("/api/drive/copy-to-client", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    // 任何系統帳號都能觸發：要不要送、送什麼，全部由後端依素材狀態決定，前端給的只有 assetId
+    await requireUser(req);
+    const assetId = String(req.body?.assetId || '');
+    if (!assetId) return res.status(400).json({ error: "缺少 assetId" });
+    return res.json(await copyAssetToClient(assetId));
+  } catch (e: any) {
+    if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("drive/copy-to-client failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "送客戶失敗" });
+  }
+});
+
+/** 每日補漏：前端觸發沒送到的（關掉分頁、網路斷掉、從別的畫面改成通過），這裡一次補齊 */
+app.get("/api/cron/client-copy-sweep", async (req, res) => {
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret || req.headers.authorization !== `Bearer ${cronSecret}`) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  if (!adminDb || !isDriveConfigured()) return res.status(503).json({ error: "not configured" });
+  try {
+    const snap = await adminDb.collection("assets").where("clientCopyPending", "==", true).limit(100).get();
+    const tally: Record<string, number> = {};
+    for (const d of snap.docs) {
+      try {
+        const r = await copyAssetToClient(d.id);
+        tally[r.status] = (tally[r.status] || 0) + 1;
+      } catch (e: any) {
+        console.error("client-copy-sweep item failed", d.id, e?.message);
+        tally.failed = (tally.failed || 0) + 1;
+      }
+    }
+    res.json({ scanned: snap.size, ...tally });
+  } catch (e: any) {
+    console.error("client-copy-sweep failed", e);
+    res.status(500).json({ error: e.message || "unknown error" });
   }
 });
 

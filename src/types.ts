@@ -366,6 +366,15 @@ export interface Vendor {
   // 跟毛片根同樣的限制：命名各家不同、猜不出來，只能由人用 Picker 指一次。
   brollFolderId?: string;
   brollFolderName?: string;
+  // 剪輯師在系統內上傳成片時，檔案落在這裡（例如 自媒體IP代操/大發/剪輯/成片）。
+  // 系統以公司身分代傳 ⇒ 檔案算聚浪的，剪輯師不用登入 Google、也不用開資料夾權限給他。
+  // 一樣只能由主管用 Picker 指一次（drive.file 看不到人工建的資料夾）。
+  finishedFolderId?: string;
+  finishedFolderName?: string;
+  // 客戶看得到的資料夾（例如 00for客戶端/大發）。業主通過後系統自動複製一份成片進來。
+  // ⚠️ 不是一上傳就複製：剪輯師是在業主審完之前就上傳的，客戶不能看到未定稿。
+  clientFolderId?: string;
+  clientFolderName?: string;
   selfPublishing?: boolean; // Vendor publishes by themselves
   defaultPlatforms?: VendorDefaultPlatforms; // 這個 IP 預設的發布平台（依內容形式分開），新增貼文時自動帶入；見 VendorDefaultPlatforms
   status?: 'active' | 'paused' | 'ended'; // 不填視同 active
@@ -660,6 +669,15 @@ export interface Asset {
   revisionCount?: number; // 被業主退回過幾次
   revisionNote?: string; // 最近一次退回原因
   cloudUploadedAt?: string; // 剪輯師標記「已上傳雲端」的時間。這是請款月份的唯一認定依據，只寫一次不覆蓋
+  // 剪輯師在系統內上傳到該 IP 成片夾的檔案（後端驗過真的在成片夾才寫）。
+  // **每次上傳整份覆蓋**：改稿重傳只留最新版，送客戶的也只會是最新版。
+  // 手動傳、回來只按標記的片沒有這欄 ⇒ 系統不知道是哪個檔，不會自動送客戶。
+  finishedFiles?: { id: string; name: string; uploadedAt: string }[];
+  // 業主通過（ready）後複製到客戶資料夾的副本。全部由後端 admin 寫入，前端與剪輯師都不寫。
+  clientCopies?: { id: string; sourceId: string; name: string }[];
+  clientCopiedAt?: string;
+  // 有新成片等著送客戶。每日 cron 只掃這個旗標，送完清掉（Firestore 查不了「欄位不存在」）
+  clientCopyPending?: boolean;
   /**
    * 影片長度分級，決定單價。剪輯師按「交片送審」時選，管帳可改。
    * 沒有值的是 2026-09-11 分級上線前的舊素材，仍走 editorFee / DEFAULT_EDITOR_FEE。

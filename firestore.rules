@@ -216,7 +216,12 @@ service cloud.firestore {
              (!('rawFootageFolderId' in data) || data.rawFootageFolderId is string) &&
              (!('rawFootageFolderName' in data) || data.rawFootageFolderName is string) &&
              (!('brollFolderId' in data) || data.brollFolderId is string) &&
-             (!('brollFolderName' in data) || data.brollFolderName is string);
+             (!('brollFolderName' in data) || data.brollFolderName is string) &&
+             // 剪輯師成片落點、業主通過後自動複製過去的客戶資料夾
+             (!('finishedFolderId' in data) || data.finishedFolderId is string) &&
+             (!('finishedFolderName' in data) || data.finishedFolderName is string) &&
+             (!('clientFolderId' in data) || data.clientFolderId is string) &&
+             (!('clientFolderName' in data) || data.clientFolderName is string);
     }
 
     function isValidPost(data) {

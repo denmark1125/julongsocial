@@ -266,6 +266,28 @@ export async function getFile(fileId: string): Promise<DriveFileInfo> {
 }
 
 /**
+ * 把成片**真的複製一份**到另一個資料夾（業主通過後送進客戶資料夾用）。
+ *
+ * ⚠️ 用 copy 不用捷徑：捷徑只是指標，客戶要同時有原檔權限才打得開，而內部成片夾不開給客戶。
+ * ⚠️ 副本擁有者是公司帳號，一樣吃公司配額 —— 每支交付的成片在雲端就是兩份。
+ * 2026-10-15 已用自然風人工建的「0成片」實測：Picker 挑過的資料夾可以複製進去。
+ */
+export async function copyFile(fileId: string, parentId: string, name?: string): Promise<DriveFileInfo> {
+  const f = await driveFetch(
+    `/files/${encodeURIComponent(fileId)}/copy?fields=id,name,size,mimeType,webViewLink,parents`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parents: [parentId], ...(name ? { name } : {}) }),
+    }
+  );
+  return {
+    id: f.id, name: f.name, sizeBytes: Number(f.size || 0), mimeType: f.mimeType,
+    webViewLink: f.webViewLink, parents: f.parents,
+  };
+}
+
+/**
  * 改檔案／資料夾名稱。素材改片名時，用來讓雲端那一組毛片資料夾跟著改。
  * 只動 metadata，資料夾裡的檔案完全不受影響。
  *

@@ -15,6 +15,7 @@ import {
   deleteField
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
+import { requestClientCopy } from '../lib/finishedUpload';
 import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking, UserProfile, deriveFlowStage } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import { visibleVendors, stockVisibleVendors, getPauseStatus, buildPostIndex, getDisplayAssetStatus } from '../lib/vendorStatus';
@@ -362,6 +363,8 @@ export default function AssetDatabase() {
         doc(db, 'assets', asset.id!),
         buildFlowUpdate(asset, to, { byUid: auth.currentUser?.uid })
       );
+      // 已上傳的片按「通過」會直接變 ready ⇒ 送客戶資料夾（沒有成片檔的後端會跳過）
+      if (to === 'ready') requestClientCopy(asset.id);
       toast.success(reviewPassed ? '已取消審核' : '已通過審核');
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `assets/${asset.id}`);

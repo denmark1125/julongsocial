@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { collection, doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
+import { requestClientCopy } from '../lib/finishedUpload';
 import {
   Asset,
   AssetFlowStage,
@@ -118,6 +119,8 @@ export default function ProductionFlowBoard({
           note,
         })
       );
+      // 變成 ready（已上傳＋業主通過）＝可以送客戶了。後端自己判斷有沒有成片檔、IP 有沒有客戶夾
+      if (to === 'ready') requestClientCopy(asset.id);
       toast.success(successMsg);
     } catch (error) {
       console.error('Flow advance failed:', error);
