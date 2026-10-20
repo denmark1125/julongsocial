@@ -18,6 +18,8 @@ import { db, auth } from '../firebase';
 import { requestClientCopy } from '../lib/finishedUpload';
 import { Asset, Vendor, OperationType, FirestoreErrorInfo, AssetType, Post, Editor, ShootBooking, UserProfile, deriveFlowStage } from '../types';
 import { useLiveCollection } from '../lib/liveData';
+import { resolvePostPicks, waitingPostsFor } from '../lib/postMatch';
+import PlannedPostSelect from './PlannedPostSelect';
 import { visibleVendors, stockVisibleVendors, getPauseStatus, buildPostIndex, getDisplayAssetStatus } from '../lib/vendorStatus';
 import { buildFlowUpdate, buildSubmitUndoUpdate, getClientApprovalTarget, isClientApproved } from '../lib/assetFlow';
 import { getWorkingEditorId, canReassignEditor, getAssetEditorOwner } from '../lib/editorBilling';
@@ -93,6 +95,8 @@ export default function AssetDatabase() {
     [rawAssets]
   );
   const posts = useLiveCollection<Post>('posts');
+  /** 手動建檔時「這支是拍哪一篇小編貼文」。null＝沒動過（用猜的），''＝不屬於任何一篇 */
+  const [newPostPick, setNewPostPick] = useState<string | null>(null);
   const [reviewNotes, setReviewNotes] = useState<Record<string, { text: string; updatedAt: string; updatedByName: string }>>({});
   const [noteAsset, setNoteAsset] = useState<Asset | null>(null);
   // 改片名。走後端 API：雲端那一組毛片資料夾要跟著改名，前端沒有 Drive 權限。
@@ -268,6 +272,10 @@ export default function AssetDatabase() {
     }
   };
 
+  const newAssetIsRawVideo = newAsset.type === 'video' && newAsset.stage === 'raw' && !!newAsset.vendorId;
+  const newAssetPostCandidates = newAssetIsRawVideo ? waitingPostsFor(newAsset.vendorId, posts, assets) : [];
+  const newAssetPostId = resolvePostPicks([{ name: newAsset.title, pick: newPostPick }], newAssetPostCandidates)[0];
+
   const handleAddAsset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAsset.title || !newAsset.vendorId) {
@@ -275,9 +283,12 @@ export default function AssetDatabase() {
       return;
     }
 
+    // 綁小編貼文（只有毛片影片才綁）。上片日以那篇為準，見 lib/boundPosts.ts
+    const pickedPost = newAssetIsRawVideo ? newAssetPostCandidates.find(p => p.id === newAssetPostId) : undefined;
     try {
       await addDoc(collection(db, 'assets'), {
         ...newAsset,
+        ...(pickedPost ? { plannedPostId: pickedPost.id, plannedAirDate: pickedPost.scheduledAt.slice(0, 10) } : {}),
         url: newAsset.url || '',
         category: newAsset.category || '未分類',
         // IP 名稱快照：被逐支指名到自己沒負責的 IP 的剪輯師讀不到 vendor 文件，
@@ -303,6 +314,7 @@ export default function AssetDatabase() {
         stage: 'raw',
         filmingDate: new Date().toISOString().split('T')[0]
       });
+      setNewPostPick(null);
       setIsAdding(false);
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'assets');
@@ -1437,6 +1449,15 @@ ${after}`)) return;
                   />
                 </div>
               </div>
+
+              {newAssetIsRawVideo && (
+                <PlannedPostSelect
+                  value={newAssetPostId}
+                  guessed={newPostPick === null}
+                  candidates={newAssetPostCandidates}
+                  onChange={setNewPostPick}
+                />
+              )}
 
               <div className="space-y-2">
                 <label className="text-sm font-bold text-gray-600 ml-1">標題 / 名稱</label>

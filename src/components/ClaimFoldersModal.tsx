@@ -1,5 +1,8 @@
 import { useMemo, useState } from 'react';
-import { Vendor, Editor } from '../types';
+import { Vendor, Editor, Post, Asset } from '../types';
+import { useLiveCollection } from '../lib/liveData';
+import { resolvePostPicks, waitingPostsFor } from '../lib/postMatch';
+import PlannedPostSelect from './PlannedPostSelect';
 import { auth } from '../firebase';
 import { openMultiFolderPicker, getPickerApiKey } from '../lib/drivePicker';
 import { visibleVendors } from '../lib/vendorStatus';
@@ -49,6 +52,8 @@ export default function ClaimFoldersModal({
   const [briefs, setBriefs] = useState<Record<string, string>>({});
   /** 逐支的分類，key 是資料夾 id。沒設過的沿用上面那個預設值。 */
   const [cats, setCats] = useState<Record<string, string>>({});
+  /** 資料夾 id → 選的小編貼文（沒動過＝不在這裡，用系統猜的；''＝不屬於任何一篇） */
+  const [postPickOf, setPostPickOf] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ created: any[]; skipped: any[]; failed: any[] } | null>(null);
 
@@ -105,6 +110,12 @@ export default function ClaimFoldersModal({
     }
   };
 
+  // 小編已經排好、還在等片的貼文。認領時順便講「這支是拍哪一篇」，上片日就不用再排一次
+  const posts = useLiveCollection<Post>('posts');
+  const assets = useLiveCollection<Asset>('assets');
+  const postCandidates = useMemo(() => vendorId ? waitingPostsFor(vendorId, posts, assets) : [], [vendorId, posts, assets]);
+  const postPicks = resolvePostPicks(picked.map(f => ({ name: f.name, pick: postPickOf[f.id] ?? null })), postCandidates);
+
   const handleSubmit = async () => {
     if (picked.length === 0) return;
     setBusy(true);
@@ -118,9 +129,13 @@ export default function ClaimFoldersModal({
           brief: briefs[f.id] || '',
           // 逐支分類；沒動過的就是上面選的預設
           category: cats[f.id] ?? category,
+          plannedPostId: postPicks[picked.indexOf(f)] || '',
         })),
       });
       setDone(data);
+      // 選的貼文在送出前被別人掛走或刪掉：素材照樣建了，只是沒綁上，要講清楚
+      const unbound = (data.created || []).filter((c: any) => c.postWarning);
+      if (unbound.length) toast(`「${unbound[0].name}」沒有綁上貼文：${unbound[0].postWarning}。之後到「排上片日」再排`, { duration: 8000 });
       if (data.failed?.length) {
         toast.error(`${data.created.length} 支建好了，${data.failed.length} 支失敗`);
       } else {
@@ -336,6 +351,13 @@ export default function ClaimFoldersModal({
                         </button>
                       ))}
                     </div>
+                    <PlannedPostSelect
+                      value={postPicks[i]}
+                      guessed={postPickOf[f.id] === undefined}
+                      candidates={postCandidates}
+                      takenElsewhere={postPicks.filter((_, k) => k !== i && !!postPicks[k])}
+                      onChange={postId => setPostPickOf(prev => ({ ...prev, [f.id]: postId }))}
+                    />
                     <textarea
                       value={briefs[f.id] || ''}
                       onChange={e => setBriefs(prev => ({ ...prev, [f.id]: e.target.value }))}

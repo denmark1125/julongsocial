@@ -15,6 +15,7 @@ import { isClientApproved } from '../lib/assetFlow';
 import { listPlannedSlots } from '../lib/plannedSlots';
 import { Post, Vendor, PostStatus, Asset, PlannedSlotMove, ShootBooking, getVendorDefaultPlatforms, platformOptionsFor } from '../types';
 import { useLiveCollection } from '../lib/liveData';
+import { boundAssetLabel } from '../lib/boundPosts';
 import type { PostPrefill } from './CalendarView';
 import { 
   Plus, 
@@ -839,6 +840,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                     </td>
                     <td className="p-4 max-w-xs">
                       <div className="font-bold text-base line-clamp-2">{post.title}</div>
+                      {boundAssetLabel(post, assets) && <div className="text-sm text-blue-700 truncate mt-1">{boundAssetLabel(post, assets)}</div>}
                       <div className="text-sm text-gray-500 line-clamp-2 mt-1">{post.content}</div>
                     </td>
                     <td className="p-4 text-center">
@@ -909,6 +911,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                         </div>
                       </div>
                       <h4 className="font-bold text-base line-clamp-2">{post.title}</h4>
+                      {boundAssetLabel(post, assets) && <p className="text-sm text-blue-700 truncate mt-1">{boundAssetLabel(post, assets)}</p>}
                     </div>
                   </div>
 

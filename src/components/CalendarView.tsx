@@ -12,6 +12,7 @@ import {
 import { db, auth } from '../firebase';
 import { Post, Vendor, Asset, DismissedHabit, PlannedSlotMove, ShootBooking } from '../types';
 import { useLiveCollection } from '../lib/liveData';
+import { boundAssetLabel } from '../lib/boundPosts';
 import { visibleVendors, trackedVendors } from '../lib/vendorStatus';
 import { listPlannedSlots, groupSlotsByDay, PlannedSlot } from '../lib/plannedSlots';
 import PostDetailModal from './PostDetailModal';
@@ -468,6 +469,7 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                               <span className="truncate font-bold">{vendor?.name}</span>
                             </div>
                             <div className="truncate opacity-90">{post.title}</div>
+                            {boundAssetLabel(post, assets) && <div className="truncate text-blue-600">{boundAssetLabel(post, assets)}</div>}
                           </div>
                         );
                       })}
@@ -529,6 +531,7 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                       <span className="flex-1 min-w-0 space-y-1">
                         <span className="block text-sm font-bold text-[#5A5A40] break-words">{vendor?.name}</span>
                         <span className="line-clamp-2 text-base font-bold text-gray-800 break-words">{post.title}</span>
+                        {boundAssetLabel(post, assets) && <span className="block text-sm text-blue-700 truncate">{boundAssetLabel(post, assets)}</span>}
                         <span className="flex flex-wrap gap-1.5">
                           <span className={clsx('text-sm px-2 py-0.5 rounded-full',
                             post.status === 'published' ? 'bg-green-100 text-green-800' :

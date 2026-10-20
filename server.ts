@@ -124,6 +124,34 @@ function sendAuthError(res: any, e: any) {
   return res.status(status).json({ error: e?.message || "驗證失敗" });
 }
 
+/**
+ * 上架毛片時藏鏡人選的「這支是拍哪一篇小編貼文」。2026-10-20 起，見 src/lib/postMatch.ts。
+ *
+ * ⚠️ 不相信前端：那篇必須是同一個 IP、影片、還沒掛素材、沒發布、沒被別支毛片綁走。
+ *    不符合就不綁（素材照樣建），回傳原因讓畫面講清楚，片會留在「還沒排上片日」等同事排。
+ * `claimed`：同一次請求裡已經綁走的貼文，避免一張表單兩支綁同一篇。
+ */
+async function resolvePlannedPost(
+  vendorId: string, postId: unknown, claimed: Set<string>
+): Promise<{ fields: Record<string, string>; warning?: string }> {
+  const id = String(postId || '').trim();
+  if (!id) return { fields: {} };
+  const snap = await adminDb.collection("posts").doc(id).get();
+  const p = snap.data();
+  const reject = (warning: string) => ({ fields: {}, warning });
+  if (!snap.exists || !p) return reject("選的那篇貼文已經不存在");
+  if (p.vendorId !== vendorId) return reject("選的貼文不是這個 IP 的");
+  if (p.contentType === 'post') return reject("選的是圖文貼文");
+  if (p.assetId && p.assetId !== 'to_be_added') return reject("選的貼文已經掛了別的片");
+  if (p.status === 'published') return reject("選的貼文已經發布了");
+  if (claimed.has(id)) return reject("同一篇貼文選了兩次，只有第一支綁上");
+  const dup = await adminDb.collection("assets").where("plannedPostId", "==", id).limit(1).get();
+  if (!dup.empty) return reject("那篇貼文已經有別支毛片了");
+  claimed.add(id);
+  // 上片日快照：以貼文為準，前 10 碼（scheduledAt 是本地時間字串）
+  return { fields: { plannedPostId: id, plannedAirDate: String(p.scheduledAt || '').slice(0, 10) } };
+}
+
 /** Drive 沒設定時回 503，而不是讓路由整個炸掉 */
 function requireDriveConfigured(res: any): boolean {
   if (isDriveConfigured()) return true;
@@ -595,6 +623,7 @@ app.post("/api/drive/commit-groups", async (req, res) => {
 
     const now = new Date().toISOString();
     const created: any[] = [];
+    const claimedPosts = new Set<string>();
     const failed: any[] = [];
 
     for (const [batchIndex, g] of groups.entries()) {
@@ -631,6 +660,7 @@ app.post("/api/drive/commit-groups", async (req, res) => {
         // 素材建檔。欄位刻意跟畫面上人工建檔（handleAddAsset）一字不差，
         // 少一個 status/approved 就會在交棒看板上變成幽靈卡。
         const folderInfo = await getFile(groupFolderId);
+        const planned = await resolvePlannedPost(vendorId, g.plannedPostId, claimedPosts);
         const assetRef = adminDb.collection("assets").doc();
         await assetRef.set({
           title: groupName,
@@ -666,6 +696,8 @@ app.post("/api/drive/commit-groups", async (req, res) => {
           createdBy: me.uid,
           // 剪輯師讀不到 users 文件，名字要快照下來，他才知道有問題找誰
           createdByName: me.displayName || me.email || '',
+          // 綁小編貼文（有選而且驗證通過才有）。上片日跟著那篇走，見 src/lib/boundPosts.ts
+          ...planned.fields,
         });
 
         for (const c of checked) {
@@ -699,6 +731,7 @@ app.post("/api/drive/commit-groups", async (req, res) => {
           fileCount: checked.filter((c: any) => c.kind === 'raw').length,
           brollCount: checked.filter((c: any) => c.kind === 'broll').length,
           folderUrl: folderInfo.webViewLink || '',
+          postWarning: planned.warning || null,
         });
       } catch (err: any) {
         failed.push({ name: groupName, reason: err?.message || "這一組處理失敗" });
@@ -746,6 +779,7 @@ app.post("/api/drive/claim-folders", async (req, res) => {
 
     const now = new Date().toISOString();
     const created: any[] = [];
+    const claimedPosts = new Set<string>();
     const skipped: any[] = [];
     const failed: any[] = [];
 
@@ -765,6 +799,7 @@ app.post("/api/drive/claim-folders", async (req, res) => {
           skipped.push({ name: info.name, reason: "這個資料夾已經有對應的素材了" }); continue;
         }
 
+        const planned = await resolvePlannedPost(vendorId, f?.plannedPostId, claimedPosts);
         const assetRef = adminDb.collection("assets").doc();
         await assetRef.set({
           // 資料夾名稱就是素材名稱。同事本來就會好好命名，不另外要他們再打一次。
@@ -792,6 +827,8 @@ app.post("/api/drive/claim-folders", async (req, res) => {
           createdBy: me.uid,
           // 剪輯師讀不到 users 文件，名字要快照下來，他才知道有問題找誰
           createdByName: me.displayName || me.email || '',
+          // 綁小編貼文（有選而且驗證通過才有）。上片日跟著那篇走，見 src/lib/boundPosts.ts
+          ...planned.fields,
         });
 
         // 跟 commit-groups 一樣留一筆資料夾紀錄，日後孤兒對帳才對得上。
@@ -804,7 +841,7 @@ app.post("/api/drive/claim-folders", async (req, res) => {
           createdAt: now, createdByUid: me.uid,
         }, { merge: true });
 
-        created.push({ assetId: assetRef.id, name: info.name, folderUrl: info.webViewLink || '' });
+        created.push({ assetId: assetRef.id, name: info.name, folderUrl: info.webViewLink || '', postWarning: planned.warning || null });
       } catch (err: any) {
         failed.push({ name: f?.name || folderId, reason: err?.message || "這個資料夾處理失敗" });
       }

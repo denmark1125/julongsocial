@@ -30,6 +30,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { UserProfile, Post, Vendor, Asset, DismissedHabit } from '../types';
 import { useLiveCollection } from '../lib/liveData';
+import { useBoundPostSync } from '../lib/useBoundPostSync';
 import { trackedVendors, getVideoStockAlert, getOwedVideoCount, getAvailableVideoAssets, hasVideoTrackingScope } from '../lib/vendorStatus';
 import { format, parseISO, isBefore, addDays, isAfter, getDay, isSameDay, subDays } from 'date-fns';
 import Logo from './Logo';
@@ -64,6 +65,8 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
   const vendors = useLiveCollection<Vendor>('vendors', !isEditor);
   const assets = useLiveCollection<Asset>('assets', !isEditor);
   const dismissedHabits = useLiveCollection<DismissedHabit>('dismissedHabits', !isEditor);
+  // 毛片綁小編貼文：通過就自動掛上、貼文改日期就跟著改（見 lib/boundPosts.ts）
+  useBoundPostSync(posts, assets, !isEditor && !!userProfile);
 
   // Notification Logic（剪輯師沒有鈴鐺，直接回空清單，不跑任何公司全域計算）
   const notifications = isEditor ? [] : (() => {

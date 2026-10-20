@@ -1,17 +1,21 @@
 import { useMemo, useState, type DragEvent } from 'react';
-import { addDays, differenceInCalendarDays, format, isSameDay, parseISO, startOfDay, startOfWeek } from 'date-fns';
-import { deleteField, doc, updateDoc } from 'firebase/firestore';
+import {
+  addDays, addMonths, differenceInCalendarDays, endOfMonth, endOfWeek, format, isSameDay, isSameMonth,
+  startOfDay, startOfMonth, startOfWeek,
+} from 'date-fns';
+import { deleteField, doc, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Asset, DismissedHabit, PlannedSlotMove, Post, Vendor, deriveFlowStage } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import { stockVisibleVendors, trackedVendors } from '../lib/vendorStatus';
 import { listPlannedSlots } from '../lib/plannedSlots';
-import { buildHorizonDemands, SUPPLY_HORIZON_DAYS } from '../lib/materialSupply';
+import { buildHorizonDemands, postDemandId, SUPPLY_HORIZON_DAYS } from '../lib/materialSupply';
 import { buildEditorQueue, deliveryDeadline, EDIT_LEAD_DAYS, EditorQueueRow } from '../lib/editorQueue';
 import { compareRawEditOrder, rankByVendor } from '../lib/editOrder';
 import { isClosedOutsideSystem } from '../lib/assetFlow';
+import { isWaitingVideoPost } from '../lib/postMatch';
 import toast from 'react-hot-toast';
-import { CalendarDays, Flame, X } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Flame, X } from 'lucide-react';
 
 /**
  * 排上片日：左邊是這個 IP 還沒排上片日的毛片，拖到右邊月曆的某一天＝這支預計那天上。
@@ -20,9 +24,11 @@ import { CalendarDays, Flame, X } from 'lucide-react';
  * 原本系統自動把每支毛片配到 IP 的發片日，剪輯師畫面變成每支都有很近的期限、全部都要剪。
  * 現在**上片日由同事決定**，剪輯師的交片期限＝上片日往前 EDIT_LEAD_DAYS 天。
  *
- * ⚠️ 一次只看一個 IP（上方按鈕切換，比照社群日曆）。
+ * ⚠️ 一次只看一個 IP（上方按鈕切換，比照社群日曆），月曆可以前後翻月。
  *    第一版把所有 IP 的片攤在上方、所有 IP 一列一列排在下方，45 支片把行事曆擠出畫面，拖不到（使用者 10-20）。
- * ⚠️ 寫的就是 `asset.plannedAirDate`，剪輯師清單（buildEditorQueue）只認這個欄位。
+ * ⚠️ 小編已經排好的貼文（素材＝待補上）會出現在格子裡。片拖到那一天／那篇貼文上＝綁定那篇
+ *    （asset.plannedPostId），之後上片日跟著貼文走，剪好通過自動掛上（見 lib/boundPosts.ts）。
+ *    那天沒有小編貼文就只記日子（asset.plannedAirDate）。
  * ⚠️ 虛線框＝那天沒人排，系統先拿這個 IP 剪輯順序第 1 支遞補（跟剪輯師看到的同一份結果）。
  *    把它拖到任何一天（包括原地）就變成人排的。
  * ⚠️ 手機沒有原生拖拉：點一下方框選起來，再點日子（或左邊待排區）放下，走同一個寫入。
@@ -42,8 +48,10 @@ const isDelivered = (a: Asset) => {
 };
 
 const WEEKDAYS = '日一二三四五六';
-/** 月曆顯示幾週（從本週日起）。要蓋過 SUPPLY_HORIZON_DAYS，遞補的片才看得到 */
-const WEEKS = 5;
+const postDay = (p: Post) => (p.scheduledAt || '').slice(0, 10);
+
+/** 放下去要寫什麼：哪一天、綁哪一篇（null＝不綁）。整個 null＝退回待排 */
+type Target = { date: Date; postId: string | null } | null;
 
 export default function AirDateBoard({ onClose }: { onClose: () => void }) {
   const vendors = useLiveCollection<Vendor>('vendors');
@@ -53,13 +61,14 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
   const slotMoves = useLiveCollection<PlannedSlotMove>('plannedSlotMoves');
 
   const [vendorPick, setVendorPick] = useState<string | null>(null);
+  const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()));
   /** 手機備援：點選中的那支（assetId） */
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  /** 拖曳經過的那一格，給個底色讓人知道會放在哪 */
-  const [hoverDay, setHoverDay] = useState<string | null>(null);
+  /** 拖曳經過的那一格／那篇貼文，給個底色讓人知道會放在哪 */
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
 
-  const { ipVendors, pending, demandsByCell, queueByCell, rank } = useMemo(() => {
+  const { ipVendors, pending, demandsByCell, queueByKey, autoDateOf, rank } = useMemo(() => {
     const now = new Date();
     // 冷凍中的 IP 也要能排（冷凍凍的是發片不是剪片，見 stockVisibleVendors），只是它沒有固定發片日
     const visible = stockVisibleVendors(vendors);
@@ -83,55 +92,75 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
       deliveredAssets: assets.filter(a => isDelivered(a) && visibleIds.has(a.vendorId)),
     });
 
-    const cellKey = (vendorId: string, d: Date) => `${vendorId}|${format(d, 'yyyy-MM-dd')}`;
-    const demandsByCell = new Map<string, number>();
-    demands.forEach(d => demandsByCell.set(cellKey(d.vendorId, d.date), (demandsByCell.get(cellKey(d.vendorId, d.date)) || 0) + 1));
-    const queueByCell = new Map<string, EditorQueueRow[]>();
-    [...queue.rows, ...queue.stocked, ...queue.settled].forEach(r => {
-      if (!r.date) return;
-      const k = cellKey(r.vendorId, r.date);
-      queueByCell.set(k, [...(queueByCell.get(k) || []), r]);
+    const demandsByCell = new Set(demands.map(d => `${d.vendorId}|${format(d.date, 'yyyy-MM-dd')}`));
+    // 系統遞補的列，用需求 id 找（小編貼文那格是 post_xxx，預排是 slot_xxx）
+    const queueByKey = new Map<string, EditorQueueRow>();
+    const autoDateOf = new Map<string, Date>();
+    [...queue.rows, ...queue.stocked].forEach(r => {
+      queueByKey.set(r.key, r);
+      if (r.kind === 'to_edit' && r.deadlineSource !== 'air' && r.date && r.asset) autoDateOf.set(r.asset.id!, r.date);
     });
 
     // 有發片日或有待剪片的 IP 才有按鈕
     const active = new Set<string>([...demands.map(d => d.vendorId), ...pendingAll.map(a => a.vendorId)]);
     const ipVendors = visible.filter(v => active.has(v.id!)).sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
 
-    return { ipVendors, pending: pendingAll, demandsByCell, queueByCell, rank: rankByVendor(pendingAll) };
+    return { ipVendors, pending: pendingAll, demandsByCell, queueByKey, autoDateOf, rank: rankByVendor(pendingAll) };
   }, [vendors, assets, posts, dismissedHabits, slotMoves]);
 
-  const unplacedCount = (vendorId: string) => pending.filter(a => a.vendorId === vendorId && !a.plannedAirDate).length;
+  const postById = useMemo(() => new Map(posts.map(p => [p.id!, p])), [posts]);
+  /** 這支片綁的小編貼文（還有效的才算：沒被刪、沒掛別支、沒發布） */
+  const boundPost = (a: Asset): Post | undefined => {
+    const p = a.plannedPostId ? postById.get(a.plannedPostId) : undefined;
+    return p && isWaitingVideoPost(p, new Date(0)) ? p : undefined;
+  };
+  /** 這支片目前排在哪天：有綁貼文就以貼文為準（小編改日期會跟著走），否則用同事排的日子 */
+  const placedDay = (a: Asset): string | null => {
+    const p = boundPost(a);
+    return p ? postDay(p) : (a.plannedAirDate || null);
+  };
+
+  const unplacedCount = (vid: string) => pending.filter(a => a.vendorId === vid && !placedDay(a)).length;
   // 預設停在第一個還有片沒排的 IP
   const vendorId = vendorPick ?? (ipVendors.find(v => unplacedCount(v.id!) > 0) ?? ipVendors[0])?.id ?? null;
   const vendor = vendors.find(v => v.id === vendorId);
 
   const today = startOfDay(new Date());
-  const gridDays = Array.from({ length: WEEKS * 7 }, (_, i) => addDays(startOfWeek(today), i));
+  const gridStart = startOfWeek(startOfMonth(monthCursor));
+  const gridDays = Array.from(
+    { length: differenceInCalendarDays(endOfWeek(endOfMonth(monthCursor)), gridStart) + 1 },
+    (_, i) => addDays(gridStart, i)
+  );
   const mine = pending.filter(a => a.vendorId === vendorId);
-  const unplaced = mine.filter(a => !a.plannedAirDate).sort(compareRawEditOrder);
-  // 排在月曆範圍以外（更早或更遠）的片：不列出來的話，拖過去之後就找不到了
-  const outside = mine.filter(a => {
-    if (!a.plannedAirDate) return false;
-    const d = startOfDay(parseISO(a.plannedAirDate));
-    return d < gridDays[0] || d > gridDays[gridDays.length - 1];
-  }).sort((x, y) => (x.plannedAirDate || '').localeCompare(y.plannedAirDate || ''));
+  const unplaced = mine.filter(a => !placedDay(a)).sort(compareRawEditOrder);
+  const myVideoPosts = posts.filter(p => p.vendorId === vendorId && p.contentType !== 'post' && p.scheduledAt);
 
-  /** 系統遞補到哪一天（assetId → 日子）。只算沒人排過的片 */
-  const autoDateOf = new Map<string, Date>();
-  queueByCell.forEach(rows => rows.forEach(r => {
-    if (r.kind === 'to_edit' && r.date && r.asset && !r.asset.plannedAirDate) autoDateOf.set(r.asset.id!, r.date);
-  }));
-
-  const setAirDate = async (assetId: string, date: Date | null) => {
-    const a = pending.find(x => x.id === assetId);
+  /**
+   * 寫入一支片的位置。綁到某篇貼文時，原本綁那篇的片要退回待排（一篇只配一支）。
+   * ⚠️ 用 batch：兩支片的改動要一起成功，不然會短暫出現兩支綁同一篇。
+   */
+  const place = async (assetId: string, target: Target) => {
     setSelectedId(null);
-    setHoverDay(null);
+    setHoverKey(null);
+    const a = pending.find(x => x.id === assetId);
     if (!a) return;
-    const next = date ? format(date, 'yyyy-MM-dd') : null;
-    if ((a.plannedAirDate || null) === next) return;
+    if (a.vendorId !== vendorId) return;
+    if (target && target.date < today) return;
+    const nextDay = target ? format(target.date, 'yyyy-MM-dd') : null;
+    const nextPost = target?.postId ?? null;
+    if ((a.plannedPostId || null) === nextPost && (a.plannedAirDate || null) === nextDay) return;
+
     setBusyId(assetId);
     try {
-      await updateDoc(doc(db, 'assets', assetId), { plannedAirDate: next ?? deleteField() });
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'assets', assetId), {
+        plannedAirDate: nextDay ?? deleteField(),
+        plannedPostId: nextPost ?? deleteField(),
+      });
+      const bumped = nextPost ? pending.find(x => x.id !== assetId && x.plannedPostId === nextPost) : undefined;
+      if (bumped) batch.update(doc(db, 'assets', bumped.id!), { plannedAirDate: deleteField(), plannedPostId: deleteField() });
+      await batch.commit();
+      if (bumped) toast(`「${bumped.title}」退回左邊（一篇貼文只配一支片）`);
     } catch (error) {
       console.error('排上片日失敗:', error);
       toast.error('沒有存到，請再試一次');
@@ -140,17 +169,26 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
     }
   };
 
+  /** 放到某一天（不是某篇貼文上）：那天有還沒配片的小編貼文就綁最早那篇，否則只記日子 */
+  const placeOnDay = (assetId: string, d: Date) => {
+    const dayStr = format(d, 'yyyy-MM-dd');
+    const open = myVideoPosts
+      .filter(p => postDay(p) === dayStr && isWaitingVideoPost(p, today) && !pending.some(x => x.id !== assetId && x.plannedPostId === p.id))
+      .sort((x, y) => x.scheduledAt.localeCompare(y.scheduledAt));
+    void place(assetId, { date: d, postId: open[0]?.id ?? null });
+  };
+
   const onDragStart = (e: DragEvent, assetId: string) => {
     e.dataTransfer.setData('text/plain', assetId);
     e.dataTransfer.effectAllowed = 'move';
   };
-  const allowDrop = (e: DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; };
-  const dropTo = (e: DragEvent, date: Date | null) => {
+  const over = (key: string) => (e: DragEvent) => {
     e.preventDefault();
-    const id = e.dataTransfer.getData('text/plain');
-    if (id) void setAirDate(id, date);
-    else setHoverDay(null);
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    if (hoverKey !== key) setHoverKey(key);
   };
+  const dragged = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); return e.dataTransfer.getData('text/plain'); };
 
   /**
    * 一支片的方框。dashed＝系統遞補，還沒有人親手排。
@@ -158,17 +196,17 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
    */
   const chip = (a: Asset, opts: { key?: string; dashed?: boolean; airDate?: Date } = {}) => {
     const { dashed = false, airDate } = opts;
-    // 左邊待排區的片如果已經被系統補在某一天，直接講出來 —— 不然同一支在兩邊各出現一次，看起來像重複
-    const autoAt = !airDate ? autoDateOf.get(a.id!) : undefined;
     const deadline = airDate ? deliveryDeadline(airDate) : null;
     const late = deadline ? differenceInCalendarDays(deadline, today) < 0 : false;
     const selected = selectedId === a.id;
+    // 左邊待排區的片如果已經被系統補在某一天，直接講出來 —— 不然同一支在兩邊各出現一次，看起來像重複
+    const autoAt = !airDate ? autoDateOf.get(a.id!) : undefined;
     return (
       <div
         key={opts.key ?? a.id}
         draggable={busyId !== a.id}
         onDragStart={e => onDragStart(e, a.id!)}
-        onDragEnd={() => setHoverDay(null)}
+        onDragEnd={() => setHoverKey(null)}
         onClick={e => { e.stopPropagation(); setSelectedId(selected ? null : a.id!); }}
         title={a.title}
         className={[
@@ -206,7 +244,7 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
               <CalendarDays size={18} /> 排上片日
             </h3>
             <p className="text-[13px] text-gray-500 truncate">
-              把左邊的片拖到那一天＝預計那天上，拖回左邊＝取消。剪輯師交片期限＝上片日前 {EDIT_LEAD_DAYS} 天。
+              把左邊的片拖到那一天或小編的貼文上＝預計那天上，拖回左邊＝取消。剪輯師交片期限＝上片日前 {EDIT_LEAD_DAYS} 天。
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 shrink-0" aria-label="關閉">
@@ -238,12 +276,12 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
           <p className="text-center text-gray-400 py-16">目前沒有要排的 IP。</p>
         ) : (
           <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 p-3 sm:p-4 overflow-y-auto lg:overflow-hidden">
-            {/* 左：還沒排上片日（拖回這裡＝清掉上片日） */}
+            {/* 左：還沒排上片日（拖回這裡＝清掉上片日與綁定） */}
             <div
-              onDragOver={allowDrop}
-              onDrop={e => dropTo(e, null)}
-              onClick={() => { if (selectedId) void setAirDate(selectedId, null); }}
-              className="lg:w-64 shrink-0 bg-white rounded-2xl border border-black/5 p-3 flex flex-col lg:min-h-0"
+              onDragOver={over('tray')}
+              onDrop={e => { const id = dragged(e); if (id) void place(id, null); }}
+              onClick={() => { if (selectedId) void place(selectedId, null); }}
+              className={`lg:w-64 shrink-0 bg-white rounded-2xl border p-3 flex flex-col lg:min-h-0 ${hoverKey === 'tray' ? 'border-[#5A5A40]/40' : 'border-black/5'}`}
             >
               <p className="text-[13px] font-bold text-[#5A5A40] mb-2 whitespace-nowrap">
                 還沒排上片日 <span className="font-normal text-gray-500">{unplaced.length} 支</span>
@@ -253,71 +291,99 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
                   ? <p className="text-[13px] text-gray-400">{vendor.name} 的毛片都排好了。</p>
                   : unplaced.map(a => <div key={a.id} className="w-44 lg:w-auto shrink-0">{chip(a)}</div>)}
               </div>
-              {outside.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-black/5 space-y-1.5">
-                  <p className="text-[12px] text-gray-500">排在月曆範圍以外</p>
-                  {outside.map(a => (
-                    <div key={a.id}>
-                      <p className="text-[12px] text-gray-400 px-1">{format(parseISO(a.plannedAirDate!), 'M/d')} 上</p>
-                      {chip(a, { airDate: startOfDay(parseISO(a.plannedAirDate!)) })}
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
 
             {/* 右：月曆 */}
             <div className="flex-1 min-w-0 bg-white rounded-2xl border border-black/5 flex flex-col lg:min-h-0 overflow-hidden">
-              {selectedId && (
-                <p className="px-3 py-2 text-[13px] text-[#5A5A40] font-bold border-b border-black/5">
-                  已選「{pending.find(a => a.id === selectedId)?.title}」，點一天放下。
-                </p>
-              )}
+              <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-black/5">
+                <span className="text-[15px] font-bold serif text-[#5A5A40] whitespace-nowrap">{format(monthCursor, 'yyyy年M月')}</span>
+                {selectedId && (
+                  <span className="flex-1 min-w-0 text-[13px] text-[#5A5A40] font-bold truncate">
+                    已選「{pending.find(a => a.id === selectedId)?.title}」，點一天放下
+                  </span>
+                )}
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => setMonthCursor(m => addMonths(m, -1))} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100" aria-label="上個月">
+                    <ChevronLeft size={18} />
+                  </button>
+                  <button onClick={() => setMonthCursor(startOfMonth(new Date()))} className="px-2 py-1 rounded-lg text-[13px] font-bold text-gray-600 hover:bg-gray-100">今天</button>
+                  <button onClick={() => setMonthCursor(m => addMonths(m, 1))} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100" aria-label="下個月">
+                    <ChevronRight size={18} />
+                  </button>
+                </div>
+              </div>
               <div className="grid grid-cols-7 border-b border-black/5">
                 {WEEKDAYS.split('').map(w => (
                   <div key={w} className="py-2 text-center text-[13px] font-bold text-gray-500">{w}</div>
                 ))}
               </div>
-              <div className="grid grid-cols-7 auto-rows-[minmax(96px,1fr)] flex-1 lg:min-h-0 lg:overflow-y-auto">
+              <div className="grid grid-cols-7 auto-rows-[minmax(104px,auto)] flex-1 lg:min-h-0 lg:overflow-y-auto">
                 {gridDays.map(d => {
                   const dateStr = format(d, 'yyyy-MM-dd');
-                  const key = `${vendorId}|${dateStr}`;
                   const past = d < today;
-                  const isSlotDay = (demandsByCell.get(key) || 0) > 0;
-                  const placed = mine.filter(a => a.plannedAirDate === dateStr);
-                  const qRows = queueByCell.get(key) || [];
-                  const auto = qRows.filter(r => r.kind === 'to_edit' && r.asset && !r.asset.plannedAirDate);
-                  const settledPosts = posts.filter(p =>
-                    p.vendorId === vendorId && p.contentType !== 'post' && p.scheduledAt &&
-                    p.assetId && p.assetId !== 'to_be_added' && isSameDay(parseISO(p.scheduledAt), d));
-                  const stocked = qRows.filter(r => r.kind === 'has_stock').length;
-                  const empty = qRows.some(r => r.kind === 'no_material');
+                  const inMonth = isSameMonth(d, monthCursor);
+                  const isSlotDay = demandsByCell.has(`${vendorId}|${dateStr}`);
+                  const dayPosts = myVideoPosts.filter(p => postDay(p) === dateStr).sort((x, y) => x.scheduledAt.localeCompare(y.scheduledAt));
+                  // 只排了日子、沒綁貼文的片
+                  const loose = mine.filter(a => !boundPost(a) && a.plannedAirDate === dateStr);
+                  // 預排那一格（沒有小編貼文）的系統遞補
+                  const slotRows = Array.from<EditorQueueRow>(queueByKey.values()).filter(r =>
+                    r.vendorId === vendorId && r.key.startsWith('slot_') && r.date && isSameDay(r.date, d));
                   return (
                     <div
                       key={dateStr}
-                      onDragOver={past ? undefined : e => { allowDrop(e); if (hoverDay !== dateStr) setHoverDay(dateStr); }}
-                      onDrop={past ? undefined : e => dropTo(e, d)}
-                      onClick={() => { if (selectedId && !past) void setAirDate(selectedId, d); }}
+                      onDragOver={past ? undefined : over(dateStr)}
+                      onDrop={past ? undefined : e => { const id = dragged(e); if (id) placeOnDay(id, d); }}
+                      onClick={() => { if (selectedId && !past) placeOnDay(selectedId, d); }}
                       className={[
                         'border-r border-b border-black/5 p-1.5 min-w-0 space-y-1 transition-colors',
-                        past ? 'bg-gray-50/80 opacity-50' : isSlotDay ? 'bg-orange-50/60' : '',
-                        hoverDay === dateStr ? '!bg-[#5A5A40]/10' : '',
+                        past ? 'bg-gray-50/80 opacity-50' : isSlotDay ? 'bg-orange-50/60' : !inMonth ? 'bg-gray-50/40' : '',
+                        hoverKey === dateStr ? '!bg-[#5A5A40]/10' : '',
                         selectedId && !past ? 'cursor-pointer hover:bg-[#5A5A40]/5' : '',
                       ].join(' ')}
                     >
                       <div className="flex items-center gap-1">
-                        <span className={`text-[13px] font-bold w-6 h-6 flex items-center justify-center rounded-full shrink-0 ${isSameDay(d, today) ? 'bg-[#5A5A40] text-white' : 'text-gray-500'}`}>
+                        <span className={`text-[13px] font-bold w-6 h-6 flex items-center justify-center rounded-full shrink-0 ${isSameDay(d, today) ? 'bg-[#5A5A40] text-white' : inMonth ? 'text-gray-500' : 'text-gray-300'}`}>
                           {d.getDate() === 1 ? format(d, 'M/d') : d.getDate()}
                         </span>
                         {isSlotDay && !past && <span className="text-[12px] text-orange-700 truncate">發片日</span>}
                       </div>
-                      {settledPosts.map(p => (
-                        <p key={p.id} title={p.title} className="text-[12px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 truncate">已排：{p.title}</p>
-                      ))}
-                      {placed.map(a => chip(a, { airDate: d }))}
-                      {auto.map(r => chip(r.asset!, { key: r.key, airDate: d, dashed: true }))}
-                      {stocked > 0 && <p className="text-[12px] px-1 text-sky-700 truncate">有成片等排程</p>}
-                      {empty && !past && <p className="text-[12px] px-1 text-amber-700">沒片</p>}
+
+                      {/* 小編排好的貼文：已掛片的只列標題；還在等片的可以把毛片拖上去綁定 */}
+                      {dayPosts.map(p => {
+                        if (!isWaitingVideoPost(p, new Date(0))) {
+                          return <p key={p.id} title={p.title} className="text-[12px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 truncate">已排：{p.title}</p>;
+                        }
+                        const bound = mine.find(a => a.plannedPostId === p.id);
+                        const auto = !bound ? queueByKey.get(postDemandId(p.id!)) : undefined;
+                        const pKey = `post|${p.id}`;
+                        return (
+                          <div
+                            key={p.id}
+                            onDragOver={past ? undefined : over(pKey)}
+                            onDrop={past ? undefined : e => { const id = dragged(e); if (id) void place(id, { date: d, postId: p.id! }); }}
+                            onClick={e => { if (selectedId && !past) { e.stopPropagation(); void place(selectedId, { date: d, postId: p.id! }); } }}
+                            className={`rounded-lg p-1 space-y-1 ${bound ? 'bg-blue-50/70' : 'border border-dashed border-blue-200 bg-blue-50/30'} ${hoverKey === pKey ? 'ring-2 ring-blue-300' : ''}`}
+                          >
+                            <p title={p.title} className="text-[12px] text-blue-700 truncate px-0.5">
+                              小編：{p.title}{!bound && auto?.kind === 'no_material' ? '・等片' : ''}
+                            </p>
+                            {bound && chip(bound, { airDate: d })}
+                            {!bound && auto?.kind === 'to_edit' && auto.asset && chip(auto.asset, { key: auto.key, airDate: d, dashed: true })}
+                            {!bound && auto?.kind === 'has_stock' && <p className="text-[12px] px-0.5 text-sky-700 truncate">有成片等排程</p>}
+                          </div>
+                        );
+                      })}
+
+                      {/* 沒有小編貼文的日子：同事只排了日子的片＋預排的系統遞補 */}
+                      {loose.map(a => chip(a, { airDate: d }))}
+                      {slotRows.map(r => r.kind === 'to_edit' && r.asset
+                        ? chip(r.asset, { key: r.key, airDate: d, dashed: true })
+                        : r.kind === 'has_stock'
+                          ? <p key={r.key} className="text-[12px] px-1 text-sky-700 truncate">有成片等排程</p>
+                          : r.kind === 'no_material' && !past
+                            ? <p key={r.key} className="text-[12px] px-1 text-amber-700">沒片</p>
+                            : null)}
                     </div>
                   );
                 })}

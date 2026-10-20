@@ -1,6 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { auth } from '../firebase';
-import { Vendor, Editor } from '../types';
+import { Vendor, Editor, Post, Asset } from '../types';
+import { useLiveCollection } from '../lib/liveData';
+import { resolvePostPicks, waitingPostsFor } from '../lib/postMatch';
+import PlannedPostSelect from './PlannedPostSelect';
 import { visibleVendors } from '../lib/vendorStatus';
 import { ASSET_CATEGORIES, ASSET_CATEGORY_DATALIST_ID } from '../lib/assetCategories';
 import { BROLL_FOLDER_NAME } from '../lib/driveNaming';
@@ -63,6 +66,11 @@ interface Group {
   editorId: string;
   /** 內部自己剪，不派給外包。跟 editorId 是互斥的兩種狀態 */
   internalEdit: boolean;
+  /**
+   * 這支是拍哪一篇小編貼文。null＝還沒動過，用系統依名稱猜的；''＝不屬於任何一篇。
+   * 見 lib/postMatch.ts 的 resolvePostPicks。
+   */
+  postPick: string | null;
 }
 
 const fmtSize = (bytes: number) => {
@@ -83,7 +91,7 @@ const INTERNAL = '__internal__';
 
 const newGroup = (category = ''): Group => ({
   key: `g${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
-  name: '', files: [], brollFiles: [], category, brief: '', editorId: '', internalEdit: false,
+  name: '', files: [], brollFiles: [], category, brief: '', editorId: '', internalEdit: false, postPick: null,
 });
 
 export default function RawFootageUpload({
@@ -110,6 +118,11 @@ export default function RawFootageUpload({
     [vendors]
   );
   const vendor = vendors.find(v => v.id === vendorId);
+  // 小編已經排好、還在等片的貼文。上架時順便講「這支是拍哪一篇」，上片日就不用再排一次
+  const posts = useLiveCollection<Post>('posts');
+  const assets = useLiveCollection<Asset>('assets');
+  const postCandidates = useMemo(() => vendorId ? waitingPostsFor(vendorId, posts, assets) : [], [vendorId, posts, assets]);
+  const postPicks = resolvePostPicks(groups.map(g => ({ name: g.name, pick: g.postPick })), postCandidates);
   const folderReady = Boolean(vendor?.rawFootageFolderId);
 
   // 只要有任何一組已經建了資料夾，上面那三個欄位就不能再動 —— 改了路徑就對不上了
@@ -242,11 +255,15 @@ export default function RawFootageUpload({
           brief: g.brief,
           editorId: g.editorId,
           internalEdit: g.internalEdit,
+          plannedPostId: postPicks[groups.indexOf(g)] || '',
           files: g.files.map(f => ({ driveFileId: f.id, note: notes[f.id] || '' })),
           brollFiles: g.brollFiles.map(f => ({ driveFileId: f.id, note: notes[f.id] || '' })),
         })),
       });
       setDone(data);
+      // 選的貼文在送出前被別人掛走或刪掉：素材照樣建了，只是沒綁上，要講清楚
+      const unbound = (data.created || []).filter((c: any) => c.postWarning);
+      if (unbound.length) toast(`「${unbound[0].name}」沒有綁上貼文：${unbound[0].postWarning}。之後到「排上片日」再排`, { duration: 8000 });
       if (data.failed?.length) {
         toast.error(`${data.created?.length || 0} 支建好了，${data.failed.length} 支失敗`);
       } else {
@@ -493,6 +510,15 @@ export default function RawFootageUpload({
                               這個 IP 沒有負責剪輯師，不指定的話沒有人會看到這支片
                             </p>
                           )}
+                        </div>
+                        <div className="w-full sm:w-72">
+                          <PlannedPostSelect
+                            value={postPicks[gi]}
+                            guessed={g.postPick === null}
+                            candidates={postCandidates}
+                            takenElsewhere={postPicks.filter((_, k) => k !== gi && !!postPicks[k])}
+                            onChange={postId => patch(g.key, { postPick: postId })}
+                          />
                         </div>
                         <div className="flex-1 min-w-[14rem]">
                           <label className="block text-xs font-medium text-slate-600 mb-1">剪輯需求（整支片的方向）</label>

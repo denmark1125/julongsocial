@@ -628,6 +628,16 @@ export interface Asset {
    */
   plannedAirDate?: string;
   /**
+   * 這支毛片要給哪一篇小編貼文用（posts 的 id）。2026-10-20 起。
+   *
+   * 小編先排好一個月的標題＋日期（素材＝待補上），藏鏡人上架時選「這支是拍哪一篇」，
+   * 或同事在「排上片日」把片拖到那篇貼文上。
+   * ⚠️ **有值時上片日以貼文的 scheduledAt 為準**，plannedAirDate 只是快照。小編改日期不需要任何人同步。
+   * ⚠️ 片剪好、業主通過後由 useBoundPostSync 自動掛上那篇貼文；貼文被刪或掛了別支就自動解除。
+   * ⚠️ 剪輯師改不了它（不在 isEditorAssetUpdate 白名單）。
+   */
+  plannedPostId?: string;
+  /**
    * 上片／歸片時這支在這一批裡的位置（0 起算）。一批片共用同一個 createdAt，
    * 同一批誰先剪靠它。server 建檔時寫入。見 lib/editOrder.ts。
    */

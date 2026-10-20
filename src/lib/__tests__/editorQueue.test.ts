@@ -201,3 +201,47 @@ describe('buildEditorQueue', () => {
     expect(q.rows[0].deadline).toEqual(day(9, 22));
   });
 });
+
+describe('buildEditorQueue：綁定小編貼文（plannedPostId）', () => {
+  it('上片日跟著貼文走：小編把貼文改到 11/01，期限跟著變成 10/23', () => {
+    const post = demand('hz', day(11, 1), { id: 'post_p1' });
+    const raw = asset({ vendorId: 'hz', plannedPostId: 'p1', plannedAirDate: '2026-10-25' });
+
+    const q = buildEditorQueue({ demands: [post], pendingAssets: [raw] });
+
+    expect(q.rows).toHaveLength(1);
+    expect(q.rows[0].key).toBe('post_p1');
+    expect(q.rows[0].date).toEqual(day(11, 1));
+    expect(q.rows[0].deadline).toEqual(day(10, 23));
+  });
+
+  it('綁定的貼文已經掛了別支片：當作沒綁，退回遞補', () => {
+    const demands = [demand('hz', day(10, 25), { id: 'post_p1', attachedAssetId: 'other' }), demand('hz', day(10, 28))];
+    const raw = asset({ vendorId: 'hz', plannedPostId: 'p1' });
+
+    const q = buildEditorQueue({ demands, pendingAssets: [raw] });
+
+    expect(q.rows.find(r => r.asset?.id === raw.id)?.date).toEqual(day(10, 28));
+    expectConservation(demands, q);
+  });
+
+  it('綁定的貼文不在視窗內（太遠或剛被刪）：退回 plannedAirDate 快照', () => {
+    const raw = asset({ vendorId: 'hz', plannedPostId: 'gone', plannedAirDate: '2026-11-20' });
+
+    const q = buildEditorQueue({ demands: [], pendingAssets: [raw] });
+
+    expect(q.rows[0].date).toEqual(day(11, 20));
+  });
+
+  it('只排日子的片不能用日期搶走別支綁定的那篇貼文', () => {
+    const demands = [demand('hz', day(10, 25), { id: 'post_p1' })];
+    const dateOnly = asset({ vendorId: 'hz', editOrder: 1, plannedAirDate: '2026-10-25' });
+    const bound = asset({ vendorId: 'hz', editOrder: 2, plannedPostId: 'p1' });
+
+    const q = buildEditorQueue({ demands, pendingAssets: [dateOnly, bound] });
+
+    expect(q.rows.find(r => r.key === 'post_p1')?.asset?.id).toBe(bound.id);
+    expect(q.rows.find(r => r.asset?.id === dateOnly.id)?.key).toBe(`planned_${dateOnly.id}`);
+    expectConservation(demands, q);
+  });
+});

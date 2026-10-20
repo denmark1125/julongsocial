@@ -39,6 +39,8 @@ interface LiveStore {
   docs: unknown[];
   listeners: Set<() => void>;
   unsubscribe: () => void;
+  /** 第一包資料到了沒。沒到之前 docs 是空陣列，跟「真的沒有資料」分不出來 */
+  loaded: boolean;
 }
 
 const registry = new Map<LiveCollectionName, LiveStore>();
@@ -47,13 +49,14 @@ function ensureStore(name: LiveCollectionName): LiveStore {
   const existing = registry.get(name);
   if (existing) return existing;
 
-  const store: LiveStore = { docs: [], listeners: new Set(), unsubscribe: () => {} };
+  const store: LiveStore = { docs: [], listeners: new Set(), unsubscribe: () => {}, loaded: false };
   registry.set(name, store);
 
   store.unsubscribe = onSnapshot(
     collection(db, name),
     (snapshot) => {
       store.docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      store.loaded = true;
       store.listeners.forEach(notify => notify());
     },
     (error) => {
@@ -87,6 +90,15 @@ export function useLiveCollection<T>(name: LiveCollectionName, enabled: boolean 
   }, [store]);
   const getSnapshot = useCallback(() => (store ? store.docs : EMPTY) as T[], [store]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+/**
+ * 這份 collection 的第一包資料到了沒。
+ * ⚠️ 會根據「某筆資料不存在」去寫入的程式（例如 useBoundPostSync 判斷貼文被刪）一定要先問這支，
+ *    否則剛登入、資料還沒到的那一瞬間，所有東西看起來都被刪了。
+ */
+export function isLiveCollectionLoaded(name: LiveCollectionName): boolean {
+  return registry.get(name)?.loaded ?? false;
 }
 
 /**

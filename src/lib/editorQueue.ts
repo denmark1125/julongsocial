@@ -1,6 +1,6 @@
 import { differenceInCalendarDays, format, parseISO, startOfDay, subDays } from 'date-fns';
 import { Asset } from '../types';
-import { DemandItem } from './materialSupply';
+import { DemandItem, postDemandId } from './materialSupply';
 import { compareRawEditOrder } from './editOrder';
 
 /**
@@ -222,12 +222,29 @@ export function buildEditorQueue(opts: {
     const raws = pendingAssets.filter(a => a.vendorId === vendorId).sort(rawOrder);
     const delivered = deliveredAssets.filter(a => a.vendorId === vendorId).sort(deliveredOrder);
 
-    // 1. 同事排了上片日的毛片：照他排的日子，先佔掉那一天的格子。
+    // 1. 已經排好的毛片先佔格：
+    //    a. 綁了小編貼文（plannedPostId）→ 日子以那篇貼文為準，小編改日期這裡自動跟著變。
+    //       那篇已經掛了別支片 → 當作沒綁（片退回下面的遞補／未排）。
+    //    b. 沒綁，但同事排了上片日（plannedAirDate）→ 照他排的日子；那天剛好有格子就佔掉。
+    //       綁定的貼文不在視窗內（太遠，或剛被刪、還沒被 useBoundPostSync 清掉）也退回這條，用快照。
     //    ⚠️ 已經過了的日子也照樣顯示（期限會是「已超過」）—— 那是同事該改日期的訊號，不要自動清掉。
     //    ⚠️ 那天不在這個 IP 的發片日上（同事拖到別天）也照樣成列，只是不對應任何格子。
     const claimed = new Set<string>();
     const free: Asset[] = [];
-    raws.forEach(raw => {
+    // 綁了貼文的先處理：不然只排了日子的片會先用日期把那篇貼文的格子佔走
+    const boundFirst = [...raws].sort((x, y) => Number(!x.plannedPostId) - Number(!y.plannedPostId));
+    boundFirst.forEach(raw => {
+      const post = raw.plannedPostId ? mine.find(d => d.id === postDemandId(raw.plannedPostId!)) : undefined;
+      if (post && post.attachedAssetId && post.attachedAssetId !== raw.id) { free.push(raw); return; }
+      if (post && !claimed.has(post.id)) {
+        claimed.add(post.id);
+        const air = startOfDay(post.date);
+        rows.push({
+          key: post.id, date: air, ...rowDeadline(raw, air, 'air'), vendorId,
+          kind: 'to_edit', asset: raw, urgent: Boolean(raw.isUrgent),
+        });
+        return;
+      }
       const air = plannedAirDay(raw);
       if (!air) { free.push(raw); return; }
       const slot = open.find(d => !claimed.has(d.id) && startOfDay(d.date).getTime() === air.getTime());
@@ -237,6 +254,8 @@ export function buildEditorQueue(opts: {
         kind: 'to_edit', asset: raw, urgent: Boolean(raw.isUrgent),
       });
     });
+
+    free.sort(rawOrder); // 上面先處理綁定的片打亂了順序，遞補要照剪輯順序
 
     // 2. 剩下沒人排的發片日由近到遠遞補：先給成片，再給沒排日子的毛片（剪輯順序第 1 支先），都沒有就是沒片。
     //    老闆 2026-10-20：「這週六縈寶要上片但是沒排片，會優先放上片排序一的片」。
