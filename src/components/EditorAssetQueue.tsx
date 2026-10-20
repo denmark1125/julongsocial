@@ -1241,11 +1241,18 @@ export default function EditorAssetQueue({
     if (!auth.currentUser) return;
     setBusyId(asset.id!);
     let files;
+    const toastId = `upload_${asset.id}`;
     try {
-      files = await uploadFinishedFiles(asset);
+      files = await uploadFinishedFiles(asset, p => {
+        toast.loading(
+          `上傳中 ${p.percent}%${p.fileCount > 1 ? `（第 ${p.fileIndex + 1}／${p.fileCount} 個檔）` : ''}，傳完前請不要關掉這頁`,
+          { id: toastId },
+        );
+      });
+      toast.dismiss(toastId);
     } catch (error: any) {
       console.error('In-app finished upload failed:', error);
-      toast.error(error?.message || '上傳失敗，請再試一次，或自己上傳後按「已自行上傳」');
+      toast.error(error?.message || '上傳失敗，請再試一次', { id: toastId });
       setBusyId(null);
       return;
     }

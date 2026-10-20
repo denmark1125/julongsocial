@@ -15,7 +15,7 @@ import { fileURLToPath } from "url";
 import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVideoTrackingScope, getDeficitBreakdown } from "./src/lib/vendorStatus.js";
 // 交棒狀態的判定要跟前端同一份，不然推播說的「目前狀態」會跟畫面上不一致
 import { deriveFlowStage, FLOW_STAGE_LABEL } from "./src/types.js";
-import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFolderName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, renameFile, copyFile, listFolderFiles, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
+import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFolderName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, renameFile, copyFile, listFolderFiles, createResumableSession, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
 import { summarizeFolder } from "./src/lib/rawFolder.js";
 import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
 
@@ -1048,6 +1048,46 @@ app.post("/api/drive/editor-upload-auth", async (req, res) => {
     if (e?.httpStatus) return sendUploadTargetError(res, e);
     console.error("drive/editor-upload-auth failed:", e?.message);
     return res.status(502).json({ error: e?.message || "取得上傳憑證失敗" });
+  }
+});
+
+/**
+ * 剪輯師系統內上傳成片：開一個續傳通道，瀏覽器直接把檔案分段送進這個 IP 的成片夾。2026-10-20 起。
+ * 取代 Google Picker 的上傳視窗（它用瀏覽器登入的 Google 帳號，剪輯師的帳號沒權限 → Server rejected）。
+ * 傳完前端照舊呼叫 editor-upload-done 登記（那裡會再向 Google 確認檔案真的在成片夾裡）。
+ */
+const UPLOAD_ORIGINS = [/^https:\/\/julongsocial(-[a-z0-9-]+)?\.vercel\.app$/, /^http:\/\/localhost:\d+$/];
+const MAX_FINISHED_BYTES = 20 * 1024 ** 3;
+
+app.post("/api/drive/editor-upload-session", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    const me = await requireUser(req);
+    const { folderId } = await loadFinishedUploadTarget(me, req.body?.assetId);
+    const name = String(req.body?.fileName || '').trim().slice(0, 200);
+    const size = Number(req.body?.size);
+    const mimeType = String(req.body?.mimeType || 'application/octet-stream').slice(0, 100);
+    if (!name) return res.status(400).json({ error: "缺少檔名" });
+    if (!Number.isFinite(size) || size <= 0) return res.status(400).json({ error: "檔案大小不對" });
+    if (size > MAX_FINISHED_BYTES) return res.status(413).json({ error: "單一檔案超過 20 GB，請先壓縮再傳" });
+    // CORS 標頭是照開通道時的 Origin 給的，只開給自己的網站
+    const origin = String(req.headers.origin || '');
+    if (!UPLOAD_ORIGINS.some(r => r.test(origin))) return res.status(403).json({ error: "上傳來源不對" });
+
+    const quota = await getQuota();
+    if (quota.freeBytes - size < DRIVE_MIN_FREE_BYTES) {
+      return res.status(507).json({
+        error: "DRIVE_QUOTA_LOW",
+        message: `公司雲端硬碟只剩 ${Math.round(quota.freeBytes / 1024 ** 3)} GB，已暫停上傳以免塞爆，請通知主管。`,
+      });
+    }
+    const uploadUrl = await createResumableSession({ name, parentId: folderId, mimeType, size, origin });
+    return res.json({ uploadUrl });
+  } catch (e: any) {
+    if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
+    if (e?.httpStatus) return sendUploadTargetError(res, e);
+    console.error("drive/editor-upload-session failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "開上傳通道失敗" });
   }
 });
 

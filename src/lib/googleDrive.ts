@@ -17,6 +17,7 @@
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
+const DRIVE_UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 
 /** 這個 app 建立的東西都打上這個記號，日後對帳／掃孤兒才認得出來 */
@@ -263,6 +264,41 @@ export async function getFile(fileId: string): Promise<DriveFileInfo> {
     webViewLink: f.webViewLink, md5Checksum: f.md5Checksum,
     parents: f.parents, appProperties: f.appProperties,
   };
+}
+
+/**
+ * 開一個「續傳上傳」通道，回傳上傳網址；瀏覽器拿這個網址直接把檔案分段 PUT 進公司雲端。2026-10-20 起。
+ *
+ * 為什麼不用 Google Picker 的上傳視窗：Picker 上傳時用的是**瀏覽器目前登入的 Google 帳號**，
+ * 剪輯師登入的是自己的帳號、沒有公司成片夾的權限 → Google 回「Server rejected」，
+ * 上線以來剪輯師一次都沒傳成功過（10/15 測試用的是登入公司帳號的瀏覽器才沒發現）。
+ *
+ * ⚠️ `origin` 一定要帶（瀏覽器那頁的網址來源）：開通道時有帶，Google 之後對瀏覽器的 PUT 才會回 CORS 標頭，
+ *    網頁才讀得到 308 進度與最後的檔案 id。9 月試直傳失敗（「送得出去、讀不回來」）就是少了這個。
+ *    2026-10-20 實測：帶 Origin 開通道 → 瀏覽器分兩段 PUT，308＋Range、最後 200＋id 都讀得到，擁有者是公司帳號。
+ * ⚠️ 上傳網址本身就是憑證（只能往這個資料夾傳這一個檔），不要記在 log 裡。
+ */
+export async function createResumableSession(opts: {
+  name: string; parentId: string; mimeType: string; size: number; origin: string;
+}): Promise<string> {
+  const token = await getAccessToken();
+  const res = await fetch(`${DRIVE_UPLOAD_API}/files?uploadType=resumable&supportsAllDrives=true&fields=id,name,size,parents`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json; charset=UTF-8',
+      'X-Upload-Content-Type': opts.mimeType || 'application/octet-stream',
+      'X-Upload-Content-Length': String(opts.size),
+      Origin: opts.origin,
+    },
+    body: JSON.stringify({ name: opts.name, parents: [opts.parentId] }),
+  });
+  const location = res.headers.get('location');
+  if (!res.ok || !location) {
+    const data: any = await res.json().catch(() => ({}));
+    throw new Error(`開上傳通道失敗（${data?.error?.errors?.[0]?.reason || res.status}）`);
+  }
+  return location;
 }
 
 export interface FolderFile {
