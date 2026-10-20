@@ -21,7 +21,6 @@ import EditingBrief from './EditingBrief';
 import {
   buildEditorQueue, customDeadline, deadlineStatus, deliveryDeadline, EditorQueueRow, formatDeadline, shootBaseDate,
 } from '../lib/editorQueue';
-import { rankByVendor } from '../lib/editOrder';
 import { isBillable } from '../lib/editorBilling';
 import { canUploadFinishedInApp, uploadFinishedFiles, requestClientCopy, fetchFinishedUploadVendors } from '../lib/finishedUpload';
 import {
@@ -409,11 +408,15 @@ function FoldDayRow({ row, vendorName }: {
   );
 }
 
-/** 「順序 N」：同事排的剪輯順序，樣式比照「同事指定」那排小標籤 */
-function EditRankBadge({ rank }: { rank: number }) {
+/**
+ * 整份清單由上到下的第幾支（只算有片可剪的列）。
+ * ⚠️ 以前印的是「順序 N」＝同一個 IP 內的剪輯順序，不同 IP 各有自己的順序 1，整份清單好幾個「1」，
+ *    剪輯師還是不知道整體的先後，藏鏡人得一直口頭講（使用者 10-20）。改成整份一個連續編號。
+ */
+function PositionBadge({ position }: { position: number }) {
   return (
-    <span className="inline-block lg:mt-1 px-1.5 py-0.5 rounded-md bg-[#5A5A40]/10 text-[#5A5A40] text-[12px] lg:text-[13px] font-bold whitespace-nowrap">
-      順序 {rank}
+    <span className="inline-flex items-center justify-center shrink-0 w-7 h-7 lg:w-8 lg:h-8 lg:mb-1 rounded-full bg-[#5A5A40] text-white text-[13px] lg:text-[15px] font-bold">
+      {position}
     </span>
   );
 }
@@ -424,13 +427,13 @@ function EditRankBadge({ rank }: { rank: number }) {
  * 三種樣子：有料要剪（帶素材卡）／還沒有片（只有一行字）／急件沒配到日期。
  * ⚠️ 用詞一律陳述事實（「10/06 要上」），不要祈使句。順序本身已經表達了先後。
  */
-function QueueRow({ row, vendorName, card, onOpenLibrary, editRank }: {
+function QueueRow({ row, vendorName, card, onOpenLibrary, position }: {
   key?: string;
   row: EditorQueueRow;
   vendorName: string;
   card: ReactNode;
-  /** 這支在它那個 IP 的剪輯順序（同事在「排剪輯順序」排的，見 rankByVendor） */
-  editRank?: number;
+  /** 整份清單的第幾支（有片可剪的列才有） */
+  position?: number;
   /**
    * 「沒片」那一列的出口。老闆：「可以引導她去素材庫」。
    * ⚠️ 只在那個 IP 的素材庫**真的有東西**時才傳進來 —— 點過去是空白頁等於又一條死路。
@@ -468,6 +471,7 @@ function QueueRow({ row, vendorName, card, onOpenLibrary, editRank }: {
             ⚠️ 2026-10-03 老闆：「10/15（四）前交片・同事指定」一整串 nowrap 塞進 160px 欄位，
                整段超出欄位壓到右邊卡片上。所以每一段各自一行，不再把整串鎖成一行。
             手機版仍是同一行「09/28（一）前交片 已超過 5 天」：小標只在 lg 顯示，「前交片」只在手機顯示。 */}
+        {position && <PositionBadge position={position} />}
         {row.urgent ? (
           <>
             <span className="inline-flex items-center gap-1 text-[13px] lg:text-[15px] font-bold text-orange-600 whitespace-nowrap">
@@ -501,12 +505,10 @@ function QueueRow({ row, vendorName, card, onOpenLibrary, editRank }: {
         )}
         {row.deadlineSource === 'custom' && (
           <span className="inline-block lg:mt-1 px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[12px] lg:text-[13px] font-bold whitespace-nowrap">
-            同事指定
+            {/* ⚠️ 原本寫「同事指定」，剪輯師看成「同事要剪」（使用者 10-20）。講的是這個日期是特別定的 */}
+            指定交片日
           </span>
         )}
-        {/* 清單照交片期限排、不同 IP 會交錯；同事指定交片日或排進積壓時日期也跟順序對不上。
-            直接印出同事排的第幾支，剪輯師不用從日期倒推。⚠️ 只陳述事實，不寫「先剪這支」。 */}
-        {row.kind === 'to_edit' && editRank && <EditRankBadge rank={editRank} />}
         {row.kind !== 'to_edit' && <span className="text-[13px] lg:text-[15px] text-gray-500">{vendorName}</span>}
       </div>
 
@@ -1001,9 +1003,6 @@ export default function EditorAssetQueue({
    *    剪完的片留在上面只會佔位置。它們改用底下那一行提示帶過去。
    */
   const queuePending = displayed.filter(a => bucketOf(a) === 'to_edit');
-  // 每支待剪片在它那個 IP 排第幾。⚠️ 只在這位剪輯師看得到的片裡排：同一個 IP 分給兩個人時各自從 1 起算
-  //（剪輯師讀不到別人的片，算不出全 IP 的序號）。
-  const editRank = rankByVendor(queuePending);
 
   /**
    * 排程驅動的清單：一列＝社群日曆上的一格（哪天哪個 IP 要上片）。
@@ -1038,6 +1037,10 @@ export default function EditorAssetQueue({
       deliveredAssets: displayed.filter(a => bucketOf(a) !== 'to_edit' && isAssetSelectable(a, postIndex)),
     });
   }, [vendors, posts, slotMoves, extraSlots, dismissedHabits, queuePending, displayed]);
+
+  // 整份清單有片可剪的列由上到下的編號（見 PositionBadge）。在完整的 rows 上算，「顯示更多」展開前後號碼不變。
+  const positionOf = new Map<string, number>();
+  queue.rows.forEach(r => { if (r.kind === 'to_edit') positionOf.set(r.key, positionOf.size + 1); });
 
   const toEdit = inBucket('to_edit');
   const toUpload = inBucket('to_upload');
@@ -1476,12 +1479,9 @@ export default function EditorAssetQueue({
                     const stuck = base ? differenceInCalendarDays(new Date(), base) : null;
                     return (
                       <div key={a.id} className="bg-white/70 rounded-2xl border border-black/5 overflow-hidden">
-                        {((stuck !== null && stuck > 0) || editRank.has(a.id!)) && (
-                          <div className="px-4 pt-3 flex items-center gap-2">
-                            {stuck !== null && stuck > 0 && (
-                              <span className="text-[13px] text-gray-500 whitespace-nowrap">拍回來 {stuck} 天</span>
-                            )}
-                            {editRank.has(a.id!) && <EditRankBadge rank={editRank.get(a.id!)!} />}
+                        {stuck !== null && stuck > 0 && (
+                          <div className="px-4 pt-3">
+                            <span className="text-[13px] text-gray-500 whitespace-nowrap">拍回來 {stuck} 天</span>
                           </div>
                         )}
                         <AssetCard {...cardProps(a)} compact onAdvance={() => advance(a)} />
@@ -1529,7 +1529,7 @@ export default function EditorAssetQueue({
             {activeView === 'queue'
               // ⚠️ 陳述句，不要祈使句。「從上面開始剪」等於系統在派工，
               //    而派工是同事在做的事（見 feedback_editor_facing_wording）。
-              ? '照交片期限排好，最近的在最上面；沒片的排在最後。'
+              ? '照交片期限排好，數字是剪的先後，最近的在最上面；沒片的排在最後。'
               : '手上全部的片。剪完按「交片送審」；審片通過後上傳並按「上傳雲端」，這支就完成了。'}
           </p>
         </div>
@@ -1589,7 +1589,7 @@ export default function EditorAssetQueue({
                   key={row.key}
                   row={row}
                   vendorName={vendorName(row.vendorId)}
-                  editRank={row.asset?.id ? editRank.get(row.asset.id) : undefined}
+                  position={positionOf.get(row.key)}
                   onOpenLibrary={
                     // 只有那個 IP 在「我的所有片」裡真的有東西才給連結
                     onOpenAllAssets && displayed.some(a => a.vendorId === row.vendorId)
