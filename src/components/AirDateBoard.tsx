@@ -15,7 +15,7 @@ import { compareRawEditOrder, rankByVendor } from '../lib/editOrder';
 import { isClosedOutsideSystem } from '../lib/assetFlow';
 import { isWaitingVideoPost } from '../lib/postMatch';
 import toast from 'react-hot-toast';
-import { CalendarDays, ChevronLeft, ChevronRight, Flame, Plus, X } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Flame, Link2, Plus, X } from 'lucide-react';
 import { addExtraSlot, removeExtraSlot } from '../lib/extraSlots';
 
 /**
@@ -243,8 +243,8 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
    * 一支片的方框。dashed＝系統遞補，還沒有人親手排。
    * ⚠️ 寫成函式不寫成元件：元件定義在 render 裡每次都是新型別，拖到一半重整會整顆重掛。
    */
-  const chip = (a: Asset, opts: { key?: string; dashed?: boolean; airDate?: Date } = {}) => {
-    const { dashed = false, airDate } = opts;
+  const chip = (a: Asset, opts: { key?: string; dashed?: boolean; airDate?: Date; placed?: 'post' | 'day' } = {}) => {
+    const { dashed = false, airDate, placed } = opts;
     const isStock = deliveredIds.has(a.id!);
     // 成片已經交了，沒有交片期限
     const deadline = airDate && !isStock ? deliveryDeadline(airDate) : null;
@@ -262,11 +262,19 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
         title={a.title}
         className={[
           'rounded-lg px-2 py-1 text-left cursor-grab active:cursor-grabbing select-none transition-shadow',
-          dashed ? 'border border-dashed border-[#5A5A40]/40 bg-white/70 text-gray-500' : 'border border-[#5A5A40]/20 bg-white shadow-sm text-gray-800',
+          // 三種一眼分得出來：同事排定的＝深色粗框＋底色＋「已綁」標籤；系統暫補＝虛線淡色；左邊待排＝白卡（使用者 10-20）
+          placed ? 'border-2 border-[#5A5A40] bg-[#5A5A40]/10 shadow-sm text-gray-900'
+            : dashed ? 'border border-dashed border-[#5A5A40]/40 bg-white/70 text-gray-500'
+              : 'border border-[#5A5A40]/20 bg-white shadow-sm text-gray-800',
           selected ? 'ring-2 ring-[#5A5A40]' : 'hover:shadow-md',
           busyId === a.id ? 'opacity-40' : '',
         ].join(' ')}
       >
+        {placed && (
+          <div className="flex items-center gap-0.5 text-[11px] font-bold text-[#5A5A40] whitespace-nowrap">
+            <Link2 size={11} className="shrink-0" />{placed === 'post' ? '已綁貼文' : '已排這天'}
+          </div>
+        )}
         <div className="flex items-center gap-1 min-w-0">
           {a.isUrgent && <Flame size={12} className="text-orange-600 shrink-0" />}
           <span className="text-[13px] font-bold truncate">{a.title}</span>
@@ -449,7 +457,7 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
                             <p title={p.title} className="text-[12px] text-blue-700 truncate px-0.5">
                               小編：{p.title}{!bound && auto?.kind === 'no_material' ? '・等片' : ''}
                             </p>
-                            {bound && chip(bound, { airDate: d })}
+                            {bound && chip(bound, { airDate: d, placed: 'post' })}
                             {!bound && auto?.kind === 'to_edit' && auto.asset && chip(auto.asset, { key: auto.key, airDate: d, dashed: true })}
                             {!bound && auto?.kind === 'has_stock' && auto.asset && chip(auto.asset, { key: auto.key, airDate: d, dashed: true })}
                           </div>
@@ -457,7 +465,7 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
                       })}
 
                       {/* 沒有小編貼文的日子：同事只排了日子的片＋預排的系統遞補 */}
-                      {loose.map(a => chip(a, { airDate: d }))}
+                      {loose.map(a => chip(a, { airDate: d, placed: 'day' }))}
                       {slotRows.map(r => r.asset && loose.some(a => a.id === r.asset!.id)
                         ? null // 同事排在這天的片上面已經列過
                         : (r.kind === 'to_edit' || r.kind === 'has_stock') && r.asset
