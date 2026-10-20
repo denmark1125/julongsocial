@@ -1,18 +1,18 @@
 import { useMemo, useState, type DragEvent } from 'react';
 import {
-  addDays, addMonths, differenceInCalendarDays, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameDay,
+  addMonths, differenceInCalendarDays, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameDay,
   isSameMonth, startOfDay, startOfMonth, startOfWeek,
 } from 'date-fns';
 import { deleteField, doc, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Asset, DismissedHabit, ExtraSlot, PlannedSlotMove, Post, Vendor, deriveFlowStage } from '../types';
+import { Asset, DismissedHabit, ExtraSlot, PlannedSlotMove, Post, Vendor } from '../types';
 import { useLiveCollection } from '../lib/liveData';
-import { buildPostIndex, isAssetSelectable, PostIndex, slotVendors, stockVisibleVendors } from '../lib/vendorStatus';
+import { buildCompanyQueue } from '../lib/companyQueue';
+import { slotVendors } from '../lib/vendorStatus';
 import { hasHabitOn, listPlannedSlots } from '../lib/plannedSlots';
-import { buildHorizonDemands, postDemandId, SUPPLY_HORIZON_DAYS } from '../lib/materialSupply';
-import { buildEditorQueue, deliveryDeadline, EDIT_LEAD_DAYS, EditorQueueRow } from '../lib/editorQueue';
+import { postDemandId } from '../lib/materialSupply';
+import { deliveryDeadline, EDIT_LEAD_DAYS, EditorQueueRow } from '../lib/editorQueue';
 import { compareRawEditOrder, rankByVendor } from '../lib/editOrder';
-import { isClosedOutsideSystem } from '../lib/assetFlow';
 import { isWaitingVideoPost } from '../lib/postMatch';
 import toast from 'react-hot-toast';
 import { CalendarDays, ChevronLeft, ChevronRight, Flame, Info, Link2, Plus, X } from 'lucide-react';
@@ -34,23 +34,6 @@ import { addExtraSlot, removeExtraSlot } from '../lib/extraSlots';
  *    把它拖到任何一天（包括原地）就變成人排的。
  * ⚠️ 手機沒有原生拖拉：點一下方框選起來，再點日子（或左邊待排區）放下，走同一個寫入。
  */
-
-/** 還在等人剪的片 */
-const isPending = (a: Asset) =>
-  a.type === 'video' && !a.voidedAt && a.status !== 'archived' && !isClosedOutsideSystem(a) &&
-  (deriveFlowStage(a) === 'to_edit' || deriveFlowStage(a) === 'revising');
-
-/**
- * 剪好交出去、還沒掛上貼文的片（它們先補最近的空格）。送審中、待上傳、可排程都算。
- * ⚠️ 「還沒掛上」一律走 isAssetSelectable，不要自己寫 !usedInPostId：掛的貼文被刪掉的片
- *    （孤兒）其實還沒用掉。也不要列舉階段漏掉「可排程」—— 10-20 稽核時杜永霖一支可排程的片就這樣消失。
- */
-const isDelivered = (a: Asset, postIndex: PostIndex) => {
-  if (a.type !== 'video' || a.status === 'archived' || isClosedOutsideSystem(a)) return false;
-  const stage = deriveFlowStage(a);
-  if (stage === 'to_edit' || stage === 'revising') return false;
-  return isAssetSelectable(a, postIndex);
-};
 
 const WEEKDAYS = '日一二三四五六';
 /*
@@ -84,30 +67,10 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
   const [hoverKey, setHoverKey] = useState<string | null>(null);
 
   const { ipVendors, pending, deliveredIds, demandsByCell, queueByKey, autoDateOf, rank } = useMemo(() => {
-    const now = new Date();
-    // 冷凍中的 IP 也要能排（冷凍凍的是發片不是剪片，見 stockVisibleVendors），只是它沒有固定發片日
-    const visible = stockVisibleVendors(vendors);
-    const visibleIds = new Set(visible.map(v => v.id));
-    const pendingAll = assets.filter(a => isPending(a) && visibleIds.has(a.vendorId));
-    const postIndex = buildPostIndex(posts);
-    const deliveredAll = assets.filter(a => isDelivered(a, postIndex) && visibleIds.has(a.vendorId));
-
-    // ⚠️ 配對視窗跟剪輯師畫面一樣固定 SUPPLY_HORIZON_DAYS，否則同一天在這裡跟剪輯師那邊會遞補到不同的片。
-    const slots = listPlannedSlots({
-      vendors: slotVendors(vendors),
-      moves: slotMoves,
-      dismissed: dismissedHabits,
-      extras: extraSlots,
-      posts,
-      rangeStart: now,
-      rangeEnd: addDays(now, SUPPLY_HORIZON_DAYS),
-      fulfilledWindowDays: 1,
-    });
-    const demands = buildHorizonDemands({ posts, slots, now }).filter(d => d.contentType === 'video');
-    const queue = buildEditorQueue({
-      demands,
-      pendingAssets: pendingAll,
-      deliveredAssets: deliveredAll,
+    // 冷凍中的 IP 也要能排（冷凍凍的是發片不是剪片，見 stockVisibleVendors），只是它沒有固定發片日。
+    // ⚠️ 配對跟剪輯師畫面同一套、同一個視窗，見 lib/companyQueue.ts
+    const { visible, pending: pendingAll, delivered: deliveredAll, demands, queue } = buildCompanyQueue({
+      vendors, assets, posts, moves: slotMoves, dismissed: dismissedHabits, extras: extraSlots,
     });
 
     const demandsByCell = new Set(demands.map(d => `${d.vendorId}|${format(d.date, 'yyyy-MM-dd')}`));

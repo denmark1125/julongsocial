@@ -27,6 +27,7 @@ import { isPickerConfigured } from '../lib/drivePicker';
 import { ASSET_CATEGORIES, ASSET_CATEGORY_DATALIST_ID } from '../lib/assetCategories';
 import { driveFolderIdFromUrl } from '../lib/driveNaming';
 import EditingBrief from './EditingBrief';
+import RawStatus from './RawStatus';
 import AttachFilesModal from './AttachFilesModal';
 import ClaimFoldersModal from './ClaimFoldersModal';
 import RawFootageUpload from './RawFootageUpload';
@@ -1188,6 +1189,10 @@ ${after}`)) return;
                 {/* 剪輯需求。刻意跟下面琥珀色的「審片備註」分開：
                     那是「為什麼還沒審」，這是「要怎麼剪」，兩件不同的事。 */}
                 <EditingBrief brief={asset.editingBrief} clipNotes={asset.clipNotes} />
+                {/* 素材夠不夠剪＋剪輯師回報（2026-10-20 漏片防護）。只在還要剪的片出現 */}
+                {asset.type === 'video' && !asset.voidedAt && ['to_edit', 'revising'].includes(deriveFlowStage(asset)) && (
+                  <RawStatus asset={asset} mode="internal" />
+                )}
                 {reviewNotes[asset.id!] && (
                   <button
                     type="button"

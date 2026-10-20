@@ -26,6 +26,7 @@ import { canUploadFinishedInApp, uploadFinishedFiles, requestClientCopy, fetchFi
 import {
   buildHorizonDemands, buildSupplyPlan, describeSupply, SUPPLY_HORIZON_DAYS,
 } from '../lib/materialSupply';
+import RawStatus from './RawStatus';
 import { listPlannedSlots } from '../lib/plannedSlots';
 import { buildPostIndex, isAssetSelectable, slotVendors, trackedVendors, visibleVendors as visibleVendorsOf } from '../lib/vendorStatus';
 import {
@@ -515,7 +516,7 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
 
 export function AssetCard({
   asset, vendorName, posts, busy, onAdvance, onUpload, onUploadFiles, onUndoSubmit, onUndoUpload, showClientBadge,
-  selected, onToggleSelect, compact, stacked, hideUrgentBadge,
+  selected, onToggleSelect, compact, stacked, hideUrgentBadge, reporterName,
 }: {
   // 這個專案沒有安裝 @types/react，JSX.IntrinsicAttributes 不存在，
   // 所以 key 要自己宣告成 prop，否則 tsc 會當成多餘屬性報錯。
@@ -547,6 +548,8 @@ export function AssetCard({
   stacked?: boolean;
   /** 排程清單那一列左邊已經寫了「急件」，卡片上就不再重複一個紅色標籤 */
   hideUrgentBadge?: boolean;
+  /** 剪輯師回報素材問題時記的名字（見 RawStatus） */
+  reporterName?: string;
 }) {
   const due = getFlowDueInfo(asset, posts);
   /** 電腦版精簡卡排成「資訊在左、按鈕在右」一橫列 */
@@ -618,6 +621,11 @@ export function AssetCard({
             <ExternalLink size={12} />
             {asset.driveFolderId ? '開啟毛片資料夾' : '開啟素材連結'}
           </a>
+        )}
+
+        {/* 素材夠不夠剪＋「素材有問題？」回報。只在還要剪的時候出現（2026-10-20 漏片防護） */}
+        {(flowStage === 'to_edit' || flowStage === 'revising') && (
+          <RawStatus asset={asset} mode="editor" myName={reporterName} large={compact} />
         )}
 
         {/* 每個標籤都 nowrap：中文沒有詞界，不鎖的話手機上會在「停留 12 天」中間斷成兩行留孤字。
@@ -1293,6 +1301,7 @@ export default function EditorAssetQueue({
     vendorName: vendorName(a.vendorId),
     posts,
     busy: busyId === a.id,
+    reporterName: userProfile?.displayName || userProfile?.username,
   });
 
   // ── 隊伍頁的收合區。電腦版跟手機版擺的位置不同（見下方兩欄版面），

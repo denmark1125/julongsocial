@@ -265,6 +265,47 @@ export async function getFile(fileId: string): Promise<DriveFileInfo> {
   };
 }
 
+export interface FolderFile {
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  /** 影片長度（秒）。Drive 剛收到檔案時還在處理，可能暫時沒有 */
+  durationSec?: number;
+}
+
+/**
+ * 列出資料夾裡的檔案（不含子資料夾內容），給「素材夠不夠剪」用。2026-10-20 起。
+ *
+ * ⚠️ drive.file 只看得到這個 app 建的檔案：系統上傳的資料夾列得到，**藏鏡人自己放、再認領的資料夾列出來是空的**
+ *    （又生兩支實測）。認領的要傳 full: true 用全範圍 token；沒設那把就回 null＝看不到，不要當成「沒有素材」。
+ */
+export async function listFolderFiles(folderId: string, opts: { full?: boolean } = {}): Promise<FolderFile[] | null> {
+  let token: string | undefined;
+  if (opts.full) {
+    if (!isFullDriveConfigured()) return null;
+    token = await getFullAccessToken();
+  }
+  const files: FolderFile[] = [];
+  let pageToken = '';
+  do {
+    const query = new URLSearchParams({
+      q: `'${folderId.replace(/'/g, "\\'")}' in parents and trashed=false`,
+      fields: 'nextPageToken,files(name,mimeType,size,videoMediaMetadata(durationMillis))',
+      pageSize: '200',
+      supportsAllDrives: 'true',
+      includeItemsFromAllDrives: 'true',
+    });
+    if (pageToken) query.set('pageToken', pageToken);
+    const data = await driveFetch(`/files?${query.toString()}`, {}, token);
+    for (const f of data.files || []) {
+      const ms = Number(f.videoMediaMetadata?.durationMillis);
+      files.push({ name: f.name, mimeType: f.mimeType, sizeBytes: Number(f.size || 0), durationSec: ms > 0 ? Math.round(ms / 1000) : undefined });
+    }
+    pageToken = data.nextPageToken || '';
+  } while (pageToken);
+  return files;
+}
+
 /**
  * 把成片**真的複製一份**到另一個資料夾（業主通過後送進客戶資料夾用）。
  *

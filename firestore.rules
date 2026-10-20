@@ -112,7 +112,9 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys()
         .hasOnly(['stage', 'url', 'approved', 'submittedBy', 'submittedAt',
                   'flowStage', 'flowSince', 'flowLog', 'cloudUploadedAt',
-                  'durationTier', 'editorFee', 'billableEditorId', 'editorInvoiceId']);
+                  'durationTier', 'editorFee', 'billableEditorId', 'editorInvoiceId',
+                  // 剪輯師回報素材問題（2026-10-20）。resolvedAt 另外擋，見 editorReportUntouchedResolution
+                  'editorReport']);
     }
 
     // 這位使用者代表哪一位剪輯師標籤。請款單的擁有權判斷全部靠這個。
@@ -246,6 +248,26 @@ service cloud.firestore {
              (!('scheduledAt' in data) || data.scheduledAt == null || data.scheduledAt is string);
     }
 
+    // 剪輯師回報：原因只能是四種之一、備註最多 500 字。
+    function isValidEditorReport(r) {
+      return r is map &&
+             r.keys().hasAll(['reason', 'at']) &&
+             r.keys().hasOnly(['reason', 'note', 'at', 'byName', 'resolvedAt']) &&
+             r.reason in ['missing', 'broken', 'unclear', 'other'] &&
+             r.at is string &&
+             (!('note' in r) || isValidString(r.note, 500)) &&
+             (!('byName' in r) || r.byName is string) &&
+             (!('resolvedAt' in r) || r.resolvedAt is string);
+    }
+
+    // 剪輯師只能回報、改回報、撤回；「已處理」(resolvedAt) 是內部人員的事，剪輯師不能自己標。
+    function editorReportUntouchedResolution() {
+      return !('editorReport' in request.resource.data)
+        || !('resolvedAt' in request.resource.data.editorReport)
+        || ('editorReport' in resource.data
+            && request.resource.data.editorReport.get('resolvedAt', '') == resource.data.editorReport.get('resolvedAt', ''));
+    }
+
     function isValidAsset(data) {
       // ⚠️ stage 刻意不放進 hasAll：2026-08-12 查出全庫有 28 支舊素材根本沒有這個欄位，
       // 而 hasAll 是「整份文件」的檢查，缺一欄就等於那支素材**任何更新都被拒絕**——
@@ -296,6 +318,9 @@ service cloud.firestore {
              // 所以「先剪哪一支」的順序只有公司這邊決定得了。
              (!('plannedAirDate' in data) || data.plannedAirDate is string) &&
              (!('plannedPostId' in data) || data.plannedPostId is string) &&
+             // 素材夠不夠剪（後端建檔時寫）、剪輯師回報素材問題。2026-10-20 起，見 src/lib/rawCheck.ts。
+             (!('rawCheck' in data) || data.rawCheck is map) &&
+             (!('editorReport' in data) || isValidEditorReport(data.editorReport)) &&
              // 剪輯順序：batchIndex＝上片時這一批裡的第幾支（後端寫）；editOrder＝同事事後排的位置。
              // 兩個都不在 isEditorAssetUpdate 白名單＝剪輯師改不了先剪哪一支。
              (!('batchIndex' in data) || data.batchIndex is int) &&
@@ -491,7 +516,8 @@ service cloud.firestore {
           !isEditorRole() || (
             editorCanAccessAsset(resource.data) &&
             editorCanAccessAsset(request.resource.data) &&
-            isEditorAssetUpdate()
+            isEditorAssetUpdate() &&
+            editorReportUntouchedResolution()
           )
         );
       // 刪除保護：剪輯師已標記上傳雲端（＝已可請款）或已納入請款單的片一律不可刪。

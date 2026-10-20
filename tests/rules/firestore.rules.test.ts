@@ -6,7 +6,7 @@ import {
   initializeTestEnvironment,
   RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, deleteField } from 'firebase/firestore';
 
 // firestore.rules 的行為測試，跑在 Firestore 模擬器上（npm run test:rules）。
 // 專案 id 用 demo- 開頭＝模擬器保證不會連到任何真的 Firebase 專案。
@@ -227,5 +227,33 @@ describe('毛片綁小編貼文 plannedPostId（2026-10-20）', () => {
   it('員工可以寫字串，寫成非字串就擋', async () => {
     await assertSucceeds(updateDoc(doc(as('staff'), 'assets', 'a1'), { plannedPostId: 'p1' }));
     await assertFails(updateDoc(doc(as('staff'), 'assets', 'a1'), { plannedPostId: 123 }));
+  });
+});
+
+describe('剪輯師回報素材問題 editorReport（2026-10-20）', () => {
+  const report = (extra: Record<string, unknown> = {}) => ({ reason: 'missing', at: NOW, byName: '謝謝', ...extra });
+
+  it('剪輯師可以回報自己的片、可以撤回；別家的片不行', async () => {
+    await assertSucceeds(updateDoc(doc(as('ed'), 'assets', 'a1'), { editorReport: report({ note: '只有一支 5 秒' }) }));
+    await assertFails(updateDoc(doc(as('ed'), 'assets', 'a2'), { editorReport: report() }));
+    await assertSucceeds(updateDoc(doc(as('ed'), 'assets', 'a1'), { editorReport: deleteField() }));
+  });
+
+  it('剪輯師不能自己標「已處理」，員工可以（同一個欄位）', async () => {
+    await assertSucceeds(updateDoc(doc(as('ed'), 'assets', 'a1'), { editorReport: report() }));
+    await assertFails(updateDoc(doc(as('ed'), 'assets', 'a1'), { editorReport: report({ resolvedAt: NOW }) }));
+    await assertSucceeds(updateDoc(doc(as('staff'), 'assets', 'a1'), { editorReport: report({ resolvedAt: NOW }) }));
+  });
+
+  it('原因不在四種裡、備註太長、多帶欄位都擋（格式對的同一筆可以）', async () => {
+    await assertFails(updateDoc(doc(as('ed'), 'assets', 'a1'), { editorReport: report({ reason: 'lazy' }) }));
+    await assertFails(updateDoc(doc(as('ed'), 'assets', 'a1'), { editorReport: report({ note: 'x'.repeat(501) }) }));
+    await assertFails(updateDoc(doc(as('ed'), 'assets', 'a1'), { editorReport: report({ editorFee: 1 }) }));
+    await assertSucceeds(updateDoc(doc(as('ed'), 'assets', 'a1'), { editorReport: report() }));
+  });
+
+  it('剪輯師仍然不能改 rawCheck（後端寫的）', async () => {
+    await assertFails(updateDoc(doc(as('ed'), 'assets', 'a1'), { rawCheck: { videoCount: 9, fileCount: 9, checkedAt: NOW } }));
+    await assertSucceeds(updateDoc(doc(as('staff'), 'assets', 'a1'), { rawCheck: { videoCount: 9, fileCount: 9, checkedAt: NOW } }));
   });
 });

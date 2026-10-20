@@ -638,6 +638,16 @@ export interface Asset {
    */
   plannedPostId?: string;
   /**
+   * 素材夠不夠剪：建檔時後端讀資料夾算出來的。2026-10-20 起。見 lib/rawCheck.ts。
+   * `unreadable`＝系統看不到這個資料夾的內容（認領的資料夾、又沒有全範圍 token），不是「沒有素材」。
+   */
+  rawCheck?: RawCheck;
+  /**
+   * 剪輯師回報這支素材有問題（缺素材／檔案打不開／不清楚要剪什麼／其他）。2026-10-20 起。
+   * 剪輯師可以寫（規則白名單），但 resolvedAt 只有內部人員能寫＝內部處理完了。
+   */
+  editorReport?: EditorReport;
+  /**
    * 上片／歸片時這支在這一批裡的位置（0 起算）。一批片共用同一個 createdAt，
    * 同一批誰先剪靠它。server 建檔時寫入。見 lib/editOrder.ts。
    */
@@ -800,6 +810,33 @@ export interface ExtraSlot {
   contentType: string; // 'video'
   createdBy?: string;
   createdAt: string;
+}
+
+export interface RawCheck {
+  videoCount: number;
+  fileCount: number;
+  /** 影片總長（秒）。有任何一支還沒算出長度就不填，避免把「還在處理」當成「太短」 */
+  totalSec?: number;
+  checkedAt: string;
+  unreadable?: boolean;
+}
+
+export type EditorReportReason = 'missing' | 'broken' | 'unclear' | 'other';
+
+export const EDITOR_REPORT_REASON_LABEL: Record<EditorReportReason, string> = {
+  missing: '缺素材',
+  broken: '檔案打不開',
+  unclear: '不清楚要剪什麼',
+  other: '其他',
+};
+
+export interface EditorReport {
+  reason: EditorReportReason;
+  note?: string;
+  at: string;
+  byName?: string;
+  /** 內部處理完的時間。有值＝不再算「需要處理」 */
+  resolvedAt?: string;
 }
 
 export type BookingStatus = 'booked' | 'completed' | 'postponed' | 'cancelled';

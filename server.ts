@@ -15,7 +15,8 @@ import { fileURLToPath } from "url";
 import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVideoTrackingScope, getDeficitBreakdown } from "./src/lib/vendorStatus.js";
 // 交棒狀態的判定要跟前端同一份，不然推播說的「目前狀態」會跟畫面上不一致
 import { deriveFlowStage, FLOW_STAGE_LABEL } from "./src/types.js";
-import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFolderName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, renameFile, copyFile, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
+import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFolderName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, renameFile, copyFile, listFolderFiles, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
+import { summarizeFolder } from "./src/lib/rawFolder.js";
 import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
 
 dotenv.config();
@@ -131,6 +132,26 @@ function sendAuthError(res: any, e: any) {
  *    不符合就不綁（素材照樣建），回傳原因讓畫面講清楚，片會留在「還沒排上片日」等同事排。
  * `claimed`：同一次請求裡已經綁走的貼文，避免一張表單兩支綁同一篇。
  */
+/**
+ * 素材夠不夠剪：讀資料夾裡的檔案算 rawCheck（幾支影片、總長）。2026-10-20 起，見 src/lib/rawCheck.ts。
+ *
+ * ⚠️ drive.file 只看得到系統自己建的檔案：認領的資料夾用它列會是空的（不是真的空）。
+ *    所以先用一般 token，列不到東西再用全範圍 token；兩把都看不到時，認領的標 unreadable（不當成異常）。
+ * ⚠️ 失敗不能擋建檔：檢查只是附加資訊，Drive 一時出錯就略過，之後可以從素材資料庫「重新檢查」。
+ */
+async function checkRawFolder(folderId: string, claimed: boolean) {
+  try {
+    const own = await listFolderFiles(folderId);
+    if (own && own.length) return summarizeFolder(own);
+    const full = await listFolderFiles(folderId, { full: true });
+    if (full) return summarizeFolder(full);
+    return summarizeFolder(claimed ? null : own);
+  } catch (e: any) {
+    console.warn("checkRawFolder failed:", folderId, e?.message);
+    return null;
+  }
+}
+
 async function resolvePlannedPost(
   vendorId: string, postId: unknown, claimed: Set<string>
 ): Promise<{ fields: Record<string, string>; warning?: string }> {
@@ -723,6 +744,10 @@ app.post("/api/drive/commit-groups", async (req, res) => {
           });
         }
 
+        // 素材夠不夠剪（剪輯師卡片與內部「需要處理」用）
+        const rawCheck = await checkRawFolder(groupFolderId, false);
+        if (rawCheck) await assetRef.update({ rawCheck });
+
         // 拍攝預約核銷：跟畫面上人工建檔的行為一致，一支素材算一次交件
         await autoResolveShootBooking(vendorId);
 
@@ -841,6 +866,10 @@ app.post("/api/drive/claim-folders", async (req, res) => {
           createdAt: now, createdByUid: me.uid,
         }, { merge: true });
 
+        // 素材夠不夠剪。認領的資料夾 drive.file 看不到內容，見 checkRawFolder
+        const rawCheck = await checkRawFolder(folderId, true);
+        if (rawCheck) await assetRef.update({ rawCheck });
+
         created.push({ assetId: assetRef.id, name: info.name, folderUrl: info.webViewLink || '', postWarning: planned.warning || null });
       } catch (err: any) {
         failed.push({ name: f?.name || folderId, reason: err?.message || "這個資料夾處理失敗" });
@@ -856,6 +885,30 @@ app.post("/api/drive/claim-folders", async (req, res) => {
     if (e?.httpStatus) return sendAuthError(res, e);
     console.error("drive/claim-folders failed:", e?.message);
     return res.status(502).json({ error: e?.message || "認領失敗" });
+  }
+});
+
+/**
+ * 重新檢查素材資料夾（同事後來才把檔案補進去、或建檔當下 Drive 還在處理影片長度）。內部人員用。
+ */
+app.post("/api/assets/:id/recheck-raw", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    const me = await requireUser(req);
+    if (me.role === 'editor') return res.status(403).json({ error: "剪輯師無法使用" });
+    const ref = adminDb.collection("assets").doc(String(req.params.id));
+    const snap = await ref.get();
+    const folderId = snap.data()?.driveFolderId;
+    if (!snap.exists || !folderId) return res.status(404).json({ error: "這支素材沒有雲端資料夾" });
+    const claimed = (await adminDb.collection("driveFolders").doc(`claim_${folderId}`).get()).exists;
+    const rawCheck = await checkRawFolder(folderId, claimed);
+    if (!rawCheck) return res.status(502).json({ error: "雲端硬碟暫時讀不到，稍後再試" });
+    await ref.update({ rawCheck });
+    return res.json({ rawCheck });
+  } catch (e: any) {
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("assets/recheck-raw failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "檢查失敗" });
   }
 });
 

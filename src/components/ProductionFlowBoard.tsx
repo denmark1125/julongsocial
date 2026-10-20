@@ -1,11 +1,15 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { collection, doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { requestClientCopy } from '../lib/finishedUpload';
 import {
   Asset,
   AssetFlowStage,
+  DismissedHabit,
+  EDITOR_REPORT_REASON_LABEL,
   Editor,
+  ExtraSlot,
+  PlannedSlotMove,
   Post,
   UserProfile,
   Vendor,
@@ -19,7 +23,10 @@ import AirDateBoard from './AirDateBoard';
 import EditOrderModal from './EditOrderModal';
 import { buildFlowUpdate, getClientApprovalTarget, getFlowDaysStuck, getFlowDueInfo, isClosedOutsideSystem, isFlowStale, isMarkedDoneManually, sortFlowColumn } from '../lib/assetFlow';
 import { getAssetEditorOwner } from '../lib/editorBilling';
-import { Scissors, UserCheck, PenLine, Clock, Flame, CalendarClock, ThumbsUp, CalendarDays, ListOrdered } from 'lucide-react';
+import { Scissors, UserCheck, PenLine, Clock, Flame, CalendarClock, ThumbsUp, CalendarDays, ListOrdered, AlertTriangle } from 'lucide-react';
+import { buildCompanyQueue, datesOf } from '../lib/companyQueue';
+import { findSkippedAssets, rawCheckIssue } from '../lib/rawCheck';
+import RawStatus from './RawStatus';
 import { format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -68,6 +75,34 @@ export default function ProductionFlowBoard({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [isPlanning, setIsPlanning] = useState(false);
   const [isOrdering, setIsOrdering] = useState(false);
+  const [showNeeds, setShowNeeds] = useState(false);
+  const dismissedHabits = useLiveCollection<DismissedHabit>('dismissedHabits');
+  const slotMoves = useLiveCollection<PlannedSlotMove>('plannedSlotMoves');
+  const extraSlots = useLiveCollection<ExtraSlot>('extraSlots');
+
+  /**
+   * 需要內部處理的待剪片（2026-10-20 漏片防護，見 lib/rawCheck.ts）：
+   * 素材異常（自動檢查）／剪輯師回報（還沒處理）／疑似跳過（期限過了、剪輯師之後還交了別支）。
+   * ⚠️ 疑似跳過只在這裡出現，剪輯師那邊看不到。
+   */
+  const { needs, skippedIds } = useMemo(() => {
+    const { pending, queue } = buildCompanyQueue({
+      vendors, assets, posts, moves: slotMoves, dismissed: dismissedHabits, extras: extraSlots,
+    });
+    const { airDates, deadlines } = datesOf(queue);
+    const skippedIds = findSkippedAssets(pending, airDates, deadlines, assets, vendors, posts);
+    const needs = pending.flatMap(a => {
+      const reasons: string[] = [];
+      const issue = rawCheckIssue(a.rawCheck);
+      if (issue) reasons.push(`素材異常：${issue}`);
+      if (a.editorReport && !a.editorReport.resolvedAt) {
+        reasons.push(`剪輯師回報：${EDITOR_REPORT_REASON_LABEL[a.editorReport.reason]}${a.editorReport.note ? `－${a.editorReport.note}` : ''}`);
+      }
+      if (skippedIds.has(a.id!)) reasons.push('疑似跳過：交片期限過了，剪輯師之後先交了比它晚上片的片');
+      return reasons.length ? [{ asset: a, reasons }] : [];
+    });
+    return { needs, skippedIds };
+  }, [vendors, assets, posts, slotMoves, dismissedHabits, extraSlots]);
 
   const vendorMap = new Map(vendors.map(v => [v.id, v]));
 
@@ -171,6 +206,19 @@ export default function ProductionFlowBoard({
           >
             <ListOrdered size={16} /> 排剪輯順序
           </button>
+        {needs.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowNeeds(v => !v)}
+            className="bg-white px-4 py-2 rounded-2xl border border-amber-300 shadow-sm flex items-center gap-3 text-left hover:bg-amber-50/50"
+          >
+            <div className="bg-amber-50 p-2 rounded-lg text-amber-700"><AlertTriangle size={16} /></div>
+            <div>
+              <p className="text-[13px] font-bold text-gray-400 uppercase tracking-wider">需要處理</p>
+              <p className="text-lg font-bold leading-none">{needs.length} <span className="text-xs font-normal text-gray-400">支</span></p>
+            </div>
+          </button>
+        )}
         {stuckCount > 0 && (
           <div className="bg-white px-4 py-2 rounded-2xl border border-red-200 shadow-sm flex items-center gap-3">
             <div className="bg-red-50 p-2 rounded-lg text-red-600"><Clock size={16} /></div>
@@ -182,6 +230,24 @@ export default function ProductionFlowBoard({
         )}
         </div>
       </div>
+
+      {/* 需要處理清單：素材異常／剪輯師回報／疑似跳過 */}
+      {showNeeds && needs.length > 0 && (
+        <div className="bg-white rounded-3xl border border-amber-200 shadow-sm divide-y divide-black/5">
+          {needs.map(({ asset: a, reasons }) => (
+            <div key={a.id} className="px-4 py-3 flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-4">
+              <div className="sm:w-72 shrink-0 min-w-0">
+                <p className="text-[13px] font-bold text-[#5A5A40]">{vendorMap.get(a.vendorId)?.name || '未知IP'}・{editorName(ownerKey(a))}</p>
+                <p className="text-sm text-gray-800 truncate" title={a.title}>{a.title}</p>
+              </div>
+              <div className="flex-1 min-w-0 space-y-0.5">
+                {reasons.map(r => <p key={r} className="text-[13px] text-amber-800">{r}</p>)}
+                <RawStatus asset={a} mode="internal" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* 依 IP 或依剪輯師篩選：過去的排序清單是一份全公司共用的順序，
           回答不了「這是哪個剪輯師的工作量」 */}
@@ -276,6 +342,8 @@ export default function ProductionFlowBoard({
                         </div>
 
                         <p className="text-[13px] text-gray-600 leading-snug break-words">{a.title}</p>
+                        {skippedIds.has(a.id!) && <p className="text-[12px] font-bold text-red-600">疑似跳過</p>}
+                        {col.stage === 'to_edit' && <RawStatus asset={a} mode="internal" />}
 
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="inline-flex items-center gap-1 text-[9.5px] text-gray-400">
