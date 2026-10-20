@@ -15,7 +15,7 @@ import { deliveryDeadline, EDIT_LEAD_DAYS, EditorQueueRow } from '../lib/editorQ
 import { compareRawEditOrder, rankByVendor } from '../lib/editOrder';
 import { isWaitingVideoPost } from '../lib/postMatch';
 import toast from 'react-hot-toast';
-import { CalendarDays, ChevronLeft, ChevronRight, Flame, Info, Link2, Plus, X } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Flame, Info, Lock, Plus, Unlock, X } from 'lucide-react';
 import { addExtraSlot, removeExtraSlot } from '../lib/extraSlots';
 
 /**
@@ -65,6 +65,12 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
   const [busyId, setBusyId] = useState<string | null>(null);
   /** 拖曳經過的那一格／那篇貼文，給個底色讓人知道會放在哪 */
   const [hoverKey, setHoverKey] = useState<string | null>(null);
+  /**
+   * 已經排好的片預設鎖住，拖不動（使用者 10-20：排好的片一碰就跑掉）。要換先按「解鎖」→ 確認，才拖得動。
+   * 只存在這個畫面：重新整理或放到新位置後就又鎖回去。
+   */
+  const [unlockedIds, setUnlockedIds] = useState<Set<string>>(new Set());
+  const [confirmUnlockId, setConfirmUnlockId] = useState<string | null>(null);
 
   const { ipVendors, pending, deliveredIds, demandsByCell, queueByKey, autoDateOf, rank } = useMemo(() => {
     // 冷凍中的 IP 也要能排（冷凍凍的是發片不是剪片，見 stockVisibleVendors），只是它沒有固定發片日。
@@ -106,6 +112,9 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
     return p ? postDay(p) : (a.plannedAirDate || null);
   };
 
+  /** 同事排好的片（綁了貼文或排了日子）預設鎖住，見 unlockedIds */
+  const isLocked = (a: Asset) => !!(boundPost(a) || a.plannedAirDate) && !unlockedIds.has(a.id!);
+
   const unplacedCount = (vid: string) => pending.filter(a => a.vendorId === vid && !placedDay(a)).length;
   // 預設停在第一個還有片沒排的 IP
   const vendorId = vendorPick ?? (ipVendors.find(v => unplacedCount(v.id!) > 0) ?? ipVendors[0])?.id ?? null;
@@ -113,8 +122,6 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
 
   const today = startOfDay(new Date());
   const gridDays = eachDayOfInterval({ start: startOfWeek(monthCursor), end: endOfWeek(endOfMonth(monthCursor)) });
-  /** 整週都已經過去的那幾列：格子壓矮 */
-  const pastWeek = (d: Date) => endOfWeek(d) < today;
   const mine = pending.filter(a => a.vendorId === vendorId);
   // 成片排最上面（現在就能上），毛片照剪輯順序
   const unplaced = mine.filter(a => !placedDay(a))
@@ -165,6 +172,10 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
     const nextDay = target ? format(target.date, 'yyyy-MM-dd') : null;
     const nextPost = target?.postId ?? null;
     if ((a.plannedPostId || null) === nextPost && (a.plannedAirDate || null) === nextDay) return;
+    if (isLocked(a)) { toast.error(`「${a.title}」已經排好了，要換先按「解鎖」`); return; }
+    // 那篇貼文已經綁了別支、而且那支還鎖著：不能直接擠掉
+    const holder = nextPost ? pending.find(x => x.id !== assetId && x.plannedPostId === nextPost) : undefined;
+    if (holder && isLocked(holder)) { toast.error(`那篇已經排了「${holder.title}」，要換先把它解鎖`); return; }
 
     setBusyId(assetId);
     try {
@@ -177,6 +188,8 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
       if (bumped) batch.update(doc(db, 'assets', bumped.id!), { plannedAirDate: deleteField(), plannedPostId: deleteField() });
       await batch.commit();
       if (bumped) toast(`「${bumped.title}」退回左邊（一篇貼文只配一支片）`);
+      // 放到新位置就鎖回去
+      setUnlockedIds(prev => { const next = new Set(prev); next.delete(assetId); return next; });
     } catch (error) {
       console.error('排上片日失敗:', error);
       toast.error('沒有存到，請再試一次');
@@ -219,16 +232,18 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
     const selected = selectedId === a.id;
     // 左邊待排區的片如果已經被系統補在某一天，直接講出來 —— 不然同一支在兩邊各出現一次，看起來像重複
     const autoAt = !airDate ? autoDateOf.get(a.id!) : undefined;
+    const locked = !!placed && isLocked(a);
     return (
       <div
         key={opts.key ?? a.id}
-        draggable={busyId !== a.id}
+        draggable={busyId !== a.id && !locked}
         onDragStart={e => onDragStart(e, a.id!)}
         onDragEnd={() => setHoverKey(null)}
-        onClick={e => { e.stopPropagation(); setSelectedId(selected ? null : a.id!); }}
+        onClick={e => { e.stopPropagation(); if (!locked) setSelectedId(selected ? null : a.id!); }}
         title={a.title}
         className={[
-          'rounded-lg px-2 py-1 text-left cursor-grab active:cursor-grabbing select-none transition-shadow',
+          'rounded-lg px-2 py-1 text-left select-none transition-shadow',
+          locked ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
           // 三種一眼分得出來：同事排定的＝深色粗框＋底色＋「已綁」標籤；系統暫補＝虛線淡色；左邊待排＝白卡（使用者 10-20）
           placed ? 'border-2 border-[#5A5A40] bg-[#5A5A40]/10 shadow-sm text-gray-900'
             : dashed ? 'border border-dashed border-[#5A5A40]/40 bg-white/70 text-gray-500'
@@ -239,9 +254,25 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
       >
         {placed && (
           <div className="flex items-center gap-0.5 text-[11px] font-bold text-[#5A5A40] whitespace-nowrap">
-            <Link2 size={11} className="shrink-0" />{placed === 'post' ? '已綁貼文' : '已排這天'}
+            {locked ? <Lock size={11} className="shrink-0" /> : <Unlock size={11} className="shrink-0" />}
+            {placed === 'post' ? '已綁貼文' : '已排這天'}
+            {confirmUnlockId === a.id ? (
+              <span className="ml-auto flex items-center gap-1">
+                <button type="button" onClick={e => { e.stopPropagation(); setUnlockedIds(prev => new Set(prev).add(a.id!)); setConfirmUnlockId(null); }} className="px-1.5 rounded bg-[#5A5A40] text-white">解鎖</button>
+                <button type="button" onClick={e => { e.stopPropagation(); setConfirmUnlockId(null); }} className="px-1 rounded text-gray-500 hover:bg-black/5">取消</button>
+              </span>
+            ) : locked ? (
+              <button type="button" onClick={e => { e.stopPropagation(); setConfirmUnlockId(a.id!); }} className="ml-auto font-normal text-gray-500 underline underline-offset-2 hover:text-[#5A5A40]">
+                解鎖
+              </button>
+            ) : (
+              <button type="button" onClick={e => { e.stopPropagation(); setUnlockedIds(prev => { const n = new Set(prev); n.delete(a.id!); return n; }); }} className="ml-auto font-normal text-gray-500 underline underline-offset-2 hover:text-[#5A5A40]">
+                鎖回
+              </button>
+            )}
           </div>
         )}
+        {confirmUnlockId === a.id && <p className="text-[11px] text-gray-500 whitespace-normal">解鎖後可以拖到別天或拖回左邊</p>}
         <div className="flex items-center gap-1 min-w-0">
           {a.isUrgent && <Flame size={12} className="text-orange-600 shrink-0" />}
           <span className="text-[13px] font-bold truncate">{a.title}</span>
@@ -359,13 +390,8 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                   <div key={w} className="py-2 text-center text-[13px] font-bold text-gray-500">{w}</div>
                 ))}
               </div>
-              <div className="grid grid-cols-7 flex-1 lg:min-h-0 lg:overflow-y-auto"
-                style={{
-                  // 過去的整週固定矮、不分剩下的高度；剩下的高度全給本週以後（不然 grid 會平均撐高每一列，過去那幾週又變高）
-                  gridTemplateRows: Array.from({ length: gridDays.length / 7 }, (_, w) =>
-                    pastWeek(gridDays[w * 7]) ? 'auto' : 'minmax(104px, 1fr)').join(' '),
-                }}
-              >
+              {/* 每週一樣高（使用者 10-20：過去的週壓矮很醜，要統一） */}
+              <div className="grid grid-cols-7 auto-rows-[minmax(104px,1fr)] flex-1 lg:min-h-0 lg:overflow-y-auto">
                 {gridDays.map(d => {
                   const dateStr = format(d, 'yyyy-MM-dd');
                   const past = d < today;
@@ -386,7 +412,6 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                       onClick={() => { if (selectedId && !past) placeOnDay(selectedId, d); }}
                       className={[
                         'group/day border-r border-b border-black/5 p-1.5 min-w-0 space-y-1 transition-colors',
-                        pastWeek(d) ? 'min-h-[30px] !py-0.5' : 'min-h-[104px]',
                         isSameMonth(d, monthCursor) ? '' : 'bg-gray-50/50',
                         past ? 'bg-gray-50/80 opacity-50' : isSlotDay ? 'bg-orange-50/60' : '',
                         hoverKey === dateStr ? '!bg-[#5A5A40]/10' : '',
@@ -421,7 +446,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
 
                       {/* 小編排好的貼文：已掛片的只列標題；還在等片的可以把毛片拖上去綁定。
                           ⚠️ 已經過去的整週只留日期：那幾週的「已排」標籤把本週擠到畫面下面（使用者 10-20 兩次說月曆太低） */}
-                      {!pastWeek(d) && dayPosts.map(p => {
+                      {dayPosts.map(p => {
                         if (!isWaitingVideoPost(p, new Date(0))) {
                           return <p key={p.id} title={p.title} className="text-[12px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 truncate">已排：{p.title}</p>;
                         }
@@ -450,7 +475,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
 
                       {/* 沒有小編貼文的日子：同事只排了日子的片＋預排的系統遞補 */}
                       {loose.map(a => chip(a, { airDate: d, placed: 'day' }))}
-                      {!pastWeek(d) && slotRows.map(r => r.asset && loose.some(a => a.id === r.asset!.id)
+                      {slotRows.map(r => r.asset && loose.some(a => a.id === r.asset!.id)
                         ? null // 同事排在這天的片上面已經列過
                         : (r.kind === 'to_edit' || r.kind === 'has_stock') && r.asset
                           ? chip(r.asset, { key: r.key, airDate: d, dashed: true })
