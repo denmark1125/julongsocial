@@ -15,7 +15,7 @@ import { compareRawEditOrder, rankByVendor } from '../lib/editOrder';
 import { isClosedOutsideSystem } from '../lib/assetFlow';
 import { isWaitingVideoPost } from '../lib/postMatch';
 import toast from 'react-hot-toast';
-import { CalendarDays, ChevronLeft, ChevronRight, Flame, Link2, Plus, X } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Flame, Info, Link2, Plus, X } from 'lucide-react';
 import { addExtraSlot, removeExtraSlot } from '../lib/extraSlots';
 
 /**
@@ -299,10 +299,10 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
   };
 
   return (
-    <div className={embedded ? 'flex h-[calc(100vh-190px)] min-h-[560px]' : 'fixed inset-0 bg-black/50 z-50 p-2 sm:p-4 flex'}>
+    <div className={embedded ? 'flex h-[calc(100vh-150px)] min-h-[560px]' : 'fixed inset-0 bg-black/50 z-50 p-2 sm:p-4 flex'}>
       <div className={`bg-[#F5F5F0] rounded-2xl w-full flex flex-col overflow-hidden ${embedded ? 'border border-black/5' : 'shadow-xl'}`}>
-        {/* 標題列 */}
-        <div className="bg-white flex items-center justify-between gap-3 px-4 sm:px-6 py-3 border-b border-black/5">
+        {/* 標題列。內嵌在素材資料庫時省掉：上面的子分頁已經寫了「排上片日」，多一列會把月曆往下擠（使用者 10-20） */}
+        {!embedded && <div className="bg-white flex items-center justify-between gap-3 px-4 sm:px-6 py-3 border-b border-black/5">
           <div className="min-w-0">
             <h3 className="text-lg font-bold serif text-[#5A5A40] flex items-center gap-2">
               <CalendarDays size={18} /> 排上片日
@@ -316,10 +316,10 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
               <X className="w-5 h-5" />
             </button>
           )}
-        </div>
+        </div>}
 
         {/* IP 篩選：比照社群日曆的按鈕列 */}
-        <div className="bg-white px-4 sm:px-6 py-3 border-b border-black/5 flex gap-2 overflow-x-auto">
+        <div className={`bg-white px-4 sm:px-6 ${embedded ? 'py-2' : 'py-3'} border-b border-black/5 flex items-center gap-2 overflow-x-auto`}>
           {ipVendors.map(v => {
             const n = unplacedCount(v.id!);
             const on = v.id === vendorId;
@@ -336,6 +336,14 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
               </button>
             );
           })}
+          {embedded && (
+            <span
+              className="ml-auto shrink-0 flex items-center gap-1 text-[12px] text-gray-400 whitespace-nowrap cursor-help"
+              title={`把左邊的片拖到那一天或小編的貼文上＝預計那天上，拖回左邊＝取消。剪輯師交片期限＝上片日前 ${EDIT_LEAD_DAYS} 天。`}
+            >
+              <Info size={13} /> 怎麼用
+            </span>
+          )}
         </div>
 
         {!vendor ? (

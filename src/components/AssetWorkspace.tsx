@@ -27,7 +27,7 @@ export default function AssetWorkspace({ tab, setTab }: { tab: AssetWorkspaceTab
   const assets = useLiveCollection<Asset>('assets');
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="flex gap-2 overflow-x-auto">
         {ASSET_WORKSPACE_TABS.map(t => (
           <button
