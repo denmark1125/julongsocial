@@ -25,7 +25,7 @@ import { buildFlowUpdate, getClientApprovalTarget, getFlowDaysStuck, getFlowDueI
 import { getAssetEditorOwner } from '../lib/editorBilling';
 import { Scissors, UserCheck, PenLine, Clock, Flame, CalendarClock, ThumbsUp, CalendarDays, ListOrdered, AlertTriangle } from 'lucide-react';
 import { buildCompanyQueue, datesOf } from '../lib/companyQueue';
-import { findSkippedAssets, rawCheckIssue } from '../lib/rawCheck';
+import { assetRawIssue, findSkippedAssets } from '../lib/rawCheck';
 import RawStatus from './RawStatus';
 import { format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -93,7 +93,7 @@ export default function ProductionFlowBoard({
     const skippedIds = findSkippedAssets(pending, airDates, deadlines, assets, vendors, posts);
     const needs = pending.flatMap(a => {
       const reasons: string[] = [];
-      const issue = rawCheckIssue(a.rawCheck);
+      const issue = assetRawIssue(a);
       if (issue) reasons.push(`素材異常：${issue}`);
       if (a.editorReport && !a.editorReport.resolvedAt) {
         reasons.push(`剪輯師回報：${EDITOR_REPORT_REASON_LABEL[a.editorReport.reason]}${a.editorReport.note ? `－${a.editorReport.note}` : ''}`);

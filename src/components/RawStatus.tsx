@@ -5,7 +5,7 @@ import { AlertTriangle, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { auth, db } from '../firebase';
 import { Asset, EDITOR_REPORT_REASON_LABEL, EditorReportReason } from '../types';
-import { rawCheckIssue, rawCheckSummary } from '../lib/rawCheck';
+import { assetRawIssue, rawCheckIssue, rawCheckSummary } from '../lib/rawCheck';
 
 /**
  * 待剪片的「素材狀況」：素材自動檢查的結果＋剪輯師回報。2026-10-20 起，見 lib/rawCheck.ts。
@@ -26,7 +26,7 @@ const lastAutoCheck = new Map<string, number>();
 const AUTO_RECHECK_MS = 2 * 60 * 1000;
 function needsAutoRecheck(asset: Asset): boolean {
   const c = asset.rawCheck;
-  if (!c || !asset.driveFolderId) return false;
+  if (!c || (!asset.driveFolderId && !asset.url)) return false;
   const unsettled = c.unreadable || !!rawCheckIssue(c) || (c.videoCount > 0 && c.totalSec == null);
   if (!unsettled) return false;
   const since = Date.now() - Math.max(Date.parse(c.checkedAt) || 0, lastAutoCheck.get(asset.id!) || 0);
@@ -56,7 +56,7 @@ export default function RawStatus({ asset, mode, myName, large }: {
   }, [asset.id, asset.rawCheck?.checkedAt]);
 
   const summary = rawCheckSummary(asset.rawCheck);
-  const issue = rawCheckIssue(asset.rawCheck);
+  const issue = assetRawIssue(asset);
   const report = asset.editorReport && !asset.editorReport.resolvedAt ? asset.editorReport : null;
   const text = large ? 'text-[13px] lg:text-[15px]' : 'text-[13px]';
 
@@ -121,7 +121,7 @@ export default function RawStatus({ asset, mode, myName, large }: {
       {issue ? (
         <p className={`${text} font-bold text-amber-700 flex items-center gap-1`}>
           <AlertTriangle size={12} className="shrink-0" /> {issue}
-          {mode === 'internal' && (
+          {mode === 'internal' && (asset.driveFolderId || asset.url) && (
             <button type="button" onClick={recheck} disabled={busy} className="ml-1 inline-flex items-center gap-0.5 font-normal text-gray-500 hover:text-[#5A5A40] underline underline-offset-2 disabled:opacity-50 whitespace-nowrap">
               <RefreshCw size={11} /> 重新檢查
             </button>

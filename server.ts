@@ -903,7 +903,8 @@ app.post("/api/assets/:id/recheck-raw", async (req, res) => {
     const ref = adminDb.collection("assets").doc(String(req.params.id));
     const snap = await ref.get();
     const asset: any = snap.data();
-    const folderId = asset?.driveFolderId;
+    // 舊素材多半是手動貼資料夾連結（沒有 driveFolderId），從網址取資料夾 id，同改片名那條路
+    const folderId = asset?.driveFolderId || driveFolderIdFromUrl(asset?.url || '');
     if (!snap.exists || !folderId) return res.status(404).json({ error: "這支素材沒有雲端資料夾" });
     if (me.role === 'editor') {
       const byVendor = (me.assignedVendorIds || []).includes(asset.vendorId);
@@ -912,7 +913,8 @@ app.post("/api/assets/:id/recheck-raw", async (req, res) => {
     }
     const last = asset.rawCheck?.checkedAt ? Date.parse(asset.rawCheck.checkedAt) : 0;
     if (Date.now() - last < RECHECK_MIN_MS) return res.json({ rawCheck: asset.rawCheck, cached: true });
-    const claimed = (await adminDb.collection("driveFolders").doc(`claim_${folderId}`).get()).exists;
+    // 手貼連結的資料夾跟認領的一樣不是系統建的（drive.file 看不到），一律當成「認領」處理
+    const claimed = !asset.driveFolderId || (await adminDb.collection("driveFolders").doc(`claim_${folderId}`).get()).exists;
     const rawCheck = await checkRawFolder(folderId, claimed);
     if (!rawCheck) return res.status(502).json({ error: "雲端硬碟暫時讀不到，稍後再試" });
     await ref.update({ rawCheck });

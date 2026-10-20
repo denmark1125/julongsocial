@@ -86,3 +86,12 @@ describe('疑似跳過', () => {
     expect(findSkippedAssets([a, withdrawn], air, dl, [a, withdrawn], vendors, [], NOW).size).toBe(0);
   });
 });
+
+describe('assetRawIssue', () => {
+  it('沒附任何素材連結 → 直接算異常，不用等雲端檢查', async () => {
+    const { assetRawIssue } = await import('../rawCheck');
+    expect(assetRawIssue({ url: '', driveFolderId: undefined })).toBe('沒有附素材連結');
+    expect(assetRawIssue({ url: 'https://drive.google.com/drive/folders/abc' })).toBeNull();
+    expect(assetRawIssue({ driveFolderId: 'abc', rawCheck: { videoCount: 0, fileCount: 0, checkedAt: '' } })).toBe('資料夾是空的');
+  });
+});
