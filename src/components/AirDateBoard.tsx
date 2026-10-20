@@ -396,7 +396,13 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                   <div key={w} className="py-2 text-center text-[13px] font-bold text-gray-500">{w}</div>
                 ))}
               </div>
-              <div className="grid grid-cols-7 flex-1 lg:min-h-0 lg:overflow-y-auto">
+              <div className="grid grid-cols-7 flex-1 lg:min-h-0 lg:overflow-y-auto"
+                style={{
+                  // 過去的整週固定矮、不分剩下的高度；剩下的高度全給本週以後（不然 grid 會平均撐高每一列，過去那幾週又變高）
+                  gridTemplateRows: Array.from({ length: gridDays.length / 7 }, (_, w) =>
+                    pastWeek(gridDays[w * 7]) ? 'auto' : 'minmax(104px, 1fr)').join(' '),
+                }}
+              >
                 {gridDays.map(d => {
                   const dateStr = format(d, 'yyyy-MM-dd');
                   const past = d < today;
@@ -417,7 +423,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                       onClick={() => { if (selectedId && !past) placeOnDay(selectedId, d); }}
                       className={[
                         'group/day border-r border-b border-black/5 p-1.5 min-w-0 space-y-1 transition-colors',
-                        pastWeek(d) ? 'min-h-[40px]' : 'min-h-[104px]',
+                        pastWeek(d) ? 'min-h-[30px] !py-0.5' : 'min-h-[104px]',
                         isSameMonth(d, monthCursor) ? '' : 'bg-gray-50/50',
                         past ? 'bg-gray-50/80 opacity-50' : isSlotDay ? 'bg-orange-50/60' : '',
                         hoverKey === dateStr ? '!bg-[#5A5A40]/10' : '',
@@ -450,8 +456,9 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                         )}
                       </div>
 
-                      {/* 小編排好的貼文：已掛片的只列標題；還在等片的可以把毛片拖上去綁定 */}
-                      {dayPosts.map(p => {
+                      {/* 小編排好的貼文：已掛片的只列標題；還在等片的可以把毛片拖上去綁定。
+                          ⚠️ 已經過去的整週只留日期：那幾週的「已排」標籤把本週擠到畫面下面（使用者 10-20 兩次說月曆太低） */}
+                      {!pastWeek(d) && dayPosts.map(p => {
                         if (!isWaitingVideoPost(p, new Date(0))) {
                           return <p key={p.id} title={p.title} className="text-[12px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 truncate">已排：{p.title}</p>;
                         }
@@ -480,7 +487,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
 
                       {/* 沒有小編貼文的日子：同事只排了日子的片＋預排的系統遞補 */}
                       {loose.map(a => chip(a, { airDate: d, placed: 'day' }))}
-                      {slotRows.map(r => r.asset && loose.some(a => a.id === r.asset!.id)
+                      {!pastWeek(d) && slotRows.map(r => r.asset && loose.some(a => a.id === r.asset!.id)
                         ? null // 同事排在這天的片上面已經列過
                         : (r.kind === 'to_edit' || r.kind === 'has_stock') && r.asset
                           ? chip(r.asset, { key: r.key, airDate: d, dashed: true })
