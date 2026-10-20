@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildEditorQueue, EditorQueue } from '../editorQueue';
+import { buildEditorQueue, deliveryDeadline, EditorQueue } from '../editorQueue';
 import { DemandItem } from '../materialSupply';
 import { asset, day, demand } from './fixtures';
 
@@ -8,7 +8,8 @@ import { asset, day, demand } from './fixtures';
 /** 守恆律：每個影片需求恰好落在 rows／stocked／settled 其中一袋，不多不少、不重複 */
 function expectConservation(demands: DemandItem[], q: EditorQueue) {
   const videoIds = demands.filter(d => d.contentType === 'video').map(d => d.id).sort();
-  const datedRows = q.rows.filter(r => r.date !== null); // 急件／指定交片日但沒配到日子的列不對應任何需求
+  // 急件／指定交片日但沒排日子的列、同事排到非發片日的列，都不對應任何需求
+  const datedRows = q.rows.filter(r => r.date !== null && !r.key.startsWith('planned_'));
   const seen = [...datedRows, ...q.stocked, ...q.settled].map(r => r.key).sort();
   expect(seen).toEqual(videoIds);
   expect(new Set(seen).size).toBe(seen.length);
@@ -131,5 +132,72 @@ describe('buildEditorQueue', () => {
       deliveredAssets: [asset({ vendorId: 'a', stage: 'finished' }), asset({ vendorId: 'c', stage: 'finished' })],
     });
     expectConservation(demands, q);
+  });
+
+  it('交片期限＝上片日往前 9 個日曆天，含週末（2026-10-20 主管定案）', () => {
+    expect(deliveryDeadline(day(10, 25))).toEqual(day(10, 16));
+    expect(deliveryDeadline(day(11, 3))).toEqual(day(10, 25));
+  });
+
+  it('同事排的上片日優先佔格，其餘空格才由剪輯順序第 1 支遞補', () => {
+    // 又生週二、六發片
+    const demands = [demand('ys', day(10, 24)), demand('ys', day(10, 27)), demand('ys', day(10, 31))];
+    const first = asset({ vendorId: 'ys', editOrder: 1 });
+    const second = asset({ vendorId: 'ys', editOrder: 2 });
+    const placed = asset({ vendorId: 'ys', editOrder: 3, plannedAirDate: '2026-10-27' });
+
+    const q = buildEditorQueue({ demands, pendingAssets: [first, second, placed] });
+
+    const byDay = Object.fromEntries(q.rows.map(r => [r.date!.getDate(), r]));
+    expect(byDay[27].asset?.id).toBe(placed.id);
+    expect(byDay[27].deadlineSource).toBe('air');
+    expect(byDay[24].asset?.id).toBe(first.id);
+    expect(byDay[24].deadlineSource).toBe('auto');
+    expect(byDay[31].asset?.id).toBe(second.id);
+    expect(q.unassigned).toHaveLength(0);
+    expectConservation(demands, q);
+  });
+
+  it('排了上片日的片不會再被遞補到別的空格（同一支不出現兩次）', () => {
+    const demands = [demand('ys', day(10, 24)), demand('ys', day(10, 27))];
+    const placed = asset({ vendorId: 'ys', editOrder: 1, plannedAirDate: '2026-10-27' });
+
+    const q = buildEditorQueue({ demands, pendingAssets: [placed] });
+
+    expect(q.rows.filter(r => r.asset?.id === placed.id)).toHaveLength(1);
+    expect(q.rows.find(r => r.date?.getDate() === 24)?.kind).toBe('no_material');
+    expectConservation(demands, q);
+  });
+
+  it('同事排到非發片日：照他排的日子成列，那個 IP 的發片日照樣遞補', () => {
+    const demands = [demand('ys', day(10, 24))];
+    const placed = asset({ vendorId: 'ys', plannedAirDate: '2026-10-29' });
+    const other = asset({ vendorId: 'ys' });
+
+    const q = buildEditorQueue({ demands, pendingAssets: [placed, other] });
+
+    const p = q.rows.find(r => r.asset?.id === placed.id)!;
+    expect(p.date).toEqual(day(10, 29));
+    expect(p.deadline).toEqual(day(10, 20));
+    expect(q.rows.find(r => r.date?.getDate() === 24)?.asset?.id).toBe(other.id);
+    expectConservation(demands, q);
+  });
+
+  it('沒排日子、也沒遞補到空格的毛片：進「還沒排上片日」，沒有期限（拿掉拍回來＋7 天）', () => {
+    const fresh = asset({ vendorId: 'a', createdAt: '2026-10-15T00:00:00+08:00', filmingDate: '2026-10-14' });
+
+    const q = buildEditorQueue({ demands: [], pendingAssets: [fresh] });
+
+    expect(q.rows).toHaveLength(0);
+    expect(q.unassigned.map(a => a.id)).toEqual([fresh.id]);
+  });
+
+  it('上片日已經過了的片照樣留在主清單，期限顯示已超過（等同事改日子，不自動清掉）', () => {
+    const late = asset({ vendorId: 'a', plannedAirDate: '2026-10-01' });
+
+    const q = buildEditorQueue({ demands: [], pendingAssets: [late] });
+
+    expect(q.rows).toHaveLength(1);
+    expect(q.rows[0].deadline).toEqual(day(9, 22));
   });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { customDeadline, deadlineStatus, deliveryDeadline, formatDeadline } from '../editorQueue';
 import { day } from './fixtures';
 
-// 交片期限＝上片日往前推 7 個工作天（docs/進度紀錄.md 2026-10-03 第三節第 2 點）
+// 交片期限＝上片日往前推 9 個日曆天（7 天剪＋2 天審稿，2026-10-20 主管定案；取代原本的 7 個工作天）
 
 describe('deliveryDeadline', () => {
   it('10/10 上片 → 10/01（四）前交片', () => {
@@ -10,12 +10,12 @@ describe('deliveryDeadline', () => {
     expect(formatDeadline(deliveryDeadline(day(10, 10)))).toBe('10/01（四）前交片');
   });
 
-  it('跳過週六日：10/13（二）上片 → 10/02（五）', () => {
-    expect(deliveryDeadline(day(10, 13))).toEqual(day(10, 2));
+  it('週末照算，不跳過：10/13（二）上片 → 10/04（日）', () => {
+    expect(deliveryDeadline(day(10, 13))).toEqual(day(10, 4));
   });
 
   it('上片日帶時間也一樣，只看日期', () => {
-    expect(deliveryDeadline(new Date(2026, 9, 13, 18, 30))).toEqual(day(10, 2));
+    expect(deliveryDeadline(new Date(2026, 9, 13, 18, 30))).toEqual(day(10, 4));
   });
 });
 

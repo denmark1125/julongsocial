@@ -371,7 +371,7 @@ export default function AssetDatabase() {
     }
   };
 
-  /** 同事指定的預計交片日。空字串＝清除，回到「上片日往前推 7 個工作天」 */
+  /** 同事指定的預計交片日。空字串＝清除，回到「上片日往前推 9 天」 */
   const setEditDueDate = async (asset: Asset, date: string) => {
     try {
       await updateDoc(doc(db, 'assets', asset.id!), { editDueDate: date || deleteField() });

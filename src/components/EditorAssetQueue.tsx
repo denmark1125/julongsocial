@@ -409,7 +409,7 @@ function FoldDayRow({ row, vendorName }: {
   );
 }
 
-/** 「順序 N」：同事排的剪輯順序，樣式比照「同事指定」「拍攝後 7 天」那排小標籤 */
+/** 「順序 N」：同事排的剪輯順序，樣式比照「同事指定」那排小標籤 */
 function EditRankBadge({ rank }: { rank: number }) {
   return (
     <span className="inline-block lg:mt-1 px-1.5 py-0.5 rounded-md bg-[#5A5A40]/10 text-[#5A5A40] text-[12px] lg:text-[13px] font-bold whitespace-nowrap">
@@ -437,7 +437,7 @@ function QueueRow({ row, vendorName, card, onOpenLibrary, editRank }: {
    */
   onOpenLibrary?: () => void;
 }) {
-  // 剪輯師只看交片期限，不看上片日（見 editorQueue.ts 的 EDIT_LEAD_WORKDAYS）。
+  // 剪輯師只看交片期限，不看上片日（見 editorQueue.ts 的 EDIT_LEAD_DAYS）。
   // ⚠️ 例外：「沒片」那一列顯示上片日。2026-10-06 老闆：康青龍只排週五，畫面卻寫「10/07（三）」，
   //    看起來像週三要發、週五不見了 —— 那是 10/16（五）往回推的交片期限。沒片可剪時交片期限沒有意義，
   //    這一列是讓人知道哪天要上、去催料。
@@ -502,12 +502,6 @@ function QueueRow({ row, vendorName, card, onOpenLibrary, editRank }: {
         {row.deadlineSource === 'custom' && (
           <span className="inline-block lg:mt-1 px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[12px] lg:text-[13px] font-bold whitespace-nowrap">
             同事指定
-          </span>
-        )}
-        {/* 沒有上片日（凍結、沒設上片週期、或毛片比上片日多），期限由拍攝日推算 */}
-        {row.deadlineSource === 'shoot' && (
-          <span className="inline-block lg:mt-1 px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-600 text-[12px] lg:text-[13px] font-bold whitespace-nowrap">
-            拍攝後 7 天
           </span>
         )}
         {/* 清單照交片期限排、不同 IP 會交錯；同事指定交片日或排進積壓時日期也跟順序對不上。
@@ -647,7 +641,7 @@ export function AssetCard({
             要換行就整個標籤換下一行。 */}
         {!compact && (
         <div className="flex items-center gap-x-3 gap-y-1 mt-1 flex-wrap">
-          {/* 剪輯師只看交片期限，不看上片日（見 editorQueue.ts 的 EDIT_LEAD_WORKDAYS）。
+          {/* 剪輯師只看交片期限，不看上片日（見 editorQueue.ts 的 EDIT_LEAD_DAYS）。
               交出去之後期限就沒意義了，只在待剪／業主要改時顯示。 */}
           {cardDeadline && cardDeadlineStatus && (
             <span
@@ -1457,14 +1451,15 @@ export default function EditorAssetQueue({
   // 還沒排到上片日
   const unassignedBlock = (
     <>
-          {/* 積壓：沒排上片日、又不是新進毛片（見 editorQueue 的 SHOOT_DEADLINE_SINCE）。
-              藏起來會讓剪輯師以為沒事做，所以收合而不是拿掉。 */}
+          {/* 還沒排上片日：同事沒排、也沒被遞補到空格（見 editorQueue 的 buildEditorQueue）。沒有期限。
+              藏起來會讓剪輯師以為沒事做，所以收合而不是拿掉。
+              ⚠️ 不寫「已卡 N 天」：沒排日子是同事那邊的事，紅字等於怪錯人。 */}
           {queue.unassigned.length > 0 && (
             <>
               <FoldHeader
                 open={showUnscheduled}
-                title="積壓待剪"
-                hint="未排上片日。指定交片日或標急件後移入任務清單。"
+                title="還沒排上片日"
+                hint="同事排好上片日後會移到上面，交片期限＝上片日前 9 天。"
                 count={queue.unassigned.length}
                 onToggle={() => setShowUnscheduled(v => !v)}
               />
@@ -1478,7 +1473,7 @@ export default function EditorAssetQueue({
                         {((stuck !== null && stuck > 0) || editRank.has(a.id!)) && (
                           <div className="px-4 pt-3 flex items-center gap-2">
                             {stuck !== null && stuck > 0 && (
-                              <span className="text-[13px] font-bold text-amber-700 whitespace-nowrap">已卡 {stuck} 天</span>
+                              <span className="text-[13px] text-gray-500 whitespace-nowrap">拍回來 {stuck} 天</span>
                             )}
                             {editRank.has(a.id!) && <EditRankBadge rank={editRank.get(a.id!)!} />}
                           </div>

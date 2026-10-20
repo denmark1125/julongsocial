@@ -1,36 +1,19 @@
-import { addDays, differenceInCalendarDays, format, parseISO, startOfDay, subBusinessDays } from 'date-fns';
+import { differenceInCalendarDays, format, parseISO, startOfDay, subDays } from 'date-fns';
 import { Asset } from '../types';
 import { DemandItem } from './materialSupply';
 import { compareRawEditOrder } from './editOrder';
 
 /**
- * 交片後要留幾個工作天走完「業主審稿 → 修改 → 上傳雲端」。
+ * 交片期限＝上片日往前推這麼多個日曆天：7 天剪輯＋2 天業主審稿／修改／上傳雲端。含週末。
  *
- * ⚠️ 2026-10-03 老闆：清單原本寫「10/10 要上，剩 7 天」，剪輯師照上片日剪一定來不及，
- *    事後還會說「是你寫 7 天」。所以剪輯師畫面**只顯示交片期限，不顯示上片日**。
- * 工作天＝跳過週六、日。國定假日沒有排除（date-fns 不知道台灣的假日），遇到連假要靠同事指定交片日。
+ * ⚠️ 2026-10-20 主管定案，取代原本的「往前推 7 個工作天」。
+ *    同時拿掉「沒上片日的毛片＝拍回來＋7 天」：每支片都被塞一個很近的期限，
+ *    剪輯師畫面變成「全部都要剪」。現在只有排了上片日（同事拖進行事曆，或系統遞補空格）的片才有期限。
  */
-export const EDIT_LEAD_WORKDAYS = 7;
+export const EDIT_LEAD_DAYS = 9;
 
 /**
- * 沒配到上片日的毛片：拍攝日（沒填就用建檔日）＋這麼多天＝交片期限。公司規則「拍回來 7 天內剪完」。
- *
- * 為什麼需要：清單是上片日驅動的，凍結中（杜永霖）或沒設上片週期（又生、小馬…）的 IP
- * 永遠排不出上片日，毛片只會躲在折疊區，剪輯師得自己去「我的所有片」翻。
- */
-export const EDIT_DAYS_AFTER_SHOOT = 7;
-
-/**
- * 只有這天（含）之後建檔的毛片套「拍攝後 7 天」。之前的是積壓，留在折疊區。
- *
- * ⚠️ 2026-10-06 上線時又生 8 支、小馬 6 支已卡 30 天以上，全部套進來主清單會被一排
- *    「已超過 N 天」淹掉。老闆決定舊的分開放，要誰優先由同事指定交片日。
- *    取 09-29＝上線當天還在 7 天內的片都算新片（杜永霖那 4 支就是這種）。
- */
-export const SHOOT_DEADLINE_SINCE = '2026-09-29';
-
-/**
- * 毛片「拍回來」的那天＝拍攝日與建檔日取較晚的。積壓天數與「拍攝後 7 天」都從這天起算。
+ * 毛片「拍回來」的那天＝拍攝日與建檔日取較晚的。「還沒排上片日」區照這天排、印「拍回來 N 天」。
  *
  * ⚠️ 不能只看拍攝日：2026-10-06 實測極酵一支 07/31 拍、10/02 才進系統，
  *    期限被算成 08/07，整份清單第一列就是一支剪輯師兩個月前根本拿不到的片。
@@ -43,14 +26,16 @@ export function shootBaseDate(asset: Pick<Asset, 'filmingDate' | 'createdAt'>): 
   return startOfDay(new Date(Math.max(...dates.map(d => d.getTime()))));
 }
 
-/** 新進毛片（不是積壓）才套拍攝後 7 天 */
-function isFreshRaw(asset: Asset): boolean {
-  return (asset.createdAt || '').slice(0, 10) >= SHOOT_DEADLINE_SINCE;
+/** 上片日往前推 EDIT_LEAD_DAYS 天＝交片期限 */
+export function deliveryDeadline(airDate: Date): Date {
+  return subDays(startOfDay(airDate), EDIT_LEAD_DAYS);
 }
 
-/** 上片日往前推 EDIT_LEAD_WORKDAYS 個工作天＝交片期限 */
-export function deliveryDeadline(airDate: Date): Date {
-  return subBusinessDays(startOfDay(airDate), EDIT_LEAD_WORKDAYS);
+/** 同事排的上片日（YYYY-MM-DD）。格式不對就當沒排 */
+export function plannedAirDay(asset: Pick<Asset, 'plannedAirDate'> | undefined): Date | null {
+  if (!asset?.plannedAirDate) return null;
+  const d = parseISO(asset.plannedAirDate);
+  return Number.isNaN(d.getTime()) ? null : startOfDay(d);
 }
 
 export type DeadlineTone = 'calm' | 'soon' | 'late';
@@ -127,10 +112,13 @@ export interface EditorQueueRow {
   key: string;
   /** 要上片的那一天。急件但沒配到任何一天時為 null。⚠️ 剪輯師畫面不顯示它，只顯示 deadline */
   date: Date | null;
-  /** 交片期限：同事指定的交片日，沒有就是上片日往前推 7 個工作天。急件沒配到日子時為 null */
+  /** 交片期限：同事指定的交片日，沒有就是上片日往前推 EDIT_LEAD_DAYS 天。急件沒配到日子時為 null */
   deadline: Date | null;
-  /** 期限從哪來：'custom'＝同事指定，'air'＝由上片日推算，'shoot'＝沒有上片日，拍攝日＋7 天 */
-  deadlineSource?: 'custom' | 'air' | 'shoot';
+  /**
+   * 期限從哪來：'custom'＝同事指定交片日，'air'＝同事排的上片日推算，
+   * 'auto'＝那天沒人排片，系統拿這個 IP 剪輯順序最前的毛片遞補，由那天推算
+   */
+  deadlineSource?: 'custom' | 'air' | 'auto';
   vendorId: string;
   kind: EditorQueueKind;
   asset?: Asset;
@@ -156,8 +144,8 @@ export interface EditorQueue {
    */
   settled: EditorQueueRow[];
   /**
-   * 積壓：沒配到上片日、又不是新進毛片（見 SHOOT_DEADLINE_SINCE）、也沒急件或指定交片日。
-   * 卡最久的排前面。不要藏掉，只是不進主清單。
+   * 還沒排上片日：同事沒排、也沒被遞補到空格，又不是急件或指定交片日。沒有期限。
+   * 拍回來最久的排前面。不要藏掉，只是不進主清單。
    */
   unassigned: Asset[];
 }
@@ -171,13 +159,13 @@ export interface EditorQueue {
  */
 const rawOrder = compareRawEditOrder;
 
-/** 這一列的期限：素材有指定交片日就用它，否則由上片日推算；都沒有時新進毛片用拍攝日＋7 天 */
-function rowDeadline(asset: Asset | undefined, airDate: Date | null): Pick<EditorQueueRow, 'deadline' | 'deadlineSource'> {
+/** 這一列的期限：素材有指定交片日就用它，否則由上片日推算；沒有上片日就沒有期限 */
+function rowDeadline(
+  asset: Asset | undefined, airDate: Date | null, source: 'air' | 'auto'
+): Pick<EditorQueueRow, 'deadline' | 'deadlineSource'> {
   const custom = customDeadline(asset);
   if (custom) return { deadline: custom, deadlineSource: 'custom' };
-  if (airDate) return { deadline: deliveryDeadline(airDate), deadlineSource: 'air' };
-  const shot = asset && isFreshRaw(asset) ? shootBaseDate(asset) : null;
-  if (shot) return { deadline: addDays(shot, EDIT_DAYS_AFTER_SHOOT), deadlineSource: 'shoot' };
+  if (airDate) return { deadline: deliveryDeadline(airDate), deadlineSource: source };
   return { deadline: null };
 }
 
@@ -229,13 +217,31 @@ export function buildEditorQueue(opts: {
       key: d.id, date: d.date, deadline: null, vendorId, kind: 'settled', urgent: false,
     }));
 
-    const dates = mine.filter(d => !d.attachedAssetId);
+    const open = mine.filter(d => !d.attachedAssetId);
 
     const raws = pendingAssets.filter(a => a.vendorId === vendorId).sort(rawOrder);
     const delivered = deliveredAssets.filter(a => a.vendorId === vendorId).sort(deliveredOrder);
 
-    // 日期由近到遠依序發配：先給成片，再給毛片，都沒有就是沒片。
-    dates.forEach((slot, i) => {
+    // 1. 同事排了上片日的毛片：照他排的日子，先佔掉那一天的格子。
+    //    ⚠️ 已經過了的日子也照樣顯示（期限會是「已超過」）—— 那是同事該改日期的訊號，不要自動清掉。
+    //    ⚠️ 那天不在這個 IP 的發片日上（同事拖到別天）也照樣成列，只是不對應任何格子。
+    const claimed = new Set<string>();
+    const free: Asset[] = [];
+    raws.forEach(raw => {
+      const air = plannedAirDay(raw);
+      if (!air) { free.push(raw); return; }
+      const slot = open.find(d => !claimed.has(d.id) && startOfDay(d.date).getTime() === air.getTime());
+      if (slot) claimed.add(slot.id);
+      rows.push({
+        key: slot ? slot.id : `planned_${raw.id}`, date: air, ...rowDeadline(raw, air, 'air'), vendorId,
+        kind: 'to_edit', asset: raw, urgent: Boolean(raw.isUrgent),
+      });
+    });
+
+    // 2. 剩下沒人排的發片日由近到遠遞補：先給成片，再給沒排日子的毛片（剪輯順序第 1 支先），都沒有就是沒片。
+    //    老闆 2026-10-20：「這週六縈寶要上片但是沒排片，會優先放上片排序一的片」。
+    const empty = open.filter(d => !claimed.has(d.id));
+    empty.forEach((slot, i) => {
       const stock = delivered[i];
       if (stock) {
         stocked.push({
@@ -244,39 +250,37 @@ export function buildEditorQueue(opts: {
         });
         return;
       }
-      const raw = raws[i - delivered.length];
+      const raw = free[i - delivered.length];
       if (raw) {
         rows.push({
-          key: slot.id, date: slot.date, ...rowDeadline(raw, slot.date), vendorId,
+          key: slot.id, date: slot.date, ...rowDeadline(raw, slot.date, 'auto'), vendorId,
           kind: 'to_edit', asset: raw, urgent: Boolean(raw.isUrgent),
         });
       } else {
         rows.push({
-          key: slot.id, date: slot.date, ...rowDeadline(undefined, slot.date), vendorId,
+          key: slot.id, date: slot.date, ...rowDeadline(undefined, slot.date, 'auto'), vendorId,
           kind: 'no_material', urgent: false,
         });
       }
     });
 
-    // 毛片比「扣掉成片之後剩下的日子」還多 → 多出來的收進折疊區。
-    // ⚠️ 成片比日子多時 dates.length - delivered.length 會變負數，必須夾在 0 以上，
+    // 沒排日子的毛片比「扣掉成片之後剩下的空格」還多 → 多出來的收進「還沒排上片日」。
+    // ⚠️ 成片比空格多時 empty.length - delivered.length 會變負數，必須夾在 0 以上，
     //    否則 slice(負數) 會從尾端取，整批毛片被當成沒排到。
-    raws.slice(Math.max(0, dates.length - delivered.length)).forEach(a => unassigned.push(a));
+    free.slice(Math.max(0, empty.length - delivered.length)).forEach(a => unassigned.push(a));
   }
 
-  // 沒配到任何一天，但急件、同事指定了交片日、或是新進毛片（拍攝後 7 天）：一樣要進主清單。
-  // 標了急件／指定了日子卻看不到，等於這個標記沒有用；
-  // 凍結或沒設上片週期的 IP 永遠沒有上片日，不靠拍攝日的話毛片永遠進不來。
+  // 沒排上片日，但急件或同事指定了交片日：一樣要進主清單。標了卻看不到，等於這個標記沒有用。
   for (let i = unassigned.length - 1; i >= 0; i--) {
     const a = unassigned[i];
-    if (!a.isUrgent && !customDeadline(a) && !isFreshRaw(a)) continue;
+    if (!a.isUrgent && !customDeadline(a)) continue;
     unassigned.splice(i, 1);
     rows.push({
-      key: `${a.isUrgent ? 'urgent' : 'due'}_${a.id}`, date: null, ...rowDeadline(a, null), vendorId: a.vendorId,
+      key: `${a.isUrgent ? 'urgent' : 'due'}_${a.id}`, date: null, ...rowDeadline(a, null, 'auto'), vendorId: a.vendorId,
       kind: 'to_edit', asset: a, urgent: Boolean(a.isUrgent),
     });
   }
-  // 積壓：卡最久的排前面
+  // 還沒排上片日：拍回來最久的排前面
   unassigned.sort((x, y) => (shootBaseDate(x)?.getTime() ?? 0) - (shootBaseDate(y)?.getTime() ?? 0));
 
   /**
@@ -314,9 +318,10 @@ export function buildEditorQueue(opts: {
   // 結果「順序 2」排在「順序 1」上面（2026-10-07 極酵文創兩支急件）。
   // 做法：各 IP 保留它原本佔的那幾個位置，只在那幾個位置之間照順序重新放 ——
   // 跨 IP 的交錯不變，急件也仍在最上面（急件在順序裡本來就排最前，佔的也正好是最上面那幾格）。
+  // ⚠️ 同事親手排了上片日的列（'air'）不參與：日子是人定的，換位置會讓期限跟那支片對不上。
   const slotsByVendor = new Map<string, number[]>();
   rows.forEach((r, i) => {
-    if (r.kind === 'to_edit' && r.asset) slotsByVendor.set(r.vendorId, [...(slotsByVendor.get(r.vendorId) || []), i]);
+    if (r.kind === 'to_edit' && r.asset && r.deadlineSource !== 'air') slotsByVendor.set(r.vendorId, [...(slotsByVendor.get(r.vendorId) || []), i]);
   });
   const reordered = [...rows];
   slotsByVendor.forEach(slots => {

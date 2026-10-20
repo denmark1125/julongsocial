@@ -15,7 +15,7 @@ import {
   FLOW_OWNER_LABEL,
 } from '../types';
 import { useLiveCollection } from '../lib/liveData';
-import AirPlanModal from './AirPlanModal';
+import AirDateBoard from './AirDateBoard';
 import EditOrderModal from './EditOrderModal';
 import { buildFlowUpdate, getClientApprovalTarget, getFlowDaysStuck, getFlowDueInfo, isClosedOutsideSystem, isFlowStale, isMarkedDoneManually, sortFlowColumn } from '../lib/assetFlow';
 import { getAssetEditorOwner } from '../lib/editorBilling';
@@ -160,7 +160,7 @@ export default function ProductionFlowBoard({
             onClick={() => setIsPlanning(true)}
             className="bg-[#5A5A40] text-white px-4 py-2 rounded-2xl shadow-sm font-bold flex items-center gap-2 hover:bg-[#4a4a35] transition-colors whitespace-nowrap"
           >
-            <CalendarDays size={16} /> 排接下來要上的片
+            <CalendarDays size={16} /> 排上片日
           </button>
           <button
             onClick={() => setIsOrdering(true)}
@@ -327,7 +327,7 @@ export default function ProductionFlowBoard({
         })}
       </div>
 
-      {isPlanning && <AirPlanModal onClose={() => setIsPlanning(false)} />}
+      {isPlanning && <AirDateBoard onClose={() => setIsPlanning(false)} />}
       {isOrdering && (
         <EditOrderModal
           vendors={vendors}
