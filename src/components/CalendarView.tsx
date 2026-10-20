@@ -406,7 +406,8 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                 // 預排（含被挪過來的、手動加的）；冷凍中/已終止的廠商在共用層就排除掉了
                 const daySlots = slotsByDay.get(format(day, 'yyyy-MM-dd')) || [];
                 // 選了單一 IP 時，未來沒有發片的日子可以手動加一格（週規則表達不了的特例，例如康青龍某週發兩支）
-                const pickedVendor = selectedVendorId !== 'all' ? vendors.find(v => v.id === selectedVendorId) : undefined;
+                // 不列入統計／已終止／冷凍沒填解凍日的 IP 加了也不會算，不給加
+                const pickedVendor = selectedVendorId !== 'all' ? slotVendors(vendors).find(v => v.id === selectedVendorId) : undefined;
                 const canAddSlot = !!pickedVendor && day >= startOfDay(new Date()) && daySlots.length === 0
                   && !dayPosts.some(p => p.contentType !== 'post') && !hasHabitOn(pickedVendor, day);
 

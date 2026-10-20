@@ -154,6 +154,8 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
   /** 這個 IP 手動加的發片日，日子 → extraSlots id（刪除用） */
   const extraByDay = new Map(extraSlots.filter(x => x.vendorId === vendorId).map(x => [x.date, x.id!]));
   // 有合約支數卻沒設固定發片日：只有小編貼文和手動加的日子算發片日，系統不會自己補
+  // 冷凍沒填解凍日的 IP 預排不會算（slotVendors），加了也沒用
+  const canAddSlot = !!vendor && slotVendors([vendor]).length > 0;
   const noHabits = !!vendor && (vendor.monthlyTargetVideos ?? 0) > 0 && !(vendor.postingHabits?.length);
 
   const changeExtra = async (write: () => Promise<void>, done: string) => {
@@ -395,7 +397,7 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
                             <X size={12} />
                           </button>
                         )}
-                        {!past && !isSlotDay && dayPosts.length === 0 && vendor && !hasHabitOn(vendor, d) && (
+                        {!past && !isSlotDay && dayPosts.length === 0 && canAddSlot && vendor && !hasHabitOn(vendor, d) && (
                           <button
                             type="button"
                             onClick={e => { e.stopPropagation(); void changeExtra(() => addExtraSlot(vendor, d), `${format(d, 'M/d')} 加了一個發片日`); }}
