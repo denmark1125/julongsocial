@@ -889,17 +889,29 @@ app.post("/api/drive/claim-folders", async (req, res) => {
 });
 
 /**
- * 重新檢查素材資料夾（同事後來才把檔案補進去、或建檔當下 Drive 還在處理影片長度）。內部人員用。
+ * 重新檢查素材資料夾（同事後來才把檔案補進去、或建檔當下 Drive 還在處理影片長度）。
+ *
+ * 2026-10-20 起剪輯師的畫面也會在背景自動呼叫（使用者：補了檔案剪輯師那邊卻還是「資料夾是空的」）。
+ * 剪輯師只能查派給他的片；而且這支只是照雲端實際內容重算 rawCheck，沒有任何別的寫入。
+ * ⚠️ 2 分鐘內查過就直接回上次的結果：好幾個人同時開著畫面，不要一直打 Drive。
  */
+const RECHECK_MIN_MS = 2 * 60 * 1000;
 app.post("/api/assets/:id/recheck-raw", async (req, res) => {
   if (!requireDriveConfigured(res)) return;
   try {
     const me = await requireUser(req);
-    if (me.role === 'editor') return res.status(403).json({ error: "剪輯師無法使用" });
     const ref = adminDb.collection("assets").doc(String(req.params.id));
     const snap = await ref.get();
-    const folderId = snap.data()?.driveFolderId;
+    const asset: any = snap.data();
+    const folderId = asset?.driveFolderId;
     if (!snap.exists || !folderId) return res.status(404).json({ error: "這支素材沒有雲端資料夾" });
+    if (me.role === 'editor') {
+      const byVendor = (me.assignedVendorIds || []).includes(asset.vendorId);
+      const byAssign = !!me.linkedEditorId && asset.editorId === me.linkedEditorId;
+      if (!byVendor && !byAssign) return res.status(403).json({ error: "這支片不是派給你的" });
+    }
+    const last = asset.rawCheck?.checkedAt ? Date.parse(asset.rawCheck.checkedAt) : 0;
+    if (Date.now() - last < RECHECK_MIN_MS) return res.json({ rawCheck: asset.rawCheck, cached: true });
     const claimed = (await adminDb.collection("driveFolders").doc(`claim_${folderId}`).get()).exists;
     const rawCheck = await checkRawFolder(folderId, claimed);
     if (!rawCheck) return res.status(502).json({ error: "雲端硬碟暫時讀不到，稍後再試" });

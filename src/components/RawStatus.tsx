@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { deleteField, doc, updateDoc } from 'firebase/firestore';
 import { format, parseISO } from 'date-fns';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
@@ -16,6 +16,23 @@ import { rawCheckIssue, rawCheckSummary } from '../lib/rawCheck';
  * ⚠️ 剪輯師看到的字一律陳述，不派工（見 feedback_editor_facing_wording）。
  * ⚠️ 「素材有問題？」刻意做成不起眼的小字：不擾民，也不要變成跳過的捷徑。
  */
+/**
+ * 素材檢查的結果還沒定論時（空的、太短、看不到、影片長度還在處理），畫面打開就在背景重查一次。
+ * 同事常常先建檔、後來才把檔案丟進資料夾；不自動重查的話剪輯師那邊會一直顯示「資料夾是空的」（使用者 10-20）。
+ * ⚠️ 只重查「已經檢查過、但結果還沒定論」的片：沒檢查過的舊素材不在這裡大量補查。
+ * ⚠️ 同一個分頁每支片 2 分鐘最多一次（跟後端節流一樣）。
+ */
+const lastAutoCheck = new Map<string, number>();
+const AUTO_RECHECK_MS = 2 * 60 * 1000;
+function needsAutoRecheck(asset: Asset): boolean {
+  const c = asset.rawCheck;
+  if (!c || !asset.driveFolderId) return false;
+  const unsettled = c.unreadable || !!rawCheckIssue(c) || (c.videoCount > 0 && c.totalSec == null);
+  if (!unsettled) return false;
+  const since = Date.now() - Math.max(Date.parse(c.checkedAt) || 0, lastAutoCheck.get(asset.id!) || 0);
+  return since > AUTO_RECHECK_MS;
+}
+
 export default function RawStatus({ asset, mode, myName, large }: {
   asset: Asset;
   mode: 'editor' | 'internal';
@@ -28,6 +45,15 @@ export default function RawStatus({ asset, mode, myName, large }: {
   const [reason, setReason] = useState<EditorReportReason | null>(asset.editorReport?.reason ?? null);
   const [note, setNote] = useState(asset.editorReport?.note ?? '');
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!needsAutoRecheck(asset)) return;
+    lastAutoCheck.set(asset.id!, Date.now());
+    // 背景重查：成功會直接改到資料庫，畫面跟著即時資料更新；失敗不打擾人
+    auth.currentUser?.getIdToken()
+      .then(idToken => fetch(`/api/assets/${asset.id}/recheck-raw`, { method: 'POST', headers: { Authorization: `Bearer ${idToken}` } }))
+      .catch(() => {});
+  }, [asset.id, asset.rawCheck?.checkedAt]);
 
   const summary = rawCheckSummary(asset.rawCheck);
   const issue = rawCheckIssue(asset.rawCheck);
