@@ -69,8 +69,10 @@ export default function RawStatus({ asset, mode, myName, large }: {
       const res = await fetch(`/api/assets/${asset.id}/recheck-raw`, {
         method: 'POST', headers: { Authorization: `Bearer ${idToken}` },
       });
-      const data: any = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || '檢查失敗');
+      const data: any = await res.json().catch(() => null);
+      // 本機預覽（只開 vite、沒有後端）會回 404 網頁，不是 JSON —— 講清楚，不要只丟一句「檢查失敗」
+      if (!data) throw new Error(res.status === 404 ? '這裡連不到後端（本機預覽），請到正式站按' : `檢查失敗（${res.status}）`);
+      if (!res.ok) throw new Error(data.message || data.error || `檢查失敗（${res.status}）`);
       const next = rawCheckIssue(data.rawCheck);
       toast.success(next ? `檢查完了：${next}` : data.rawCheck?.unreadable ? '系統看不到這個資料夾的內容' : '檢查完了，素材正常');
     } catch (e: any) {
