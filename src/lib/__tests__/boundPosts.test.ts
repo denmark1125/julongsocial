@@ -25,8 +25,18 @@ describe('findBoundPostFixes', () => {
     const reviewing = asset({ vendorId: 'hz', plannedPostId: 'p3', stage: 'finished', flowStage: 'client_review', plannedAirDate: '2026-10-25' });
     const fixes = findBoundPostFixes([post('p1'), post('p2'), post('p3')], [ok, uploaded, reviewing]);
     expect(fixes).toEqual([
-      { kind: 'attach', assetId: ok.id, postId: 'p1' },
-      { kind: 'attach', assetId: uploaded.id, postId: 'p2' },
+      { kind: 'attach', assetId: ok.id, postId: 'p1', toDraft: false },
+      { kind: 'attach', assetId: uploaded.id, postId: 'p2', toDraft: false },
+    ]);
+  });
+
+  it('又生「迎接小樹苗＋定植」：貼文是待補中，掛上時一起改成草稿；已排程的不動', () => {
+    const a = asset({ vendorId: 'hz', plannedPostId: 'p1', stage: 'finished', flowStage: 'to_upload' });
+    const b = asset({ vendorId: 'hz', plannedPostId: 'p2', stage: 'finished', flowStage: 'to_upload' });
+    const fixes = findBoundPostFixes([post('p1', { status: 'pending' }), post('p2', { status: 'scheduled' })], [a, b]);
+    expect(fixes).toEqual([
+      { kind: 'attach', assetId: a.id, postId: 'p1', toDraft: true },
+      { kind: 'attach', assetId: b.id, postId: 'p2', toDraft: false },
     ]);
   });
 

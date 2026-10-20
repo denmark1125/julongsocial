@@ -7,6 +7,8 @@ import { Asset, FLOW_STAGE_LABEL, Post, deriveFlowStage } from '../types';
  * 誰都不用替別人同步 —— 由一個在同事瀏覽器裡跑的自癒程序（useBoundPostSync）把差異補上：
  *
  * 1. attach：綁定的片業主通過了（to_upload／ready，或已上傳雲端），貼文還在「待補上」→ 掛上。
+ *    貼文是「待補中」就一起改成草稿：待補中＝還沒有片，掛上了還停在橘色，小編要自己去切（使用者 10-20）。
+ *    其他狀態不動 —— 草稿／已排程是小編自己決定的。
  * 2. sync：小編改了貼文日期 → 毛片的 plannedAirDate 快照跟著改（剪輯師清單本來就以貼文為準，這只是退路）。
  * 3. unbind：貼文被刪、已經發布、或掛了別支片 → 解除綁定，片退回「還沒排上片日」。
  *
@@ -15,7 +17,7 @@ import { Asset, FLOW_STAGE_LABEL, Post, deriveFlowStage } from '../types';
  * ⚠️ 每一筆修正都是冪等的：兩個同事同時開著也只會寫同樣的值。
  */
 export type BoundPostFix =
-  | { kind: 'attach'; assetId: string; postId: string }
+  | { kind: 'attach'; assetId: string; postId: string; toDraft: boolean }
   | { kind: 'sync'; assetId: string; date: string }
   | { kind: 'unbind'; assetId: string };
 
@@ -52,7 +54,7 @@ export function findBoundPostFixes(posts: Post[], assets: Asset[]): BoundPostFix
       continue;
     }
     if (isApprovedForAir(a) && a.status !== 'archived') {
-      fixes.push({ kind: 'attach', assetId: a.id!, postId: post.id! });
+      fixes.push({ kind: 'attach', assetId: a.id!, postId: post.id!, toDraft: post.status === 'pending' });
       continue;
     }
     // scheduledAt 是本地時間字串（'YYYY-MM-DDTHH:mm'），前 10 碼就是那一天

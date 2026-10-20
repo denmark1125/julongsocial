@@ -32,7 +32,7 @@ export function useBoundPostSync(posts: Post[], assets: Asset[], enabled: boolea
       const assetRef = doc(db, 'assets', f.assetId);
       if (f.kind === 'attach') {
         // 跟貼文管理手動掛素材同一組寫入（PostManagement 存檔那段），兩邊才不會對不起來
-        batch.update(doc(db, 'posts', f.postId), { assetId: f.assetId });
+        batch.update(doc(db, 'posts', f.postId), f.toDraft ? { assetId: f.assetId, status: 'draft' } : { assetId: f.assetId });
         batch.update(assetRef, { status: 'used', usedInPostId: f.postId });
       } else if (f.kind === 'sync') {
         batch.update(assetRef, { plannedAirDate: f.date });
