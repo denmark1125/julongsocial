@@ -142,14 +142,24 @@ function sendAuthError(res: any, e: any) {
 async function checkRawFolder(folderId: string, claimed: boolean) {
   try {
     const own = await listFolderFiles(folderId);
-    if (own && own.length) return summarizeFolder(own);
+    if (own && own.length) return summarizeFolder(await withSubfolders(own, false));
     const full = await listFolderFiles(folderId, { full: true });
-    if (full) return summarizeFolder(full);
+    if (full) return summarizeFolder(await withSubfolders(full, true));
     return summarizeFolder(claimed ? null : own);
   } catch (e: any) {
     console.warn("checkRawFolder failed:", folderId, e?.message);
     return null;
   }
+}
+
+/**
+ * 把子資料夾裡的檔案也算進來（只往下一層）。同事常常在素材資料夾裡再分「A cam／B cam」或日期子夾，
+ * 只看第一層會把整支片判成「資料夾是空的」（10-20 盤點：又生 8 支）。B-roll 子夾是補充畫面，不算素材。
+ */
+async function withSubfolders(files: Awaited<ReturnType<typeof listFolderFiles>> & {}, full: boolean) {
+  const subs = files.filter(f => f.mimeType === 'application/vnd.google-apps.folder' && f.name !== BROLL_FOLDER_NAME && f.id);
+  const nested = await Promise.all(subs.slice(0, 20).map(f => listFolderFiles(f.id!, { full }).catch(() => null)));
+  return [...files, ...nested.flatMap(n => n || [])];
 }
 
 async function resolvePlannedPost(

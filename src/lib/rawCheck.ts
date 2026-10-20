@@ -23,11 +23,10 @@ export function rawCheckIssue(check: RawCheck | undefined): string | null {
 }
 
 /**
- * 這支待剪片的素材問題（含「根本沒附素材連結」）。沒問題回 null。
- * ⚠️ 沒連結的不用等雲端檢查：剪輯師打不開素材，本身就是異常（10-20 盤點時 54 支待剪有 15 支這樣）。
+ * 這支待剪片的素材問題。沒問題回 null。
+ * ⚠️ 沒附素材連結的**不算**異常：使用者 10-20 說舊片沒上連結沒關係、不用補（盤點時 54 支有 15 支）。
  */
 export function assetRawIssue(asset: Pick<Asset, 'url' | 'driveFolderId' | 'rawCheck'>): string | null {
-  if (!asset.url && !asset.driveFolderId) return '沒有附素材連結';
   return rawCheckIssue(asset.rawCheck);
 }
 

@@ -302,6 +302,7 @@ export async function createResumableSession(opts: {
 }
 
 export interface FolderFile {
+  id?: string;
   name: string;
   mimeType: string;
   sizeBytes: number;
@@ -326,7 +327,7 @@ export async function listFolderFiles(folderId: string, opts: { full?: boolean }
   do {
     const query = new URLSearchParams({
       q: `'${folderId.replace(/'/g, "\\'")}' in parents and trashed=false`,
-      fields: 'nextPageToken,files(name,mimeType,size,videoMediaMetadata(durationMillis))',
+      fields: 'nextPageToken,files(id,name,mimeType,size,videoMediaMetadata(durationMillis))',
       pageSize: '200',
       supportsAllDrives: 'true',
       includeItemsFromAllDrives: 'true',
@@ -335,7 +336,7 @@ export async function listFolderFiles(folderId: string, opts: { full?: boolean }
     const data = await driveFetch(`/files?${query.toString()}`, {}, token);
     for (const f of data.files || []) {
       const ms = Number(f.videoMediaMetadata?.durationMillis);
-      files.push({ name: f.name, mimeType: f.mimeType, sizeBytes: Number(f.size || 0), durationSec: ms > 0 ? Math.round(ms / 1000) : undefined });
+      files.push({ id: f.id, name: f.name, mimeType: f.mimeType, sizeBytes: Number(f.size || 0), durationSec: ms > 0 ? Math.round(ms / 1000) : undefined });
     }
     pageToken = data.nextPageToken || '';
   } while (pageToken);
