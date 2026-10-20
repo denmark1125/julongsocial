@@ -374,13 +374,13 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
                       onDrop={past ? undefined : e => { const id = dragged(e); if (id) placeOnDay(id, d); }}
                       onClick={() => { if (selectedId && !past) placeOnDay(selectedId, d); }}
                       className={[
-                        'border-r border-b border-black/5 p-1.5 min-w-0 space-y-1 transition-colors',
+                        'group/day border-r border-b border-black/5 p-1.5 min-w-0 space-y-1 transition-colors',
                         past ? 'bg-gray-50/80 opacity-50' : isSlotDay ? 'bg-orange-50/60' : '',
                         hoverKey === dateStr ? '!bg-[#5A5A40]/10' : '',
                         selectedId && !past ? 'cursor-pointer hover:bg-[#5A5A40]/5' : '',
                       ].join(' ')}
                     >
-                      <div className="group/day flex items-center gap-1">
+                      <div className="flex items-center gap-1">
                         <span className={`text-[13px] font-bold w-6 h-6 flex items-center justify-center rounded-full shrink-0 ${isSameDay(d, today) ? 'bg-[#5A5A40] text-white' : 'text-gray-500'}`}>
                           {d.getDate() === 1 ? format(d, 'M/d') : d.getDate()}
                         </span>
