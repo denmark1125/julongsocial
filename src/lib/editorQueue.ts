@@ -220,7 +220,24 @@ export function buildEditorQueue(opts: {
     const open = mine.filter(d => !d.attachedAssetId);
 
     const raws = pendingAssets.filter(a => a.vendorId === vendorId).sort(rawOrder);
-    const delivered = deliveredAssets.filter(a => a.vendorId === vendorId).sort(deliveredOrder);
+    const claimed = new Set<string>();
+
+    // 0. 同事已經排了日子的成片（拖拉板上把成片拖到某天／某篇貼文）先佔那一格，跟毛片同一套：
+    //    綁貼文的以貼文日期為準，否則用 plannedAirDate；那天不是發片日就不佔格。
+    //    沒排的成片照舊補最近的空格（下面第 2 步）。
+    const delivered: Asset[] = [];
+    [...deliveredAssets.filter(a => a.vendorId === vendorId)]
+      .sort((x, y) => Number(!x.plannedPostId) - Number(!y.plannedPostId) || deliveredOrder(x, y))
+      .forEach(stock => {
+        const post = stock.plannedPostId ? mine.find(d => d.id === postDemandId(stock.plannedPostId!)) : undefined;
+        const usablePost = post && !post.attachedAssetId && !claimed.has(post.id) ? post : undefined;
+        const air = usablePost ? startOfDay(usablePost.date) : plannedAirDay(stock);
+        if (!air) { delivered.push(stock); return; }
+        const slot = usablePost ?? open.find(d => !claimed.has(d.id) && startOfDay(d.date).getTime() === air.getTime());
+        if (!slot) return; // 排在不是發片日的日子：不佔格、也不去補別天
+        claimed.add(slot.id);
+        stocked.push({ key: slot.id, date: slot.date, deadline: null, vendorId, kind: 'has_stock', asset: stock, urgent: false });
+      });
 
     // 1. 已經排好的毛片先佔格：
     //    a. 綁了小編貼文（plannedPostId）→ 日子以那篇貼文為準，小編改日期這裡自動跟著變。
@@ -229,7 +246,6 @@ export function buildEditorQueue(opts: {
     //       綁定的貼文不在視窗內（太遠，或剛被刪、還沒被 useBoundPostSync 清掉）也退回這條，用快照。
     //    ⚠️ 已經過了的日子也照樣顯示（期限會是「已超過」）—— 那是同事該改日期的訊號，不要自動清掉。
     //    ⚠️ 那天不在這個 IP 的發片日上（同事拖到別天）也照樣成列，只是不對應任何格子。
-    const claimed = new Set<string>();
     const free: Asset[] = [];
     // 綁了貼文的先處理：不然只排了日子的片會先用日期把那篇貼文的格子佔走
     const boundFirst = [...raws].sort((x, y) => Number(!x.plannedPostId) - Number(!y.plannedPostId));

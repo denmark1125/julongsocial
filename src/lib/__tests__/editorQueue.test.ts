@@ -31,6 +31,18 @@ describe('buildEditorQueue', () => {
     expectConservation(demands, q);
   });
 
+  it('同事把成片排到後面某天：那天給成片，最近的空格改由毛片遞補', () => {
+    const demands = [demand('ys', day(10, 24)), demand('ys', day(10, 28))];
+    const stock = asset({ vendorId: 'ys', stage: 'finished', plannedAirDate: '2026-10-28' });
+    const raw = asset({ vendorId: 'ys' });
+
+    const q = buildEditorQueue({ demands, pendingAssets: [raw], deliveredAssets: [stock] });
+
+    expect(q.stocked.map(r => [r.date, r.asset?.id])).toEqual([[day(10, 28), stock.id]]);
+    expect(q.rows.find(r => r.kind === 'to_edit')?.date).toEqual(day(10, 24));
+    expectConservation(demands, q);
+  });
+
   it('自然風 10/06：1 支待剪＋2 支已交片，10/06 是「等排程」不是「沒片」', () => {
     const demands = [demand('zrf', day(10, 3)), demand('zrf', day(10, 6)), demand('zrf', day(10, 10))];
     const delivered = [

@@ -73,12 +73,13 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
   /** 拖曳經過的那一格／那篇貼文，給個底色讓人知道會放在哪 */
   const [hoverKey, setHoverKey] = useState<string | null>(null);
 
-  const { ipVendors, pending, demandsByCell, queueByKey, autoDateOf, rank } = useMemo(() => {
+  const { ipVendors, pending, deliveredIds, demandsByCell, queueByKey, autoDateOf, rank } = useMemo(() => {
     const now = new Date();
     // 冷凍中的 IP 也要能排（冷凍凍的是發片不是剪片，見 stockVisibleVendors），只是它沒有固定發片日
     const visible = stockVisibleVendors(vendors);
     const visibleIds = new Set(visible.map(v => v.id));
     const pendingAll = assets.filter(a => isPending(a) && visibleIds.has(a.vendorId));
+    const deliveredAll = assets.filter(a => isDelivered(a) && visibleIds.has(a.vendorId));
 
     // ⚠️ 配對視窗跟剪輯師畫面一樣固定 SUPPLY_HORIZON_DAYS，否則同一天在這裡跟剪輯師那邊會遞補到不同的片。
     const slots = listPlannedSlots({
@@ -94,7 +95,7 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
     const queue = buildEditorQueue({
       demands,
       pendingAssets: pendingAll,
-      deliveredAssets: assets.filter(a => isDelivered(a) && visibleIds.has(a.vendorId)),
+      deliveredAssets: deliveredAll,
     });
 
     const demandsByCell = new Set(demands.map(d => `${d.vendorId}|${format(d.date, 'yyyy-MM-dd')}`));
@@ -104,13 +105,18 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
     [...queue.rows, ...queue.stocked].forEach(r => {
       queueByKey.set(r.key, r);
       if (r.kind === 'to_edit' && r.deadlineSource !== 'air' && r.date && r.asset) autoDateOf.set(r.asset.id!, r.date);
+      if (r.kind === 'has_stock' && r.date && r.asset && !r.asset.plannedAirDate && !r.asset.plannedPostId) autoDateOf.set(r.asset.id!, r.date);
     });
 
     // 有發片日或有待剪片的 IP 才有按鈕
-    const active = new Set<string>([...demands.map(d => d.vendorId), ...pendingAll.map(a => a.vendorId)]);
+    const active = new Set<string>([...demands.map(d => d.vendorId), ...pendingAll.map(a => a.vendorId), ...deliveredAll.map(a => a.vendorId)]);
     const ipVendors = visible.filter(v => active.has(v.id!)).sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
 
-    return { ipVendors, pending: pendingAll, demandsByCell, queueByKey, autoDateOf, rank: rankByVendor(pendingAll) };
+    // ⚠️ 可以拖的片＝待剪毛片＋剪好還沒掛上貼文的成片。只收毛片的話，剛交片的片會從板子上消失（使用者 10-20 問「小株番茄」）。
+    return {
+      ipVendors, pending: [...pendingAll, ...deliveredAll], deliveredIds: new Set(deliveredAll.map(a => a.id!)),
+      demandsByCell, queueByKey, autoDateOf, rank: rankByVendor(pendingAll),
+    };
   }, [vendors, assets, posts, dismissedHabits, slotMoves]);
 
   const postById = useMemo(() => new Map(posts.map(p => [p.id!, p])), [posts]);
@@ -133,7 +139,9 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
   const today = startOfDay(new Date());
   const gridDays = Array.from({ length: WEEKS * 7 }, (_, i) => addDays(weekCursor, i));
   const mine = pending.filter(a => a.vendorId === vendorId);
-  const unplaced = mine.filter(a => !placedDay(a)).sort(compareRawEditOrder);
+  // 成片排最上面（現在就能上），毛片照剪輯順序
+  const unplaced = mine.filter(a => !placedDay(a))
+    .sort((x, y) => Number(!deliveredIds.has(x.id!)) - Number(!deliveredIds.has(y.id!)) || compareRawEditOrder(x, y));
   const myVideoPosts = posts.filter(p => p.vendorId === vendorId && p.contentType !== 'post' && p.scheduledAt);
 
   /**
@@ -197,7 +205,9 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
    */
   const chip = (a: Asset, opts: { key?: string; dashed?: boolean; airDate?: Date } = {}) => {
     const { dashed = false, airDate } = opts;
-    const deadline = airDate ? deliveryDeadline(airDate) : null;
+    const isStock = deliveredIds.has(a.id!);
+    // 成片已經交了，沒有交片期限
+    const deadline = airDate && !isStock ? deliveryDeadline(airDate) : null;
     const late = deadline ? differenceInCalendarDays(deadline, today) < 0 : false;
     const selected = selectedId === a.id;
     // 左邊待排區的片如果已經被系統補在某一天，直接講出來 —— 不然同一支在兩邊各出現一次，看起來像重複
@@ -222,6 +232,7 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
           <span className="text-[13px] font-bold truncate">{a.title}</span>
         </div>
         <div className="flex items-center gap-1.5 text-[12px] whitespace-nowrap">
+          {isStock && <span className="text-sky-700 font-bold">成片</span>}
           {!airDate && rank.has(a.id!) && <span className="text-gray-400">順序 {rank.get(a.id!)}</span>}
           {autoAt && <span className="text-gray-400">系統先補在 {format(autoAt, 'M/d')}</span>}
           {deadline && (
@@ -355,7 +366,9 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
                           return <p key={p.id} title={p.title} className="text-[12px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 truncate">已排：{p.title}</p>;
                         }
                         const bound = mine.find(a => a.plannedPostId === p.id);
-                        const auto = !bound ? queueByKey.get(postDemandId(p.id!)) : undefined;
+                        const autoRow = !bound ? queueByKey.get(postDemandId(p.id!)) : undefined;
+                        // 同事只排了日子（沒綁這篇）的片，下面 loose 會列，這裡不重複
+                        const auto = autoRow?.asset && loose.some(x => x.id === autoRow.asset!.id) ? undefined : autoRow;
                         const pKey = `post|${p.id}`;
                         return (
                           <div
@@ -370,17 +383,17 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
                             </p>
                             {bound && chip(bound, { airDate: d })}
                             {!bound && auto?.kind === 'to_edit' && auto.asset && chip(auto.asset, { key: auto.key, airDate: d, dashed: true })}
-                            {!bound && auto?.kind === 'has_stock' && <p className="text-[12px] px-0.5 text-sky-700 truncate">有成片等排程</p>}
+                            {!bound && auto?.kind === 'has_stock' && auto.asset && chip(auto.asset, { key: auto.key, airDate: d, dashed: true })}
                           </div>
                         );
                       })}
 
                       {/* 沒有小編貼文的日子：同事只排了日子的片＋預排的系統遞補 */}
                       {loose.map(a => chip(a, { airDate: d }))}
-                      {slotRows.map(r => r.kind === 'to_edit' && r.asset
-                        ? chip(r.asset, { key: r.key, airDate: d, dashed: true })
-                        : r.kind === 'has_stock'
-                          ? <p key={r.key} className="text-[12px] px-1 text-sky-700 truncate">有成片等排程</p>
+                      {slotRows.map(r => r.asset && loose.some(a => a.id === r.asset!.id)
+                        ? null // 同事排在這天的片上面已經列過
+                        : (r.kind === 'to_edit' || r.kind === 'has_stock') && r.asset
+                          ? chip(r.asset, { key: r.key, airDate: d, dashed: true })
                           : r.kind === 'no_material' && !past
                             ? <p key={r.key} className="text-[12px] px-1 text-amber-700">沒片</p>
                             : null)}
