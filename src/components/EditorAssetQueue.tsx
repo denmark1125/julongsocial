@@ -28,7 +28,7 @@ import {
   buildHorizonDemands, buildSupplyPlan, describeSupply, SUPPLY_HORIZON_DAYS,
 } from '../lib/materialSupply';
 import { listPlannedSlots } from '../lib/plannedSlots';
-import { trackedVendors, visibleVendors as visibleVendorsOf } from '../lib/vendorStatus';
+import { buildPostIndex, isAssetSelectable, trackedVendors, visibleVendors as visibleVendorsOf } from '../lib/vendorStatus';
 import {
   Scissors, Film, CheckCircle2, UploadCloud, Clock, Flame,
   CalendarClock, Check, ChevronDown, ChevronRight, PackageCheck, Search, X,
@@ -1023,13 +1023,15 @@ export default function EditorAssetQueue({
     // ⚠️ 只拿「哪天哪個 IP 要上片」這份需求，**不要**再叫 buildSupplyPlan —— 那支會把
     //    有成片庫存的格子判成「不用動手」，剪輯師手上的毛片就整列消失（連錯三版的原因）。
     const demands = buildHorizonDemands({ posts, slots, now });
+    const postIndex = buildPostIndex(posts);
     return buildEditorQueue({
       demands,
       pendingAssets: queuePending,
       // 已經剪好交出去、但還沒被排進任何貼文的片。它們補掉最近的上片日。
-      // ⚠️ `!usedInPostId`：掛上貼文的片那一格早就被 demands 的 attachedAssetId 排除了，
-      //    不濾掉會重複計算，把一天算成兩天有著落。
-      deliveredAssets: displayed.filter(a => bucketOf(a) !== 'to_edit' && !a.usedInPostId),
+      // ⚠️ 掛上貼文的片那一格早就被 demands 的 attachedAssetId 排除了，不濾掉會重複計算，
+      //    把一天算成兩天有著落。用 isAssetSelectable 而不是 !usedInPostId：掛的貼文被刪掉的片（孤兒）
+      //    其實還沒用掉，要算回庫存（跟排上片日拖拉板同一個判斷，兩邊才會遞補到同一支）。
+      deliveredAssets: displayed.filter(a => bucketOf(a) !== 'to_edit' && isAssetSelectable(a, postIndex)),
     });
   }, [vendors, posts, slotMoves, dismissedHabits, queuePending, displayed]);
 

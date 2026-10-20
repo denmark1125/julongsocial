@@ -6,7 +6,7 @@ import { deleteField, doc, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Asset, DismissedHabit, PlannedSlotMove, Post, Vendor, deriveFlowStage } from '../types';
 import { useLiveCollection } from '../lib/liveData';
-import { stockVisibleVendors, trackedVendors } from '../lib/vendorStatus';
+import { buildPostIndex, isAssetSelectable, PostIndex, stockVisibleVendors, trackedVendors } from '../lib/vendorStatus';
 import { listPlannedSlots } from '../lib/plannedSlots';
 import { buildHorizonDemands, postDemandId, SUPPLY_HORIZON_DAYS } from '../lib/materialSupply';
 import { buildEditorQueue, deliveryDeadline, EDIT_LEAD_DAYS, EditorQueueRow } from '../lib/editorQueue';
@@ -38,12 +38,16 @@ const isPending = (a: Asset) =>
   a.type === 'video' && !a.voidedAt && a.status !== 'archived' && !isClosedOutsideSystem(a) &&
   (deriveFlowStage(a) === 'to_edit' || deriveFlowStage(a) === 'revising');
 
-/** 剪好交出去、還沒掛上貼文的片（比照剪輯師畫面的 deliveredAssets：它們先補最近的空格） */
-const isDelivered = (a: Asset) => {
-  if (a.type !== 'video' || a.voidedAt || a.status === 'archived' || a.usedInPostId || isClosedOutsideSystem(a)) return false;
+/**
+ * 剪好交出去、還沒掛上貼文的片（它們先補最近的空格）。送審中、待上傳、可排程都算。
+ * ⚠️ 「還沒掛上」一律走 isAssetSelectable，不要自己寫 !usedInPostId：掛的貼文被刪掉的片
+ *    （孤兒）其實還沒用掉。也不要列舉階段漏掉「可排程」—— 10-20 稽核時杜永霖一支可排程的片就這樣消失。
+ */
+const isDelivered = (a: Asset, postIndex: PostIndex) => {
+  if (a.type !== 'video' || a.status === 'archived' || isClosedOutsideSystem(a)) return false;
   const stage = deriveFlowStage(a);
   if (stage === 'to_edit' || stage === 'revising') return false;
-  return Boolean(a.cloudUploadedAt) || stage === 'client_review' || stage === 'to_upload';
+  return isAssetSelectable(a, postIndex);
 };
 
 const WEEKDAYS = '日一二三四五六';
@@ -79,7 +83,8 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
     const visible = stockVisibleVendors(vendors);
     const visibleIds = new Set(visible.map(v => v.id));
     const pendingAll = assets.filter(a => isPending(a) && visibleIds.has(a.vendorId));
-    const deliveredAll = assets.filter(a => isDelivered(a) && visibleIds.has(a.vendorId));
+    const postIndex = buildPostIndex(posts);
+    const deliveredAll = assets.filter(a => isDelivered(a, postIndex) && visibleIds.has(a.vendorId));
 
     // ⚠️ 配對視窗跟剪輯師畫面一樣固定 SUPPLY_HORIZON_DAYS，否則同一天在這裡跟剪輯師那邊會遞補到不同的片。
     const slots = listPlannedSlots({
