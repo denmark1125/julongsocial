@@ -408,18 +408,6 @@ function FoldDayRow({ row, vendorName }: {
   );
 }
 
-/**
- * 整份清單由上到下的第幾支（只算有片可剪的列）。
- * ⚠️ 以前印的是「順序 N」＝同一個 IP 內的剪輯順序，不同 IP 各有自己的順序 1，整份清單好幾個「1」，
- *    剪輯師還是不知道整體的先後，藏鏡人得一直口頭講（使用者 10-20）。改成整份一個連續編號。
- */
-function PositionBadge({ position }: { position: number }) {
-  return (
-    <span className="inline-flex items-center justify-center shrink-0 w-7 h-7 lg:w-8 lg:h-8 lg:mb-1 rounded-full bg-[#5A5A40] text-white text-[13px] lg:text-[15px] font-bold">
-      {position}
-    </span>
-  );
-}
 
 /**
  * 清單的一列＝社群日曆上的一格「哪天哪個 IP 要上片」。
@@ -427,13 +415,11 @@ function PositionBadge({ position }: { position: number }) {
  * 三種樣子：有料要剪（帶素材卡）／還沒有片（只有一行字）／急件沒配到日期。
  * ⚠️ 用詞一律陳述事實（「10/06 要上」），不要祈使句。順序本身已經表達了先後。
  */
-function QueueRow({ row, vendorName, card, onOpenLibrary, position }: {
+function QueueRow({ row, vendorName, card, onOpenLibrary }: {
   key?: string;
   row: EditorQueueRow;
   vendorName: string;
   card: ReactNode;
-  /** 整份清單的第幾支（有片可剪的列才有） */
-  position?: number;
   /**
    * 「沒片」那一列的出口。老闆：「可以引導她去素材庫」。
    * ⚠️ 只在那個 IP 的素材庫**真的有東西**時才傳進來 —— 點過去是空白頁等於又一條死路。
@@ -471,7 +457,6 @@ function QueueRow({ row, vendorName, card, onOpenLibrary, position }: {
             ⚠️ 2026-10-03 老闆：「10/15（四）前交片・同事指定」一整串 nowrap 塞進 160px 欄位，
                整段超出欄位壓到右邊卡片上。所以每一段各自一行，不再把整串鎖成一行。
             手機版仍是同一行「09/28（一）前交片 已超過 5 天」：小標只在 lg 顯示，「前交片」只在手機顯示。 */}
-        {position && <PositionBadge position={position} />}
         {row.urgent ? (
           <>
             <span className="inline-flex items-center gap-1 text-[13px] lg:text-[15px] font-bold text-orange-600 whitespace-nowrap">
@@ -503,12 +488,8 @@ function QueueRow({ row, vendorName, card, onOpenLibrary, position }: {
             {status.text}
           </span>
         )}
-        {row.deadlineSource === 'custom' && (
-          <span className="inline-block lg:mt-1 px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[12px] lg:text-[13px] font-bold whitespace-nowrap">
-            {/* ⚠️ 原本寫「同事指定」，剪輯師看成「同事要剪」（使用者 10-20）。講的是這個日期是特別定的 */}
-            指定交片日
-          </span>
-        )}
+        {/* ⚠️ 不再另外標「同事指定／指定交片日」：剪輯師看成「同事要剪」，而且日期上面已經寫了（使用者 10-20）。
+            同事手動訂的交片日跟推算的一樣，就是一個交片期限。 */}
         {row.kind !== 'to_edit' && <span className="text-[13px] lg:text-[15px] text-gray-500">{vendorName}</span>}
       </div>
 
@@ -1038,10 +1019,6 @@ export default function EditorAssetQueue({
     });
   }, [vendors, posts, slotMoves, extraSlots, dismissedHabits, queuePending, displayed]);
 
-  // 整份清單有片可剪的列由上到下的編號（見 PositionBadge）。在完整的 rows 上算，「顯示更多」展開前後號碼不變。
-  const positionOf = new Map<string, number>();
-  queue.rows.forEach(r => { if (r.kind === 'to_edit') positionOf.set(r.key, positionOf.size + 1); });
-
   const toEdit = inBucket('to_edit');
   const toUpload = inBucket('to_upload');
   // 隊伍頁（我的剪輯任務）用的版本：**不吃**「我的所有片」的 IP 篩選／搜尋／只看急件。
@@ -1529,7 +1506,8 @@ export default function EditorAssetQueue({
             {activeView === 'queue'
               // ⚠️ 陳述句，不要祈使句。「從上面開始剪」等於系統在派工，
               //    而派工是同事在做的事（見 feedback_editor_facing_wording）。
-              ? '照交片期限排好，數字是剪的先後，最近的在最上面；沒片的排在最後。'
+              // ⚠️ 不加編號：使用者 10-20 要的是「排序本身是對的、由上往下照著剪」，圓圈數字反而醜
+              ? '由上往下照交片期限排好，最近的在最上面；沒片的排在最後。'
               : '手上全部的片。剪完按「交片送審」；審片通過後上傳並按「上傳雲端」，這支就完成了。'}
           </p>
         </div>
@@ -1589,7 +1567,6 @@ export default function EditorAssetQueue({
                   key={row.key}
                   row={row}
                   vendorName={vendorName(row.vendorId)}
-                  position={positionOf.get(row.key)}
                   onOpenLibrary={
                     // 只有那個 IP 在「我的所有片」裡真的有東西才給連結
                     onOpenAllAssets && displayed.some(a => a.vendorId === row.vendorId)
