@@ -1,7 +1,6 @@
 import { useMemo, useState, type DragEvent } from 'react';
 import {
-  addDays, addMonths, differenceInCalendarDays, endOfMonth, endOfWeek, format, isSameDay, isSameMonth,
-  startOfDay, startOfMonth, startOfWeek,
+  addDays, addWeeks, differenceInCalendarDays, format, isSameDay, startOfDay, startOfWeek,
 } from 'date-fns';
 import { deleteField, doc, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -48,6 +47,12 @@ const isDelivered = (a: Asset) => {
 };
 
 const WEEKDAYS = '日一二三四五六';
+/**
+ * 一次顯示幾週，從本週日起算；翻頁一次移這麼多週。
+ * ⚠️ 不要改回「整個月」：月中打開時前面兩三週都是過去的灰格子，畫面高度只看得到那幾週，
+ *    本週跟之後真正要拖的日子被擠到下面，看起來像一張空表格（使用者 10-20 打回來）。
+ */
+const WEEKS = 5;
 const postDay = (p: Post) => (p.scheduledAt || '').slice(0, 10);
 
 /** 放下去要寫什麼：哪一天、綁哪一篇（null＝不綁）。整個 null＝退回待排 */
@@ -61,7 +66,7 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
   const slotMoves = useLiveCollection<PlannedSlotMove>('plannedSlotMoves');
 
   const [vendorPick, setVendorPick] = useState<string | null>(null);
-  const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()));
+  const [weekCursor, setWeekCursor] = useState(() => startOfWeek(new Date()));
   /** 手機備援：點選中的那支（assetId） */
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -126,11 +131,7 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
   const vendor = vendors.find(v => v.id === vendorId);
 
   const today = startOfDay(new Date());
-  const gridStart = startOfWeek(startOfMonth(monthCursor));
-  const gridDays = Array.from(
-    { length: differenceInCalendarDays(endOfWeek(endOfMonth(monthCursor)), gridStart) + 1 },
-    (_, i) => addDays(gridStart, i)
-  );
+  const gridDays = Array.from({ length: WEEKS * 7 }, (_, i) => addDays(weekCursor, i));
   const mine = pending.filter(a => a.vendorId === vendorId);
   const unplaced = mine.filter(a => !placedDay(a)).sort(compareRawEditOrder);
   const myVideoPosts = posts.filter(p => p.vendorId === vendorId && p.contentType !== 'post' && p.scheduledAt);
@@ -296,18 +297,18 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
             {/* 右：月曆 */}
             <div className="flex-1 min-w-0 bg-white rounded-2xl border border-black/5 flex flex-col lg:min-h-0 overflow-hidden">
               <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-black/5">
-                <span className="text-[15px] font-bold serif text-[#5A5A40] whitespace-nowrap">{format(monthCursor, 'yyyy年M月')}</span>
+                <span className="text-[15px] font-bold serif text-[#5A5A40] whitespace-nowrap">{format(gridDays[0], 'M/d')} – {format(gridDays[gridDays.length - 1], 'M/d')}</span>
                 {selectedId && (
                   <span className="flex-1 min-w-0 text-[13px] text-[#5A5A40] font-bold truncate">
                     已選「{pending.find(a => a.id === selectedId)?.title}」，點一天放下
                   </span>
                 )}
                 <div className="flex items-center gap-1 shrink-0">
-                  <button onClick={() => setMonthCursor(m => addMonths(m, -1))} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100" aria-label="上個月">
+                  <button onClick={() => setWeekCursor(w => addWeeks(w, -WEEKS))} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100" aria-label="往前">
                     <ChevronLeft size={18} />
                   </button>
-                  <button onClick={() => setMonthCursor(startOfMonth(new Date()))} className="px-2 py-1 rounded-lg text-[13px] font-bold text-gray-600 hover:bg-gray-100">今天</button>
-                  <button onClick={() => setMonthCursor(m => addMonths(m, 1))} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100" aria-label="下個月">
+                  <button onClick={() => setWeekCursor(startOfWeek(new Date()))} className="px-2 py-1 rounded-lg text-[13px] font-bold text-gray-600 hover:bg-gray-100">今天</button>
+                  <button onClick={() => setWeekCursor(w => addWeeks(w, WEEKS))} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100" aria-label="往後">
                     <ChevronRight size={18} />
                   </button>
                 </div>
@@ -321,7 +322,6 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
                 {gridDays.map(d => {
                   const dateStr = format(d, 'yyyy-MM-dd');
                   const past = d < today;
-                  const inMonth = isSameMonth(d, monthCursor);
                   const isSlotDay = demandsByCell.has(`${vendorId}|${dateStr}`);
                   const dayPosts = myVideoPosts.filter(p => postDay(p) === dateStr).sort((x, y) => x.scheduledAt.localeCompare(y.scheduledAt));
                   // 只排了日子、沒綁貼文的片
@@ -337,13 +337,13 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
                       onClick={() => { if (selectedId && !past) placeOnDay(selectedId, d); }}
                       className={[
                         'border-r border-b border-black/5 p-1.5 min-w-0 space-y-1 transition-colors',
-                        past ? 'bg-gray-50/80 opacity-50' : isSlotDay ? 'bg-orange-50/60' : !inMonth ? 'bg-gray-50/40' : '',
+                        past ? 'bg-gray-50/80 opacity-50' : isSlotDay ? 'bg-orange-50/60' : '',
                         hoverKey === dateStr ? '!bg-[#5A5A40]/10' : '',
                         selectedId && !past ? 'cursor-pointer hover:bg-[#5A5A40]/5' : '',
                       ].join(' ')}
                     >
                       <div className="flex items-center gap-1">
-                        <span className={`text-[13px] font-bold w-6 h-6 flex items-center justify-center rounded-full shrink-0 ${isSameDay(d, today) ? 'bg-[#5A5A40] text-white' : inMonth ? 'text-gray-500' : 'text-gray-300'}`}>
+                        <span className={`text-[13px] font-bold w-6 h-6 flex items-center justify-center rounded-full shrink-0 ${isSameDay(d, today) ? 'bg-[#5A5A40] text-white' : 'text-gray-500'}`}>
                           {d.getDate() === 1 ? format(d, 'M/d') : d.getDate()}
                         </span>
                         {isSlotDay && !past && <span className="text-[12px] text-orange-700 truncate">發片日</span>}
