@@ -785,6 +785,23 @@ export interface PlannedSlotMove {
   updatedAt?: string;
 }
 
+/**
+ * 單次「多加一個發片日」。2026-10-20 起。
+ *
+ * postingHabits 只能講「每週幾」，但康青龍這種「這週 1 支、下週 2 支、隔月倒過來」的節奏表達不了。
+ * 做法＝週規則只設最少的那種當基準，多出來的那次在日曆上加一格（這個），不發的照舊按 X（dismissedHabits）。
+ * ⚠️ 它本身就是一筆實體行程：要改天就直接改 date、不要了就整筆刪掉，不走 plannedSlotMoves／dismissedHabits。
+ */
+export interface ExtraSlot {
+  id?: string;
+  vendorId: string;
+  date: string;        // YYYY-MM-DD
+  time: string;        // HH:mm
+  contentType: string; // 'video'
+  createdBy?: string;
+  createdAt: string;
+}
+
 export type BookingStatus = 'booked' | 'completed' | 'postponed' | 'cancelled';
 export type BookingReason = 'client' | 'internal' | 'other';
 

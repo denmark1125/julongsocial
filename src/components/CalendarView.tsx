@@ -10,11 +10,12 @@ import {
   deleteDoc
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Post, Vendor, Asset, DismissedHabit, PlannedSlotMove, ShootBooking } from '../types';
+import { Post, Vendor, Asset, DismissedHabit, ExtraSlot, PlannedSlotMove, ShootBooking } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import { boundAssetLabel } from '../lib/boundPosts';
-import { visibleVendors, trackedVendors } from '../lib/vendorStatus';
-import { listPlannedSlots, groupSlotsByDay, PlannedSlot } from '../lib/plannedSlots';
+import { visibleVendors, trackedVendors, slotVendors } from '../lib/vendorStatus';
+import { listPlannedSlots, groupSlotsByDay, hasHabitOn, PlannedSlot } from '../lib/plannedSlots';
+import { addExtraSlot, moveExtraSlot, removeExtraSlot } from '../lib/extraSlots';
 import PostDetailModal from './PostDetailModal';
 import { 
   format, 
@@ -27,7 +28,8 @@ import {
   getDay,
   parseISO,
   subDays,
-  addDays
+  addDays,
+  startOfDay
 } from 'date-fns';
 import { ChevronLeft, ChevronRight, Clock, Plus, Download, X, Calendar as CalendarIcon, BellRing, Image as ImageIcon, Video } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -56,6 +58,7 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
   const assets = useLiveCollection<Asset>('assets');
   const dismissedHabits = useLiveCollection<DismissedHabit>('dismissedHabits');
   const slotMoves = useLiveCollection<PlannedSlotMove>('plannedSlotMoves');
+  const extraSlots = useLiveCollection<ExtraSlot>('extraSlots');
   const shootBookings = useLiveCollection<ShootBooking>('shootBookings');
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   // 一律先開月曆。曾經改成「手機自動進清單」，但月曆的價值就是一眼看完整個月，
@@ -77,6 +80,12 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
     if (toDate === slot.toDate) return; // 拖回原地，不用寫
 
     try {
+      // 手動加的發片日本身就是一筆實體，直接改它的日子
+      if (slot.extraId) {
+        await moveExtraSlot(slot.extraId, targetDate);
+        toast.success(`發片日已移到 ${format(targetDate, 'MM/dd')}`);
+        return;
+      }
       if (toDate === slot.fromDate) {
         // 拖回它原本該在的那天＝取消這次調整，記錄本身就不該留著
         if (slot.moveId) await deleteDoc(doc(db, 'plannedSlotMoves', slot.moveId));
@@ -172,6 +181,12 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
    */
   const dismissSlot = async (slot: PlannedSlot) => {
     try {
+      // 手動加的發片日：整筆刪掉就好，不用記「這次不發」
+      if (slot.extraId) {
+        await removeExtraSlot(slot.extraId);
+        toast.success('已刪除加上去的發片日');
+        return;
+      }
       await addDoc(collection(db, 'dismissedHabits'), {
         vendorId: slot.vendorId,
         habitTime: slot.time,
@@ -230,14 +245,15 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
 
   // 整個月的預排一次算完再依日期分組；每格各跑一次等於同樣的掃描做 30 遍。
   const slotsByDay = useMemo(() => groupSlotsByDay(listPlannedSlots({
-    vendors: trackedVendors(vendors).filter(v => selectedVendorId === 'all' || v.id === selectedVendorId),
+    vendors: slotVendors(vendors).filter(v => selectedVendorId === 'all' || v.id === selectedVendorId),
     moves: slotMoves,
     dismissed: dismissedHabits,
+    extras: extraSlots,
     posts,
     rangeStart: monthStart,
     rangeEnd: monthEnd,
     fulfilledWindowDays: 1, // 沿用原本「前後一天內有發就不用再提醒」
-  })), [vendors, selectedVendorId, slotMoves, dismissedHabits, posts, monthStart, monthEnd]);
+  })), [vendors, selectedVendorId, slotMoves, extraSlots, dismissedHabits, posts, monthStart, monthEnd]);
 
   const filteredPosts = posts.filter(p => {
     const postMonth = p.targetMonth || (p.scheduledAt && p.scheduledAt.length > 0 ? format(parseISO(p.scheduledAt), 'yyyy-MM') : null);
@@ -387,8 +403,12 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                   isSameDay(parseISO(p.scheduledAt), day) &&
                   (selectedVendorId === 'all' || p.vendorId === selectedVendorId)
                 );
-                // 預排（含被挪過來的）；冷凍中/已終止的廠商在共用層就排除掉了
+                // 預排（含被挪過來的、手動加的）；冷凍中/已終止的廠商在共用層就排除掉了
                 const daySlots = slotsByDay.get(format(day, 'yyyy-MM-dd')) || [];
+                // 選了單一 IP 時，未來沒有發片的日子可以手動加一格（週規則表達不了的特例，例如康青龍某週發兩支）
+                const pickedVendor = selectedVendorId !== 'all' ? vendors.find(v => v.id === selectedVendorId) : undefined;
+                const canAddSlot = !!pickedVendor && day >= startOfDay(new Date()) && daySlots.length === 0
+                  && !dayPosts.some(p => p.contentType !== 'post') && !hasHabitOn(pickedVendor, day);
 
                 return (
                   <div 
@@ -397,11 +417,30 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                     onDrop={(e) => handleDrop(e, day)}
                     className="border-r border-b border-black/5 p-2 overflow-y-auto hover:bg-gray-50 transition-colors group min-h-[120px]"
                   >
-                    <div className={clsx(
-                      "text-sm font-bold w-6 h-6 flex items-center justify-center rounded-full mb-1",
-                      isSameDay(day, new Date()) ? "bg-[#5A5A40] text-white" : "text-gray-500"
-                    )}>
-                      {format(day, 'd')}
+                    <div className="flex items-center justify-between mb-1">
+                      <div className={clsx(
+                        "text-sm font-bold w-6 h-6 flex items-center justify-center rounded-full",
+                        isSameDay(day, new Date()) ? "bg-[#5A5A40] text-white" : "text-gray-500"
+                      )}>
+                        {format(day, 'd')}
+                      </div>
+                      {canAddSlot && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await addExtraSlot(pickedVendor!, day);
+                              toast.success(`${pickedVendor!.name} ${format(day, 'MM/dd')} 加了一個發片日`);
+                            } catch (error) {
+                              console.error('Add extra slot failed:', error);
+                              toast.error('加發片日失敗');
+                            }
+                          }}
+                          className="hidden group-hover:flex items-center gap-0.5 text-[11px] text-orange-700 px-1.5 py-0.5 rounded hover:bg-orange-100 whitespace-nowrap"
+                        >
+                          <Plus size={11} /> 發片日
+                        </button>
+                      )}
                     </div>
                     <div className="space-y-1">
                       {/* Posting Habits Reminders（預排時段，拖到別天仍然是預排） */}
@@ -428,7 +467,7 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                         >
                           <span className="font-bold mr-1">{slot.time}</span>
                           <span className="truncate flex-1">
-                            {slot.isMoved ? '↪' : '🔔'} {slot.vendorName}: {slot.habit.contentTypes.map(t => t === 'post' ? '貼' : '影').join('/')}
+                            {slot.extraId ? '＋' : slot.isMoved ? '↪' : '🔔'} {slot.vendorName}: {slot.habit.contentTypes.map(t => t === 'post' ? '貼' : '影').join('/')}
                           </span>
                           <button
                             onClick={(e) => {

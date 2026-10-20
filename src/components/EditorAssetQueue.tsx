@@ -3,7 +3,7 @@ import { collection, doc, onSnapshot, query, updateDoc, where, writeBatch } from
 import { db, auth } from '../firebase';
 import {
   Asset, AssetFlowStage, DURATION_TIER_LABEL, DurationTier,
-  DismissedHabit, PlannedSlotMove, Post, ShootBooking, UserProfile, Vendor, deriveFlowStage,
+  DismissedHabit, ExtraSlot, PlannedSlotMove, Post, ShootBooking, UserProfile, Vendor, deriveFlowStage,
 } from '../types';
 import {
   buildCloudUploadUpdate,
@@ -28,7 +28,7 @@ import {
   buildHorizonDemands, buildSupplyPlan, describeSupply, SUPPLY_HORIZON_DAYS,
 } from '../lib/materialSupply';
 import { listPlannedSlots } from '../lib/plannedSlots';
-import { buildPostIndex, isAssetSelectable, trackedVendors, visibleVendors as visibleVendorsOf } from '../lib/vendorStatus';
+import { buildPostIndex, isAssetSelectable, slotVendors, trackedVendors, visibleVendors as visibleVendorsOf } from '../lib/vendorStatus';
 import {
   Scissors, Film, CheckCircle2, UploadCloud, Clock, Flame,
   CalendarClock, Check, ChevronDown, ChevronRight, PackageCheck, Search, X,
@@ -774,6 +774,7 @@ export default function EditorAssetQueue({
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [bookings, setBookings] = useState<ShootBooking[]>([]);
   const [slotMoves, setSlotMoves] = useState<PlannedSlotMove[]>([]);
+  const [extraSlots, setExtraSlots] = useState<ExtraSlot[]>([]);
   const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
   // 素材有兩個來源：我負責的 IP（廠商層）、以及逐支指名給我的片（素材層）。
   // 分開存是因為兩邊的訂閱範圍不同，混在同一個陣列裡會互相覛掉。
@@ -847,7 +848,7 @@ export default function EditorAssetQueue({
   // 排程驅動需要的三份資料。寫法照 EditorSchedule.tsx —— 逐廠商查詢，
   // ⚠️ 剪輯師端**不可以**用未範圍限定的 collection 查詢，那會整條 permission-denied。
   useEffect(() => {
-    if (vendorIds.length === 0) { setBookings([]); setSlotMoves([]); return; }
+    if (vendorIds.length === 0) { setBookings([]); setSlotMoves([]); setExtraSlots([]); return; }
     const subscribe = <T,>(name: string, setter: (fn: (prev: T[]) => T[]) => void) =>
       vendorIds.map(vid => onSnapshot(
         query(collection(db, name), where('vendorId', '==', vid)),
@@ -860,6 +861,8 @@ export default function EditorAssetQueue({
       ...subscribe<ShootBooking>('shootBookings', setBookings),
       // 小編把預排拖到別天的紀錄。沒有它，剪輯師看到的日子會停在被拖走前的舊位置。
       ...subscribe<PlannedSlotMove>('plannedSlotMoves', setSlotMoves),
+      // 同事手動加的發片日。少了它，那天在剪輯師這邊不算上片日，期限就不見了。
+      ...subscribe<ExtraSlot>('extraSlots', setExtraSlots),
     ];
     return () => unsubs.forEach(u => u());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1012,9 +1015,10 @@ export default function EditorAssetQueue({
     const now = new Date();
     const mine = visibleVendorsOf(vendors);
     const slots = listPlannedSlots({
-      vendors: trackedVendors(mine),
+      vendors: slotVendors(mine),
       moves: slotMoves,
       dismissed: dismissedHabits,
+      extras: extraSlots,
       posts,
       rangeStart: now,
       rangeEnd: addDays(now, SUPPLY_HORIZON_DAYS),
@@ -1033,7 +1037,7 @@ export default function EditorAssetQueue({
       //    其實還沒用掉，要算回庫存（跟排上片日拖拉板同一個判斷，兩邊才會遞補到同一支）。
       deliveredAssets: displayed.filter(a => bucketOf(a) !== 'to_edit' && isAssetSelectable(a, postIndex)),
     });
-  }, [vendors, posts, slotMoves, dismissedHabits, queuePending, displayed]);
+  }, [vendors, posts, slotMoves, extraSlots, dismissedHabits, queuePending, displayed]);
 
   const toEdit = inBucket('to_edit');
   const toUpload = inBucket('to_upload');

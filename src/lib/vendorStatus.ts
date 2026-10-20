@@ -96,6 +96,22 @@ export function stockVisibleVendors(vendors: Vendor[]): Vendor[] {
 }
 
 /**
+ * 預排（橘色發片日）要算哪些廠商：生效中的，加上**已經知道哪天解凍**的冷凍廠商。
+ *
+ * ⚠️ 冷凍廠商只會在解凍日之後出現格子（listPlannedSlots 依 pausedUntil 擋）。
+ *    以前用 trackedVendors，冷凍廠商要到解凍當天才冒出橘色 —— 杜永霖 10/31 解凍、固定二六，
+ *    10/31 那格照「上片日前 9 天交片」10/22 就該交，剪輯師卻到 10/31 才看得到（2026-10-20 查到）。
+ * ⚠️ 只給預排用。欠片／目標／催拍攝仍走 trackedVendors，冷凍月不算目標是對的。
+ */
+export function slotVendors(vendors: Vendor[]): Vendor[] {
+  return vendors.filter(v => {
+    if (!countsTowardTargets(v)) return false;
+    const status = getEffectiveVendorStatus(v);
+    return status === 'active' || (status === 'paused' && !!v.pausedUntil);
+  });
+}
+
+/**
  * 冷凍中回傳恢復日（沒填解除日期就回 null），不是冷凍中整支回 null。
  *
  * 顯示文字刻意留給呼叫端自己組：內部畫面講「冷凍中」，給外包剪輯師看的催剪清單講

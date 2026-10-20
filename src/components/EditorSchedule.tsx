@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
-  Asset, DismissedHabit, PlannedSlotMove, Post, ShootBooking, UserProfile, Vendor,
+  Asset, DismissedHabit, ExtraSlot, PlannedSlotMove, Post, ShootBooking, UserProfile, Vendor,
 } from '../types';
-import { trackedVendors, visibleVendors } from '../lib/vendorStatus';
+import { slotVendors, trackedVendors, visibleVendors } from '../lib/vendorStatus';
 import { listPlannedSlots } from '../lib/plannedSlots';
 import {
   buildSupplyPlan, buildHorizonDemands, describeSupply,
@@ -91,6 +91,7 @@ export default function EditorSchedule({ userProfile, onOpenVendorQueue }: {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [bookings, setBookings] = useState<ShootBooking[]>([]);
   const [slotMoves, setSlotMoves] = useState<PlannedSlotMove[]>([]);
+  const [extraSlots, setExtraSlots] = useState<ExtraSlot[]>([]);
   const [dismissedHabits, setDismissedHabits] = useState<DismissedHabit[]>([]);
 
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -116,7 +117,7 @@ export default function EditorSchedule({ userProfile, onOpenVendorQueue }: {
   }, [vendorIdsKey]);
 
   useEffect(() => {
-    if (vendorIds.length === 0) { setPosts([]); setAssets([]); setBookings([]); setSlotMoves([]); return; }
+    if (vendorIds.length === 0) { setPosts([]); setAssets([]); setBookings([]); setSlotMoves([]); setExtraSlots([]); return; }
 
     const subscribe = <T,>(name: string, setter: Dispatch<SetStateAction<T[]>>) =>
       vendorIds.map(vid => onSnapshot(
@@ -134,6 +135,8 @@ export default function EditorSchedule({ userProfile, onOpenVendorQueue }: {
       // 小編把預排拖到別天的紀錄。沒有它，剪輯師看到的預排會停在被拖走前的舊日子，
       // 跟小編的日曆對不起來 —— 這正是這一頁最該避免的事。
       ...subscribe<PlannedSlotMove>('plannedSlotMoves', setSlotMoves),
+      // 同事手動加的發片日（週規則表達不了的那幾次）
+      ...subscribe<ExtraSlot>('extraSlots', setExtraSlots),
     ];
     return () => unsubs.forEach(u => u());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -158,14 +161,15 @@ export default function EditorSchedule({ userProfile, onOpenVendorQueue }: {
 
   /** 這個月要畫的預排（含被挪過來的）。冷凍/終止的廠商在共用層就排掉了。 */
   const monthSlots = useMemo(() => listPlannedSlots({
-    vendors: trackedVendors(shownVendors),
+    vendors: slotVendors(shownVendors),
     moves: slotMoves,
     dismissed: dismissedHabits,
+    extras: extraSlots,
     posts,
     rangeStart: monthStart,
     rangeEnd: monthEnd,
     fulfilledWindowDays: 1,
-  }), [shownVendors, slotMoves, dismissedHabits, posts, monthStart, monthEnd]);
+  }), [shownVendors, slotMoves, extraSlots, dismissedHabits, posts, monthStart, monthEnd]);
 
   /**
    * 素材狀態。
@@ -178,9 +182,10 @@ export default function EditorSchedule({ userProfile, onOpenVendorQueue }: {
       demands: buildHorizonDemands({
         posts,
         slots: listPlannedSlots({
-          vendors: trackedVendors(myVendors),
+          vendors: slotVendors(myVendors),
           moves: slotMoves,
           dismissed: dismissedHabits,
+          extras: extraSlots,
           posts,
           rangeStart: now,
           rangeEnd: addDays(now, SUPPLY_HORIZON_DAYS),
@@ -192,7 +197,7 @@ export default function EditorSchedule({ userProfile, onOpenVendorQueue }: {
       posts,
       bookings,
     });
-  }, [posts, assets, bookings, myVendors, slotMoves, dismissedHabits]);
+  }, [posts, assets, bookings, myVendors, slotMoves, extraSlots, dismissedHabits]);
 
   const itemsByDay = useMemo(() => {
     const map = new Map<string, ScheduleItem[]>();

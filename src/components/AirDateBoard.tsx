@@ -4,17 +4,18 @@ import {
 } from 'date-fns';
 import { deleteField, doc, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Asset, DismissedHabit, PlannedSlotMove, Post, Vendor, deriveFlowStage } from '../types';
+import { Asset, DismissedHabit, ExtraSlot, PlannedSlotMove, Post, Vendor, deriveFlowStage } from '../types';
 import { useLiveCollection } from '../lib/liveData';
-import { buildPostIndex, isAssetSelectable, PostIndex, stockVisibleVendors, trackedVendors } from '../lib/vendorStatus';
-import { listPlannedSlots } from '../lib/plannedSlots';
+import { buildPostIndex, isAssetSelectable, PostIndex, slotVendors, stockVisibleVendors } from '../lib/vendorStatus';
+import { hasHabitOn, listPlannedSlots } from '../lib/plannedSlots';
 import { buildHorizonDemands, postDemandId, SUPPLY_HORIZON_DAYS } from '../lib/materialSupply';
 import { buildEditorQueue, deliveryDeadline, EDIT_LEAD_DAYS, EditorQueueRow } from '../lib/editorQueue';
 import { compareRawEditOrder, rankByVendor } from '../lib/editOrder';
 import { isClosedOutsideSystem } from '../lib/assetFlow';
 import { isWaitingVideoPost } from '../lib/postMatch';
 import toast from 'react-hot-toast';
-import { CalendarDays, ChevronLeft, ChevronRight, Flame, X } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Flame, Plus, X } from 'lucide-react';
+import { addExtraSlot, removeExtraSlot } from '../lib/extraSlots';
 
 /**
  * 排上片日：左邊是這個 IP 還沒排上片日的毛片，拖到右邊月曆的某一天＝這支預計那天上。
@@ -68,6 +69,7 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
   const posts = useLiveCollection<Post>('posts');
   const dismissedHabits = useLiveCollection<DismissedHabit>('dismissedHabits');
   const slotMoves = useLiveCollection<PlannedSlotMove>('plannedSlotMoves');
+  const extraSlots = useLiveCollection<ExtraSlot>('extraSlots');
 
   const [vendorPick, setVendorPick] = useState<string | null>(null);
   const [weekCursor, setWeekCursor] = useState(() => startOfWeek(new Date()));
@@ -88,9 +90,10 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
 
     // ⚠️ 配對視窗跟剪輯師畫面一樣固定 SUPPLY_HORIZON_DAYS，否則同一天在這裡跟剪輯師那邊會遞補到不同的片。
     const slots = listPlannedSlots({
-      vendors: trackedVendors(vendors),
+      vendors: slotVendors(vendors),
       moves: slotMoves,
       dismissed: dismissedHabits,
+      extras: extraSlots,
       posts,
       rangeStart: now,
       rangeEnd: addDays(now, SUPPLY_HORIZON_DAYS),
@@ -122,7 +125,7 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
       ipVendors, pending: [...pendingAll, ...deliveredAll], deliveredIds: new Set(deliveredAll.map(a => a.id!)),
       demandsByCell, queueByKey, autoDateOf, rank: rankByVendor(pendingAll),
     };
-  }, [vendors, assets, posts, dismissedHabits, slotMoves]);
+  }, [vendors, assets, posts, dismissedHabits, slotMoves, extraSlots]);
 
   const postById = useMemo(() => new Map(posts.map(p => [p.id!, p])), [posts]);
   /** 這支片綁的小編貼文（還有效的才算：沒被刪、沒掛別支、沒發布） */
@@ -148,6 +151,20 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
   const unplaced = mine.filter(a => !placedDay(a))
     .sort((x, y) => Number(!deliveredIds.has(x.id!)) - Number(!deliveredIds.has(y.id!)) || compareRawEditOrder(x, y));
   const myVideoPosts = posts.filter(p => p.vendorId === vendorId && p.contentType !== 'post' && p.scheduledAt);
+  /** 這個 IP 手動加的發片日，日子 → extraSlots id（刪除用） */
+  const extraByDay = new Map(extraSlots.filter(x => x.vendorId === vendorId).map(x => [x.date, x.id!]));
+  // 有合約支數卻沒設固定發片日：只有小編貼文和手動加的日子算發片日，系統不會自己補
+  const noHabits = !!vendor && (vendor.monthlyTargetVideos ?? 0) > 0 && !(vendor.postingHabits?.length);
+
+  const changeExtra = async (write: () => Promise<void>, done: string) => {
+    try {
+      await write();
+      toast.success(done);
+    } catch (error) {
+      console.error('發片日寫入失敗:', error);
+      toast.error('沒有存到，請再試一次');
+    }
+  };
 
   /**
    * 寫入一支片的位置。綁到某篇貼文時，原本綁那篇的片要退回待排（一篇只配一支）。
@@ -314,6 +331,11 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
             <div className="flex-1 min-w-0 bg-white rounded-2xl border border-black/5 flex flex-col lg:min-h-0 overflow-hidden">
               <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-black/5">
                 <span className="text-[15px] font-bold serif text-[#5A5A40] whitespace-nowrap">{format(gridDays[0], 'M/d')} – {format(gridDays[gridDays.length - 1], 'M/d')}</span>
+                {noHabits && !selectedId && (
+                  <span className="flex-1 min-w-0 text-[12px] text-gray-500 truncate" title="這個 IP 沒設固定發片日，只有小編排好的貼文和加上去的發片日會算，系統不會自動遞補。">
+                    這個 IP 沒設固定發片日，只有小編排好的貼文和加上去的發片日會算，系統不會自動遞補。
+                  </span>
+                )}
                 {selectedId && (
                   <span className="flex-1 min-w-0 text-[13px] text-[#5A5A40] font-bold truncate">
                     已選「{pending.find(a => a.id === selectedId)?.title}」，點一天放下
@@ -358,11 +380,30 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
                         selectedId && !past ? 'cursor-pointer hover:bg-[#5A5A40]/5' : '',
                       ].join(' ')}
                     >
-                      <div className="flex items-center gap-1">
+                      <div className="group/day flex items-center gap-1">
                         <span className={`text-[13px] font-bold w-6 h-6 flex items-center justify-center rounded-full shrink-0 ${isSameDay(d, today) ? 'bg-[#5A5A40] text-white' : 'text-gray-500'}`}>
                           {d.getDate() === 1 ? format(d, 'M/d') : d.getDate()}
                         </span>
-                        {isSlotDay && !past && <span className="text-[12px] text-orange-700 truncate">發片日</span>}
+                        {isSlotDay && !past && <span className="text-[12px] text-orange-700 truncate">{extraByDay.has(dateStr) ? '加的發片日' : '發片日'}</span>}
+                        {!past && extraByDay.has(dateStr) && (
+                          <button
+                            type="button"
+                            onClick={e => { e.stopPropagation(); void changeExtra(() => removeExtraSlot(extraByDay.get(dateStr)!), '已刪除這個發片日'); }}
+                            className="ml-auto p-0.5 rounded text-orange-700 hover:bg-orange-100 shrink-0"
+                            aria-label="刪除這個加的發片日"
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
+                        {!past && !isSlotDay && dayPosts.length === 0 && vendor && !hasHabitOn(vendor, d) && (
+                          <button
+                            type="button"
+                            onClick={e => { e.stopPropagation(); void changeExtra(() => addExtraSlot(vendor, d), `${format(d, 'M/d')} 加了一個發片日`); }}
+                            className="ml-auto hidden group-hover/day:flex items-center text-[12px] text-orange-700 px-1 rounded hover:bg-orange-100 whitespace-nowrap shrink-0"
+                          >
+                            <Plus size={12} />發片日
+                          </button>
+                        )}
                       </div>
 
                       {/* 小編排好的貼文：已掛片的只列標題；還在等片的可以把毛片拖上去綁定 */}

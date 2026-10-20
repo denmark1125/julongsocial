@@ -6,7 +6,8 @@ import {
   orderBy 
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Post, Vendor, Asset, Editor, DismissedHabit, PlannedSlotMove, ShootBooking } from '../types';
+import { Post, Vendor, Asset, Editor, DismissedHabit, ExtraSlot, PlannedSlotMove, ShootBooking } from '../types';
+import { useLiveCollection } from '../lib/liveData';
 import { trackedVendors } from '../lib/vendorStatus';
 import { listPlannedSlots } from '../lib/plannedSlots';
 import {
@@ -68,6 +69,8 @@ export default function TrackingExportModal({
   slotMoves,
   shootBookings
 }: TrackingExportModalProps) {
+  // 手動加的發片日（只有內部人員開得到這個視窗，直接用共用訂閱）
+  const extraSlots = useLiveCollection<ExtraSlot>('extraSlots');
   const [editors, setEditors] = useState<Editor[]>([]);
   const [selectedEditorId, setSelectedEditorId] = useState<string>('all');
   const [exportMode, setExportMode] = useState<'missing' | 'all' | 'schedule'>('missing');
@@ -198,6 +201,7 @@ export default function TrackingExportModal({
       vendors: trackedVendors(activeVendors),
       moves: slotMoves,
       dismissed: dismissedHabits,
+      extras: extraSlots,
       posts,
       rangeStart,
       rangeEnd,
@@ -243,6 +247,7 @@ export default function TrackingExportModal({
         vendors: trackedVendors(vendors),
         moves: slotMoves,
         dismissed: dismissedHabits,
+        extras: extraSlots,
         posts,
         rangeStart: new Date(),
         rangeEnd: addDays(new Date(), SUPPLY_HORIZON_DAYS),

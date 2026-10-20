@@ -45,7 +45,7 @@ import * as XLSX from 'xlsx';
 import { format, isPast, isToday, addDays, parseISO, getDay, setHours, setMinutes, startOfDay, isSameDay, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths, addMonths } from 'date-fns';
 import toast from 'react-hot-toast';
 import TrackingExportModal from './TrackingExportModal';
-import { DismissedHabit, MonthlyAdjustment } from '../types';
+import { DismissedHabit, ExtraSlot, MonthlyAdjustment } from '../types';
 import { visibleVendors, trackedVendorsForMonth, getContractTargets, getEffectiveMonthlyTarget, isAssetSelectable, buildPostIndex } from '../lib/vendorStatus';
 import { setPostStatus, togglePostConfirmation, togglePostPlatformPublished } from '../lib/postActions';
 
@@ -77,6 +77,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
   const postIndex = React.useMemo(() => buildPostIndex(posts), [posts]);
   const dismissedHabits = useLiveCollection<DismissedHabit>('dismissedHabits');
   const slotMoves = useLiveCollection<PlannedSlotMove>('plannedSlotMoves');
+  const extraSlots = useLiveCollection<ExtraSlot>('extraSlots');
   const shootBookings = useLiveCollection<ShootBooking>('shootBookings');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
@@ -138,6 +139,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
       vendors: [vendor],
       moves: slotMoves,
       dismissed: dismissedHabits,
+      extras: extraSlots,
       // 正在編輯的那一則不算佔位，否則編輯時它自己的時段會從建議裡消失
       posts: posts.filter(p => p.id !== editingPost?.id),
       rangeStart: today,
@@ -147,7 +149,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
     });
 
     setSuggestedDates(slots.slice(0, 6).map(s => ({ date: s.date, habit: s.habit })));
-  }, [formData.vendorId, formData.contentType, vendors, posts, editingPost, slotMoves, dismissedHabits]);
+  }, [formData.vendorId, formData.contentType, vendors, posts, editingPost, slotMoves, extraSlots, dismissedHabits]);
 
   // 從社群日曆點橘色預排進來：直接開新增貼文，廠商/時間/內容形式都填好。
   // 只吃一次就清掉，否則使用者關掉視窗後它會一直彈回來。

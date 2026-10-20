@@ -31,6 +31,7 @@ export type LiveCollectionName =
   | 'editors'
   | 'shootBookings'
   | 'plannedSlotMoves'
+  | 'extraSlots'
   | 'billingRecords'
   | 'billingContracts';
 

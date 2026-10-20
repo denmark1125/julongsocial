@@ -1,5 +1,6 @@
 import { addDays, format, getDay, isSameDay, parseISO, startOfDay } from 'date-fns';
-import { DismissedHabit, PlannedSlotMove, PostingHabit, Post, Vendor } from '../types';
+import { DismissedHabit, ExtraSlot, PlannedSlotMove, PostingHabit, Post, Vendor } from '../types';
+import { getEffectiveVendorStatus } from './vendorStatus';
 
 // 預排時段（社群日曆上的橘色卡）的唯一計算入口。
 //
@@ -19,6 +20,8 @@ export interface PlannedSlot {
   toDate: string;    // YYYY-MM-DD 目前落在哪一天
   moveId?: string;   // 有值代表它被挪過，再拖一次是改這筆而不是新增
   isMoved: boolean;
+  /** 有值＝這格是同事手動加的（extraSlots），不是週規則畫出來的。刪掉／改天直接動那一筆 */
+  extraId?: string;
 }
 
 export interface PlannedSlotOptions {
@@ -26,6 +29,8 @@ export interface PlannedSlotOptions {
   vendors: Vendor[];
   moves: PlannedSlotMove[];
   dismissed: DismissedHabit[];
+  /** 手動加的發片日。⚠️ 每個呼叫端都要傳，少一處那個畫面就看不到加的那格 */
+  extras?: ExtraSlot[];
   posts: Post[];
   rangeStart: Date;
   rangeEnd: Date;
@@ -71,9 +76,16 @@ function isFulfilled(posts: Post[], vendorId: string, date: Date, windowDays: nu
  */
 export function listPlannedSlots(opts: PlannedSlotOptions): PlannedSlot[] {
   const {
-    vendors, moves, dismissed, posts, rangeStart, rangeEnd,
+    vendors, moves, dismissed, extras = [], posts, rangeStart, rangeEnd,
     contentType, fulfilledWindowDays = 1,
   } = opts;
+
+  // 冷凍中的廠商只畫解凍日（含）之後的格子；呼叫端用 slotVendors 才會把它們傳進來
+  const startsFrom = new Map<string, string>();
+  vendors.forEach(v => {
+    if (getEffectiveVendorStatus(v) === 'paused') startsFrom.set(v.id!, v.pausedUntil || '9999-12-31');
+  });
+  const tooEarly = (vendorId: string, day: string) => (startsFrom.get(vendorId) ?? '') > day;
 
   const SCAN_PAD_DAYS = 31; // 單次調整不該跨超過一個月；掃描範圍前後各放寬一個月綽綽有餘
   const scanStart = startOfDay(addDays(rangeStart, -SCAN_PAD_DAYS));
@@ -95,6 +107,7 @@ export function listPlannedSlots(opts: PlannedSlotOptions): PlannedSlot[] {
 
         const move = findMove(moves, vendor.id!, habit.time, fromDate);
         const toDate = move?.toDate || fromDate;
+        if (tooEarly(vendor.id!, toDate)) continue;
         const landedOn = startOfDay(parseISO(toDate));
         if (landedOn < visibleStart || landedOn > visibleEnd) continue;
 
@@ -119,7 +132,49 @@ export function listPlannedSlots(opts: PlannedSlotOptions): PlannedSlot[] {
     }
   }
 
+  // 手動加的發片日：本身就是一筆實體，日子就是 date，不看挪移／略過
+  const vendorById = new Map(vendors.map(v => [v.id!, v]));
+  for (const extra of extras) {
+    const vendor = vendorById.get(extra.vendorId);
+    if (!vendor || !extra.date) continue;
+    if (contentType && extra.contentType !== contentType) continue;
+    if (tooEarly(vendor.id!, extra.date)) continue;
+    const landedOn = startOfDay(parseISO(extra.date));
+    if (landedOn < visibleStart || landedOn > visibleEnd) continue;
+    const [hours, minutes] = (extra.time || '20:00').split(':').map(Number);
+    const date = new Date(landedOn);
+    date.setHours(hours || 0, minutes || 0, 0, 0);
+    if (isFulfilled(posts, vendor.id!, date, fulfilledWindowDays)) continue;
+    slots.push({
+      vendorId: vendor.id!,
+      vendorName: vendor.name,
+      habit: {
+        daysOfWeek: [getDay(landedOn)],
+        time: extra.time,
+        contentTypes: [extra.contentType],
+        platforms: vendor.defaultPlatforms?.video ?? [],
+      },
+      time: extra.time,
+      date,
+      fromDate: extra.date,
+      toDate: extra.date,
+      isMoved: false,
+      extraId: extra.id,
+    });
+  }
+
   return slots.sort((a, b) => a.date.getTime() - b.date.getTime());
+}
+
+/** 這個廠商在這天有沒有照週規則畫出來的發片日（有就不給再加一格，兩格身分會撞在一起） */
+export function hasHabitOn(vendor: Pick<Vendor, 'postingHabits'>, day: Date): boolean {
+  return (vendor.postingHabits || []).some(h => h.daysOfWeek.includes(getDay(day)));
+}
+
+/** 加一格時預設的時間：這個 IP 第一個影片習慣時間，沒有就 20:00 */
+export function defaultSlotTime(vendor: Pick<Vendor, 'postingHabits'>): string {
+  const habits = vendor.postingHabits || [];
+  return (habits.find(h => !h.contentTypes || h.contentTypes.includes('video')) ?? habits[0])?.time || '20:00';
 }
 
 /** 某一天要顯示的預排。日曆每一格呼叫一次，不要每格都重跑 listPlannedSlots。 */

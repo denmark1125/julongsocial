@@ -191,3 +191,41 @@ describe('只能由後端寫入的表', () => {
     await assertFails(setDoc(doc(as('boss'), 'appConfig', 'drive'), { a: 1 }));
   });
 });
+
+describe('手動加的發片日 extraSlots（2026-10-20）', () => {
+  const slot = (extra: Record<string, unknown> = {}) => ({
+    vendorId: 'v1', date: '2026-10-28', time: '19:00', contentType: 'video', createdBy: 'staff', createdAt: NOW, ...extra,
+  });
+
+  it('員工可以加、改、刪；剪輯師同一筆都不行', async () => {
+    await assertSucceeds(setDoc(doc(as('staff'), 'extraSlots', 's1'), slot()));
+    await assertFails(setDoc(doc(as('ed'), 'extraSlots', 's2'), slot()));
+    await assertFails(updateDoc(doc(as('ed'), 'extraSlots', 's1'), { date: '2026-10-29' }));
+    await assertSucceeds(updateDoc(doc(as('staff'), 'extraSlots', 's1'), { date: '2026-10-29' }));
+    await assertFails(deleteDoc(doc(as('ed'), 'extraSlots', 's1')));
+    await assertSucceeds(deleteDoc(doc(as('staff'), 'extraSlots', 's1')));
+  });
+
+  it('日期、時間格式錯或多帶欄位就擋（格式對的同一筆可以）', async () => {
+    await assertFails(setDoc(doc(as('staff'), 'extraSlots', 'bad1'), slot({ date: '10/28' })));
+    await assertFails(setDoc(doc(as('staff'), 'extraSlots', 'bad2'), slot({ time: '7pm' })));
+    await assertFails(setDoc(doc(as('staff'), 'extraSlots', 'bad3'), slot({ assetId: 'a1' })));
+    await assertSucceeds(setDoc(doc(as('staff'), 'extraSlots', 'ok'), slot()));
+  });
+
+  it('剪輯師讀得到負責 IP 的，讀不到別家的', async () => {
+    await env.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), 'extraSlots', 'mine'), slot());
+      await setDoc(doc(ctx.firestore(), 'extraSlots', 'other'), slot({ vendorId: 'v2' }));
+    });
+    await assertSucceeds(getDoc(doc(as('ed'), 'extraSlots', 'mine')));
+    await assertFails(getDoc(doc(as('ed'), 'extraSlots', 'other')));
+  });
+});
+
+describe('毛片綁小編貼文 plannedPostId（2026-10-20）', () => {
+  it('員工可以寫字串，寫成非字串就擋', async () => {
+    await assertSucceeds(updateDoc(doc(as('staff'), 'assets', 'a1'), { plannedPostId: 'p1' }));
+    await assertFails(updateDoc(doc(as('staff'), 'assets', 'a1'), { plannedPostId: 123 }));
+  });
+});

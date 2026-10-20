@@ -320,6 +320,18 @@ service cloud.firestore {
              (!('updatedAt' in data) || data.updatedAt is string);
     }
 
+    // 手動加的發片日（週規則表達不了的特例，例如康青龍某週發兩支）。2026-10-20 起。
+    function isValidExtraSlot(data) {
+      return data.keys().hasOnly(['vendorId', 'date', 'time', 'contentType', 'createdBy', 'createdAt']) &&
+             data.keys().hasAll(['vendorId', 'date', 'time', 'contentType']) &&
+             data.vendorId is string &&
+             data.date is string && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+             data.time is string && data.time.matches('^[0-9]{2}:[0-9]{2}$') &&
+             data.contentType in ['video', 'post'] &&
+             (!('createdBy' in data) || data.createdBy is string) &&
+             (!('createdAt' in data) || data.createdAt is string);
+    }
+
     function isValidBillingContract(data) {
       return data.keys().hasAll(['vendorId', 'services', 'billingDay', 'totalAmount', 'status']) &&
              data.vendorId is string &&
@@ -555,6 +567,14 @@ service cloud.firestore {
     // ⚠️ delete 刻意**不是** isManager()：把預排拖回原本那天就是刪掉這筆紀錄，
     //    那是小編每天都會做的動作，收成 manager-only 等於拖出去就回不來了。
     //    這跟 dismissedHabits 的 delete 不同——那個是「反悔已刪除的排程」，比較接近管理動作。
+    // 手動加的發片日：讀取範圍比照 plannedSlotMoves（剪輯師只看得到自己負責的 IP，期限才算得出來），
+    // 寫入只有內部人員。
+    match /extraSlots/{id} {
+      allow read: if isAuthenticated() && editorCanAccessVendor(resource.data.vendorId);
+      allow create, update: if isAuthenticated() && !isEditorRole() && isValidExtraSlot(request.resource.data);
+      allow delete: if isAuthenticated() && !isEditorRole();
+    }
+
     match /plannedSlotMoves/{id} {
       // 剪輯師的「上片排程」頁要看到跟小編日曆一模一樣的預排位置。
       // 少了這條，被拖到別天的預排在剪輯師那邊會停在舊日子 —— 同一件事兩個答案。
