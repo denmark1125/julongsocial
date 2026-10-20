@@ -101,6 +101,14 @@ export default function RawStatus({ asset, mode, myName, large }: {
         </p>
       ) : summary ? (
         <p className={`${text} text-gray-500`}>{summary}</p>
+      ) : mode === 'internal' && asset.rawCheck?.unreadable ? (
+        // 認領的資料夾：系統權限看不到裡面（要全範圍 token），不是「沒有素材」。只給內部看，剪輯師那邊不顯示
+        <p className={`${text} text-gray-400 flex items-center gap-1 flex-wrap`}>
+          素材未檢查（系統看不到這個資料夾的內容）
+          <button type="button" onClick={recheck} disabled={busy} className="inline-flex items-center gap-0.5 text-gray-500 hover:text-[#5A5A40] underline underline-offset-2 disabled:opacity-50 whitespace-nowrap">
+            <RefreshCw size={11} /> 重新檢查
+          </button>
+        </p>
       ) : null}
 
       {reportLine}
