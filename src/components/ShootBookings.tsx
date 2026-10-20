@@ -39,7 +39,8 @@ function currentMonthDefault(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-export default function ShootBookings() {
+/** onOpenTool：跳到素材資料庫的「排上片日／排剪輯順序」子分頁（App 的 setActiveTab） */
+export default function ShootBookings({ onOpenTool }: { onOpenTool?: (tab: 'airDate' | 'editOrder') => void } = {}) {
   // 共用即時資料層：整個 session 只訂閱一次，切分頁不再重讀
   const vendors = useLiveCollection<Vendor>('vendors');
   const assets = useLiveCollection<Asset>('assets');
@@ -501,7 +502,7 @@ export default function ShootBookings() {
 
       {/* 拍完之後的下半條產線：素材進來了，接著是誰在剪、卡在誰手上。
           原本這段在獨立的「剪輯排序」分頁，但它只是一份清單，而且跟這頁講的是同一條產線。 */}
-      <ProductionFlowBoard vendors={vendors} assets={assets} posts={posts} me={me} />
+      <ProductionFlowBoard vendors={vendors} assets={assets} posts={posts} me={me} onOpenTool={onOpenTool} />
 
       <div className="bg-white rounded-[32px] border border-black/5 shadow-sm p-6 space-y-4">
         <div>

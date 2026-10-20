@@ -52,11 +52,14 @@ export default function ProductionFlowBoard({
   assets,
   posts,
   me,
+  onOpenTool,
 }: {
   vendors: Vendor[];
   assets: Asset[];
   posts: Post[];
   me: UserProfile | null;
+  /** 有傳就跳到素材資料庫的子分頁（2026-10-20 起的正式入口）；沒傳才退回跳出視窗 */
+  onOpenTool?: (tab: 'airDate' | 'editOrder') => void;
 }) {
   // 共用即時資料層：整個 session 只訂閱一次，切分頁不再重讀
   const editors = useLiveCollection<Editor>('editors');
@@ -155,15 +158,15 @@ export default function ProductionFlowBoard({
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {/* 一週一次的儀式，一顆按鈕就夠 —— 不新增分頁（那要動 App.tsx 與 Layout.tsx 兩處） */}
+          {/* 正式位置在素材資料庫的子分頁；這裡留捷徑，跳過去同一個畫面，不另開一份 */}
           <button
-            onClick={() => setIsPlanning(true)}
+            onClick={() => (onOpenTool ? onOpenTool('airDate') : setIsPlanning(true))}
             className="bg-[#5A5A40] text-white px-4 py-2 rounded-2xl shadow-sm font-bold flex items-center gap-2 hover:bg-[#4a4a35] transition-colors whitespace-nowrap"
           >
             <CalendarDays size={16} /> 排上片日
           </button>
           <button
-            onClick={() => setIsOrdering(true)}
+            onClick={() => (onOpenTool ? onOpenTool('editOrder') : setIsOrdering(true))}
             className="bg-white text-[#5A5A40] border border-[#5A5A40]/30 px-4 py-2 rounded-2xl shadow-sm font-bold flex items-center gap-2 hover:bg-[#5A5A40]/5 transition-colors whitespace-nowrap"
           >
             <ListOrdered size={16} /> 排剪輯順序

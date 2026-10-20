@@ -21,7 +21,8 @@ import {
   Film,
   Scissors,
   Receipt,
-  CalendarDays
+  CalendarDays,
+  ChevronDown
 } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
@@ -206,6 +207,25 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     { id: 'editorInvoice', label: '我的請款', icon: Receipt, roles: ['editor'] },
   ];
 
+  // 主選單底下的子項（側欄縮排顯示）。素材資料庫的兩個子功能，見 AssetWorkspace.tsx
+  const subItems: Record<string, { id: string; label: string }[]> = {
+    videos: [{ id: 'airDate', label: '排上片日' }, { id: 'editOrder', label: '排剪輯順序' }],
+  };
+  /**
+   * 子項目要點了主項目才展開（使用者 10-20：「按下後再展開，不是直接出現在欄位底下」）。
+   * 正在子頁面裡時一律展開，不然看不出自己在哪。
+   */
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const isExpanded = (id: string) => !!subItems[id] && (expanded[id] || subItems[id].some(sub => sub.id === activeTab));
+  const openItem = (id: string) => {
+    if (subItems[id]) setExpanded(prev => ({ ...prev, [id]: !isExpanded(id) }));
+    setActiveTab(id);
+  };
+  /** 在這個主項目或它的子項目裡 */
+  const isInItem = (id: string) => activeTab === id || !!subItems[id]?.some(sub => sub.id === activeTab);
+  const currentLabel = menuItems.find(i => i.id === activeTab)?.label
+    ?? Object.values(subItems).flat().find(sub => sub.id === activeTab)?.label;
+
   const filteredMenu = menuItems.filter(item => 
     !userProfile || item.roles.includes(userProfile.role)
   );
@@ -230,19 +250,35 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
 
         <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
           {filteredMenu.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={cn(
-                "w-full flex items-center p-3 rounded-xl transition-all",
-                activeTab === item.id 
-                  ? "bg-[#5A5A40] text-white shadow-md" 
-                  : "hover:bg-black/5 text-gray-600"
-              )}
-            >
-              <item.icon size={20} className={cn(isSidebarOpen ? "mr-3" : "mx-auto")} />
-              {isSidebarOpen && <span>{item.label}</span>}
-            </button>
+            <div key={item.id} className="space-y-1">
+              <button
+                onClick={() => openItem(item.id)}
+                className={cn(
+                  "w-full flex items-center p-3 rounded-xl transition-all",
+                  activeTab === item.id || (!isSidebarOpen && isInItem(item.id))
+                    ? "bg-[#5A5A40] text-white shadow-md" 
+                    : isInItem(item.id) ? "bg-[#5A5A40]/10 text-[#5A5A40] font-bold" : "hover:bg-black/5 text-gray-600"
+                )}
+              >
+                <item.icon size={20} className={cn(isSidebarOpen ? "mr-3" : "mx-auto")} />
+                {isSidebarOpen && <span>{item.label}</span>}
+                {isSidebarOpen && subItems[item.id] && (
+                  <ChevronDown size={16} className={cn("ml-auto transition-transform", isExpanded(item.id) ? "rotate-180" : "")} />
+                )}
+              </button>
+              {isSidebarOpen && isExpanded(item.id) && subItems[item.id].map(sub => (
+                <button
+                  key={sub.id}
+                  onClick={() => setActiveTab(sub.id)}
+                  className={cn(
+                    "w-full flex items-center pl-11 pr-3 py-2 rounded-xl text-sm transition-all whitespace-nowrap",
+                    activeTab === sub.id ? "bg-[#5A5A40] text-white shadow-md" : "hover:bg-black/5 text-gray-500"
+                  )}
+                >
+                  {sub.label}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
 
@@ -310,22 +346,39 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
               
               <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
                 {filteredMenu.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => {
-                      setActiveTab(item.id);
-                      setIsMobileMenuOpen(false);
-                    }}
-                    className={cn(
-                      "w-full flex items-center p-4 rounded-2xl transition-all",
-                      activeTab === item.id 
-                        ? "bg-[#5A5A40] text-white shadow-lg" 
-                        : "hover:bg-black/5 text-gray-600"
-                    )}
-                  >
-                    <item.icon size={22} className="mr-4" />
-                    <span className="font-bold">{item.label}</span>
-                  </button>
+                  <div key={item.id} className="space-y-1">
+                    <button
+                      onClick={() => {
+                        openItem(item.id);
+                        // 有子項目的先留著選單讓人選子項
+                        if (!subItems[item.id]) setIsMobileMenuOpen(false);
+                      }}
+                      className={cn(
+                        "w-full flex items-center p-4 rounded-2xl transition-all",
+                        activeTab === item.id 
+                          ? "bg-[#5A5A40] text-white shadow-lg" 
+                          : isInItem(item.id) ? "bg-[#5A5A40]/10 text-[#5A5A40]" : "hover:bg-black/5 text-gray-600"
+                      )}
+                    >
+                      <item.icon size={22} className="mr-4" />
+                      <span className="font-bold">{item.label}</span>
+                      {subItems[item.id] && (
+                        <ChevronDown size={18} className={cn("ml-auto transition-transform", isExpanded(item.id) ? "rotate-180" : "")} />
+                      )}
+                    </button>
+                    {isExpanded(item.id) && subItems[item.id].map(sub => (
+                      <button
+                        key={sub.id}
+                        onClick={() => { setActiveTab(sub.id); setIsMobileMenuOpen(false); }}
+                        className={cn(
+                          "w-full flex items-center pl-14 pr-4 py-3 rounded-2xl font-bold transition-all whitespace-nowrap",
+                          activeTab === sub.id ? "bg-[#5A5A40] text-white shadow-lg" : "hover:bg-black/5 text-gray-500"
+                        )}
+                      >
+                        {sub.label}
+                      </button>
+                    ))}
+                  </div>
                 ))}
               </nav>
 
@@ -369,7 +422,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
               <Menu size={24} />
             </button>
             <h2 className="text-xl md:text-2xl font-semibold serif truncate">
-              {menuItems.find(i => i.id === activeTab)?.label}
+              {currentLabel}
             </h2>
           </div>
           
@@ -468,12 +521,12 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
               onClick={() => setActiveTab(item.id)}
               className={cn(
                 "flex-1 min-w-0 flex flex-col justify-center items-center px-1 py-2 rounded-xl transition-all min-h-[64px]",
-                activeTab === item.id ? "text-[#5A5A40]" : "text-gray-400"
+                isInItem(item.id) ? "text-[#5A5A40]" : "text-gray-400"
               )}
             >
               <div className={cn(
                 "p-1 rounded-lg transition-all",
-                activeTab === item.id ? "bg-[#5A5A40]/10" : ""
+                isInItem(item.id) ? "bg-[#5A5A40]/10" : ""
               )}>
                 <item.icon size={20} />
               </div>

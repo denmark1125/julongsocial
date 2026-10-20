@@ -63,7 +63,11 @@ const postDay = (p: Post) => (p.scheduledAt || '').slice(0, 10);
 /** 放下去要寫什麼：哪一天、綁哪一篇（null＝不綁）。整個 null＝退回待排 */
 type Target = { date: Date; postId: string | null } | null;
 
-export default function AirDateBoard({ onClose }: { onClose: () => void }) {
+/**
+ * `embedded`：放在素材資料庫的「排上片日」子分頁裡（2026-10-20 起主要入口），不是跳出視窗。
+ * 沒有 onClose 時不顯示關閉鈕。
+ */
+export default function AirDateBoard({ onClose, embedded = false }: { onClose?: () => void; embedded?: boolean }) {
   const vendors = useLiveCollection<Vendor>('vendors');
   const assets = useLiveCollection<Asset>('assets');
   const posts = useLiveCollection<Post>('posts');
@@ -295,8 +299,8 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 p-2 sm:p-4 flex">
-      <div className="bg-[#F5F5F0] rounded-2xl w-full flex flex-col shadow-xl overflow-hidden">
+    <div className={embedded ? 'flex h-[calc(100vh-190px)] min-h-[560px]' : 'fixed inset-0 bg-black/50 z-50 p-2 sm:p-4 flex'}>
+      <div className={`bg-[#F5F5F0] rounded-2xl w-full flex flex-col overflow-hidden ${embedded ? 'border border-black/5' : 'shadow-xl'}`}>
         {/* 標題列 */}
         <div className="bg-white flex items-center justify-between gap-3 px-4 sm:px-6 py-3 border-b border-black/5">
           <div className="min-w-0">
@@ -307,9 +311,11 @@ export default function AirDateBoard({ onClose }: { onClose: () => void }) {
               把左邊的片拖到那一天或小編的貼文上＝預計那天上，拖回左邊＝取消。剪輯師交片期限＝上片日前 {EDIT_LEAD_DAYS} 天。
             </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 shrink-0" aria-label="關閉">
-            <X className="w-5 h-5" />
-          </button>
+          {onClose && (
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 shrink-0" aria-label="關閉">
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* IP 篩選：比照社群日曆的按鈕列 */}

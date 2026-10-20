@@ -13,7 +13,7 @@ import Dashboard from './components/Dashboard';
 import VendorManagement from './components/VendorManagement';
 import PostManagement from './components/PostManagement';
 import CalendarView, { PostPrefill } from './components/CalendarView';
-import AssetDatabase from './components/AssetDatabase';
+import AssetWorkspace, { AssetWorkspaceTab } from './components/AssetWorkspace';
 import ShootBookings from './components/ShootBookings';
 import UserManagement from './components/UserManagement';
 import BillingManagement from './components/BillingManagement';
@@ -219,6 +219,9 @@ export default function App() {
     vendors: ['engineer', 'manager', 'employee'],
     posts: ['engineer', 'manager', 'employee'],
     videos: ['engineer', 'manager', 'employee'],
+    // 素材資料庫的兩個子分頁（AssetWorkspace）
+    airDate: ['engineer', 'manager', 'employee'],
+    editOrder: ['engineer', 'manager', 'employee'],
     shootBookings: ['engineer', 'manager', 'employee'],
     // 已併入 shootBookings（製作進度），保留是為了讓舊的 ?tab=editPriority 連結仍受角色控管
     editPriority: ['engineer', 'manager', 'employee'],
@@ -278,8 +281,11 @@ export default function App() {
       case 'vendors': return <VendorManagement />;
       case 'posts': return <PostManagement prefill={postPrefill} onPrefillConsumed={() => setPostPrefill(null)} />;
       case 'calendar': return <CalendarView onPlanPost={(prefill) => { setPostPrefill(prefill); setActiveTab('posts'); }} />;
-      case 'videos': return <AssetDatabase />;
-      case 'shootBookings': return <ShootBookings />;
+      case 'videos':
+      case 'airDate':
+      case 'editOrder':
+        return <AssetWorkspace tab={activeTab as AssetWorkspaceTab} setTab={setActiveTab} />;
+      case 'shootBookings': return <ShootBookings onOpenTool={setActiveTab} />;
       // 舊的 ?tab=editPriority 連結（LINE 推播/書籤）導回合併後的製作進度，不要掉到 dashboard
       case 'editPriority': return <ShootBookings />;
       case 'billing': return <BillingManagement />;

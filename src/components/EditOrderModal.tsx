@@ -17,12 +17,14 @@ import { X, Loader2, CheckCircle2, ListOrdered, Flame, ChevronUp, ChevronDown } 
  * ⚠️ 儲存時整個 IP 的待剪片一起寫成 1…n：只寫動過的那幾支，會跟沒寫過的片比出跟畫面不一樣的順序。
  */
 export default function EditOrderModal({
-  vendors, assets, defaultVendorId, onClose,
+  vendors, assets, defaultVendorId, onClose, embedded = false,
 }: {
   vendors: Vendor[];
   assets: Asset[];
   defaultVendorId?: string;
-  onClose: () => void;
+  /** 沒傳＝不顯示關閉鈕（內嵌在素材資料庫的「排剪輯順序」子分頁時） */
+  onClose?: () => void;
+  embedded?: boolean;
 }) {
   const isPending = (a: Asset) =>
     a.type === 'video' && !a.voidedAt && a.status !== 'archived' &&
@@ -64,7 +66,9 @@ export default function EditOrderModal({
       });
       await batch.commit();
       toast.success('剪輯順序已更新');
-      onClose();
+      // 內嵌時頁面留著：清掉暫存的調整，畫面改照剛存進去的順序顯示
+      setOrders({});
+      onClose?.();
     } catch (e: any) {
       toast.error(e?.message || '儲存失敗');
     } finally {
@@ -73,16 +77,20 @@ export default function EditOrderModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-xl">
+    <div className={embedded ? 'flex justify-center' : 'fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4'}>
+      <div className={embedded
+        ? 'bg-white rounded-2xl w-full max-w-3xl h-[calc(100vh-190px)] min-h-[480px] flex flex-col border border-black/5'
+        : 'bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-xl'}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
           <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
             <ListOrdered className="w-5 h-5 text-[#5A5A40]" />
             排剪輯順序
           </h3>
-          <button onClick={onClose} disabled={busy} className="text-slate-400 hover:text-slate-600 disabled:opacity-40" aria-label="關閉">
-            <X className="w-5 h-5" />
-          </button>
+          {onClose && (
+            <button onClick={onClose} disabled={busy} className="text-slate-400 hover:text-slate-600 disabled:opacity-40" aria-label="關閉">
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         <div className="px-6 pt-4 space-y-3">
@@ -107,7 +115,7 @@ export default function EditOrderModal({
           )}
         </div>
 
-        <div className="px-6 py-4 overflow-y-auto space-y-2">
+        <div className="px-6 py-4 overflow-y-auto flex-1 min-h-0 space-y-2">
           {list.length === 0 ? (
             <p className="text-center text-slate-400 py-12">目前沒有待剪的片。</p>
           ) : list.map((a, i) => (
@@ -153,8 +161,8 @@ export default function EditOrderModal({
         </div>
 
         <div className="px-6 py-4 border-t border-slate-200 flex justify-end gap-3">
-          <button onClick={onClose} disabled={busy} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-40">
-            取消
+          <button onClick={() => (onClose ? onClose() : setOrders({}))} disabled={busy || (!onClose && !changed)} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-40">
+            {onClose ? '取消' : '還原'}
           </button>
           <button
             onClick={handleSave}
