@@ -1218,14 +1218,8 @@ app.post("/api/drive/review-upload-done", async (req, res) => {
     }, { merge: true });
     const entry: any = { version, fileId, name: f.name, uploadedAt: now, previewToken, publicPermissionId };
     if (f.durationSec) entry.durationSec = f.durationSec;
-    // ⚠️ 覆蓋：新版登記成功之後才刪舊檔（使用者 10-21：資料夾每支片只留一個檔）。
-    //    順序不能反：先刪舊的、新的又傳壞，雲端就一個都沒有。紀錄（第幾版、何時）保留，只標 deletedAt。
-    const kept = await Promise.all(existing.map(async r => {
-      if (r.deletedAt) return r;
-      try { await deleteFilePermanently(r.fileId); } catch (err: any) { console.warn("delete old review version failed:", r.fileId, err?.message); return r; }
-      return { ...r, deletedAt: now };
-    }));
-    await adminDb.collection("assets").doc(asset.id).update({ reviewFiles: [...kept, entry] });
+    // ⚠️ 舊版本（v1、v2…）的檔案保留，不覆蓋：使用者 10-21 決定留著，前後版本才能對照。
+    await adminDb.collection("assets").doc(asset.id).update({ reviewFiles: [...existing, entry] });
     return res.json({ previewUrl: `/v/${previewToken}` });
   } catch (e: any) {
     if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
