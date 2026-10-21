@@ -35,7 +35,7 @@ import { buildPostIndex, isAssetSelectable, slotVendors, trackedVendors, visible
 import {
   Scissors, Film, CheckCircle2, UploadCloud, Clock, Flame,
   CalendarClock, Check, ChevronDown, ChevronRight, PackageCheck, Search, X,
-  ExternalLink,
+  ExternalLink, RotateCw,
 } from 'lucide-react';
 import { addDays, differenceInCalendarDays, format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -556,7 +556,7 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
 
 export function AssetCard({
   asset, vendorName, posts, busy, onAdvance, onUpload, onUploadFiles, onUndoSubmit, onUndoUpload, showClientBadge,
-  selected, onToggleSelect, compact, stacked, hideUrgentBadge, reporterName, upload,
+  selected, onToggleSelect, compact, stacked, hideUrgentBadge, reporterName, upload, onResubmit,
 }: {
   // 這個專案沒有安裝 @types/react，JSX.IntrinsicAttributes 不存在，
   // 所以 key 要自己宣告成 prop，否則 tsc 會當成多餘屬性報錯。
@@ -592,6 +592,8 @@ export function AssetCard({
   reporterName?: string;
   /** 這支正在系統直傳（見 uploadQueue）：上傳那一步換成進度條 */
   upload?: UploadItem;
+  /** 「上傳修改版」：送審後業主要改，直接傳新版本（有傳才顯示，見 resubmitAsset） */
+  onResubmit?: () => void;
 }) {
   const due = getFlowDueInfo(asset, posts);
   /** 電腦版精簡卡排成「資訊在左、按鈕在右」一橫列 */
@@ -659,6 +661,13 @@ export function AssetCard({
             沒填的舊素材整塊不渲染，卡片維持原本的樣子。 */}
         <EditingBrief brief={asset.editingBrief} clipNotes={asset.clipNotes} desktopLarge={compact} />
 
+        {/* 送審過幾版、最後一次什麼時候送：剪輯師跟內部都一眼看得出這支改過幾次（2026-10-21） */}
+        {!!asset.submissions?.length && (flowStage === 'client_review' || flowStage === 'to_upload') && !asset.cloudUploadedAt && (
+          <p className={`text-[13px] text-gray-500 mt-1 ${compact ? 'lg:text-[15px]' : ''}`}>
+            第 {Math.max(asset.submissions.length, asset.reviewFiles?.length || 0)} 版・{format(parseISO(asset.submissions[asset.submissions.length - 1].submittedAt), 'M/d HH:mm')} 送審
+          </p>
+        )}
+
         {/* 沒有這個連結的話，系統告訴他「有 3 個片段」之後他還是得自己去 Drive 翻資料夾 ——
             整套自動歸檔的價值會在最後一哩斷掉。
             ⚠️ 舊素材的 url 可能是單一檔案或任何網址，不一定是資料夾，所以文案分兩種。
@@ -717,6 +726,17 @@ export function AssetCard({
       {/* 按鈕與「按錯了」連結包成同一欄：電腦版精簡卡把這一欄放在右側固定寬度。
           手機版這層 div 的 space-y-3 跟外層一樣，間距不變。 */}
       <div className={rowOnDesktop ? 'space-y-3 lg:w-52 lg:shrink-0' : 'space-y-3'}>
+      {/* 業主要改：直接傳修改版，不用撤回、不用重選長度。片留在原本那一欄 */}
+      {onResubmit && upload?.status !== 'uploading' && (flowStage === 'client_review' || flowStage === 'to_upload') && !asset.cloudUploadedAt && (
+        <button
+          type="button"
+          onClick={onResubmit}
+          disabled={busy}
+          className="w-full max-w-lg flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border-2 border-[#5A5A40]/30 text-[#5A5A40] text-sm font-bold hover:bg-[#5A5A40]/5 disabled:opacity-40 whitespace-nowrap"
+        >
+          <RotateCw size={14} /> 上傳修改版
+        </button>
+      )}
       {upload?.status === 'uploading' ? (
         // 這支在傳：按鈕換成進度條，其他卡片照常可以按（可以同時傳好幾支）
         <div className="max-w-lg rounded-xl border border-sky-200 bg-sky-50 px-3 py-2">
@@ -878,6 +898,9 @@ export default function EditorAssetQueue({
   /** 交片送審時選的影片檔（必選：送審就是把片傳到審核區，2026-10-21） */
   const [submitFile, setSubmitFile] = useState<File | null>(null);
   const [reviewUploadOn] = useState(isReviewUploadOn);
+  /** 「上傳修改版」的對象與檔案（2026-10-21） */
+  const [resubmitAsset, setResubmitAsset] = useState<Asset | null>(null);
+  const [resubmitFile, setResubmitFile] = useState<File | null>(null);
 
   // 每個指派廠商各自訂閱單一文件，不用集合查詢——避開 Firestore `in` 條件上限，也符合權限規則(逐廠商路徑核可)
   useEffect(() => {
@@ -1330,6 +1353,51 @@ export default function EditorAssetQueue({
     requestClientCopy(asset.id);
   };
 
+  /**
+   * 上傳修改版：附加一筆送審紀錄、背景傳新版本（v2、v3…，舊版保留可對照）。給業主的預覽連結不變、自動換新版。
+   * ⚠️ 業主已經通過（待上傳雲端）又傳修改版 → 退回業主審核中：新版要業主重新確認，免得通過的是舊版、上架的是新版。
+   */
+  const confirmResubmit = async () => {
+    const asset = resubmitAsset;
+    const file = resubmitFile;
+    if (!asset || !file || !auth.currentUser) return;
+    if (getUploads().some(u => u.assetId === asset.id && u.status === 'uploading')) {
+      toast.error('這支上一個檔案還在上傳，等右下角傳完再傳修改版');
+      return;
+    }
+    const byName = userProfile?.displayName || userProfile?.username;
+    const now = new Date().toISOString();
+    setBusyId(asset.id!);
+    try {
+      const back = deriveFlowStage(asset) === 'to_upload'
+        ? buildFlowUpdate(asset, 'client_review', { byUid: auth.currentUser.uid, byName, note: '上傳修改版，請業主重新確認' })
+        : {};
+      await updateDoc(doc(db, 'assets', asset.id!), {
+        ...back,
+        submittedAt: now,
+        submissions: [...(asset.submissions || []), {
+          version: (asset.submissions?.length || 0) + 1, submittedAt: now, ...(byName ? { byName } : {}),
+        }],
+      });
+      setResubmitAsset(null);
+      setResubmitFile(null);
+      toast.success('修改版上傳中，可以繼續做別的事');
+      startUpload(asset.id!, asset.title, async onProgress => {
+        await uploadReviewFile(asset, file, onProgress);
+        toast.success(`「${asset.title}」修改版已傳到審核區`);
+        return true;
+      }).catch(error => {
+        console.error('Resubmit upload failed:', error);
+        toast.error(`「${asset.title}」修改版上傳失敗：${error?.message || '請在右下角重試'}`);
+      });
+    } catch (error) {
+      console.error('Resubmit failed:', error);
+      toast.error('操作失敗，請稍後再試');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const markUploaded = async (asset: Asset) => {
     if (!auth.currentUser) return;
     setBusyId(asset.id!);
@@ -1371,6 +1439,7 @@ export default function EditorAssetQueue({
     busy: busyId === a.id,
     upload: uploads.find(u => u.assetId === a.id),
     reporterName: userProfile?.displayName || userProfile?.username,
+    onResubmit: reviewUploadOn ? () => { setResubmitFile(null); setResubmitAsset(a); } : undefined,
   });
 
   // ── 隊伍頁的收合區。電腦版跟手機版擺的位置不同（見下方兩欄版面），
@@ -1881,6 +1950,35 @@ export default function EditorAssetQueue({
           等到請款頁才補，片已經上傳、記憶也模糊了。
           ⚠️ 這裡刻意不顯示金額：分級雖然決定單價，但金額是財務的事，
              剪輯師只要分辨秒數就好（老闆明確要求，別再把 NT$ 加回來）。 */}
+      {/* 上傳修改版：只要選檔，不用再選長度 */}
+      {resubmitAsset && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onMouseDown={() => !busyId && setResubmitAsset(null)}>
+          <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-xl" onMouseDown={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold serif text-[#5A5A40]">上傳修改版</h3>
+            <p className="mt-2 text-base text-gray-600 break-words">{resubmitAsset.title}</p>
+            <p className="mt-1 text-sm text-gray-500">
+              會存成第 {Math.max(resubmitAsset.submissions?.length || 0, resubmitAsset.reviewFiles?.length || 0) + 1} 版，舊版保留；給業主的預覽連結會自動換成新版。
+            </p>
+            <label className="mt-4 flex items-center gap-2 p-3 rounded-2xl border-2 border-dashed border-black/15 hover:border-[#5A5A40]/50 cursor-pointer">
+              <UploadCloud size={18} className="shrink-0 text-[#5A5A40]" />
+              <span className={`min-w-0 truncate text-sm ${resubmitFile ? 'text-gray-800 font-bold' : 'text-gray-500'}`}>
+                {resubmitFile ? `${resubmitFile.name}（${(resubmitFile.size / 1024 ** 2).toFixed(0)} MB）` : '選擇修改後的影片'}
+              </span>
+              <input type="file" accept="video/*" className="hidden" onChange={e => setResubmitFile(e.target.files?.[0] || null)} />
+            </label>
+            <div className="mt-5 flex gap-3">
+              <button type="button" onClick={() => setResubmitAsset(null)} disabled={!!busyId}
+                className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-bold disabled:opacity-40">取消</button>
+              <button type="button" onClick={confirmResubmit} disabled={!!busyId || !resubmitFile}
+                className="flex-1 py-3 rounded-xl bg-[#5A5A40] text-white font-bold disabled:opacity-40">
+                {busyId ? '送出中…' : '確定上傳'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {submitAsset && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           onMouseDown={() => !busyId && setSubmitAsset(null)}>
