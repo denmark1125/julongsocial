@@ -483,7 +483,7 @@ export default function BillingManagement() {
                 />
               </div>
               <button 
-                onClick={generateMonthlyRecords}
+                onClick={() => generateMonthlyRecords()}
                 className="p-2 bg-[#F5F5F0] text-[#5A5A40] rounded-xl hover:bg-gray-200 transition-colors"
                 title="生成本月帳單"
               >
@@ -580,7 +580,7 @@ export default function BillingManagement() {
                         <p className="text-gray-400 italic text-sm mb-2">本月尚無帳務紀錄</p>
                         {contracts.length > 0 && (
                           <button 
-                            onClick={generateMonthlyRecords}
+                            onClick={() => generateMonthlyRecords()}
                             className="text-xs font-bold text-[#5A5A40] hover:underline flex items-center justify-center mx-auto"
                           >
                             <Calendar size={14} className="mr-1" />
