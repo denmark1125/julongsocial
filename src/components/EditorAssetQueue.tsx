@@ -29,7 +29,7 @@ import {
 } from '../lib/materialSupply';
 import RawStatus from './RawStatus';
 import { buildCompanyQueue, editorQueueView } from '../lib/companyQueue';
-import { isReviewUploadOn, startUpload, useUploads, type UploadItem } from '../lib/uploadQueue';
+import { getUploads, isReviewUploadOn, startUpload, useUploads, type UploadItem } from '../lib/uploadQueue';
 import { listPlannedSlots } from '../lib/plannedSlots';
 import { buildPostIndex, isAssetSelectable, slotVendors, trackedVendors, visibleVendors as visibleVendorsOf } from '../lib/vendorStatus';
 import {
@@ -1151,6 +1151,12 @@ export default function EditorAssetQueue({
     const file = submitFile;
     if (!asset || !auth.currentUser) return;
     if (reviewUploadOn && !file) return;
+    // 同一支上一個檔還在傳（例如送審後撤回、換檔再送）：新的檔會被上傳排程忽略，剪輯師卻以為換成功了。
+    // 先擋下來講清楚（10-21 使用者測試時遇到）
+    if (reviewUploadOn && getUploads().some(u => u.assetId === asset.id && u.status === 'uploading')) {
+      toast.error('這支上一個檔案還在上傳，等右下角傳完再送審');
+      return;
+    }
     setBusyId(asset.id!);
     const byName = userProfile?.displayName || userProfile?.username;
     const now = new Date().toISOString();
