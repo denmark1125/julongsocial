@@ -28,6 +28,7 @@ import {
   buildHorizonDemands, buildSupplyPlan, describeSupply, SUPPLY_HORIZON_DAYS,
 } from '../lib/materialSupply';
 import RawStatus from './RawStatus';
+import { startUpload, useUploads, type UploadItem } from '../lib/uploadQueue';
 import { listPlannedSlots } from '../lib/plannedSlots';
 import { buildPostIndex, isAssetSelectable, slotVendors, trackedVendors, visibleVendors as visibleVendorsOf } from '../lib/vendorStatus';
 import {
@@ -552,7 +553,7 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
 
 export function AssetCard({
   asset, vendorName, posts, busy, onAdvance, onUpload, onUploadFiles, onUndoSubmit, onUndoUpload, showClientBadge,
-  selected, onToggleSelect, compact, stacked, hideUrgentBadge, reporterName,
+  selected, onToggleSelect, compact, stacked, hideUrgentBadge, reporterName, upload,
 }: {
   // 這個專案沒有安裝 @types/react，JSX.IntrinsicAttributes 不存在，
   // 所以 key 要自己宣告成 prop，否則 tsc 會當成多餘屬性報錯。
@@ -586,6 +587,8 @@ export function AssetCard({
   hideUrgentBadge?: boolean;
   /** 剪輯師回報素材問題時記的名字（見 RawStatus） */
   reporterName?: string;
+  /** 這支正在系統直傳（見 uploadQueue）：上傳那一步換成進度條 */
+  upload?: UploadItem;
 }) {
   const due = getFlowDueInfo(asset, posts);
   /** 電腦版精簡卡排成「資訊在左、按鈕在右」一橫列 */
@@ -711,7 +714,23 @@ export function AssetCard({
       {/* 按鈕與「按錯了」連結包成同一欄：電腦版精簡卡把這一欄放在右側固定寬度。
           手機版這層 div 的 space-y-3 跟外層一樣，間距不變。 */}
       <div className={rowOnDesktop ? 'space-y-3 lg:w-52 lg:shrink-0' : 'space-y-3'}>
-      <FlowSteps asset={asset} busy={busy} onAdvance={onAdvance} onUpload={onUpload} onUploadFiles={onUploadFiles} compact={compact} scheduledNote={scheduledNote} />
+      {upload?.status === 'uploading' ? (
+        // 這支在傳：按鈕換成進度條，其他卡片照常可以按（可以同時傳好幾支）
+        <div className="max-w-lg rounded-xl border border-sky-200 bg-sky-50 px-3 py-2">
+          <div className="flex items-center justify-between text-[13px] font-bold text-sky-800 whitespace-nowrap">
+            <span className="flex items-center gap-1"><UploadCloud size={13} /> 上傳中</span>
+            <span>{upload.percent}%</span>
+          </div>
+          <div className="mt-1.5 h-1.5 rounded-full bg-sky-100 overflow-hidden">
+            <div className="h-full bg-sky-600 transition-all" style={{ width: `${upload.percent}%` }} />
+          </div>
+        </div>
+      ) : (
+        <FlowSteps asset={asset} busy={busy} onAdvance={onAdvance} onUpload={onUpload} onUploadFiles={onUploadFiles} compact={compact} scheduledNote={scheduledNote} />
+      )}
+      {upload?.status === 'failed' && (
+        <p className="text-[13px] text-red-600">上傳沒有成功，可以再按一次上傳</p>
+      )}
 
       {onUndoSubmit && deriveFlowStage(asset) === 'client_review' && !asset.cloudUploadedAt && !asset.editorInvoiceId && !asset.usedInPostId && (
         <button
@@ -966,6 +985,7 @@ export default function EditorAssetQueue({
 
   // ⚠️ 不看貼文是否已排程／發布（見 isOnEditorDesk）：剪了就要付錢，片不能因為小編排了就消失。
   const myVideos = assets.filter(a => isOnEditorDesk(a, myEditorId));
+  const uploads = useUploads();
 
   // 指名給我、但廠商不在我範圍內的片讀不到 vendor 文件，退回素材上的名稱快照
   const vendorName = (vendorId: string) =>
@@ -1225,7 +1245,7 @@ export default function EditorAssetQueue({
   /** `list` 省略時沿用分區清單；隊伍頁沒有分區，要把自己那一批傳進來 */
   const markUploadedBatch = async (list?: Asset[]) => {
     if (!auth.currentUser) return;
-    const targets = (list ?? currentList).filter(a => selectedIds[a.id!]);
+    const targets = (Array.isArray(list) ? list : currentList).filter(a => selectedIds[a.id!]);
     if (targets.length === 0) return;
     if (!window.confirm(`把選取的 ${targets.length} 支都標記為已上傳雲端？
 
@@ -1261,49 +1281,46 @@ export default function EditorAssetQueue({
   };
 
   /**
-   * 系統內上傳：開上傳視窗 → 後端登記檔案 → 走原本的 markUploaded（請款依據只有那一條路）。
-   * 取消視窗＝什麼都不做；上傳失敗＝不標記，讓剪輯師重試或改走「直接標記」。
+   * 系統內上傳：選檔 → 直傳公司雲端 → 後端登記檔案 → 標記上傳雲端（請款依據只有 buildCloudUploadUpdate 那一條路）。
+   * ⚠️ 進度放在 uploadQueue（模組層）：可以同時傳好幾支、切分頁也不會不見，卡片與右下角面板都看得到。
+   *    不碰 busyId —— 那是單一值，同時傳兩支會互相蓋掉。
+   * 取消選檔＝什麼都不做；上傳失敗＝不標記，面板上可以重試。
    */
-  const uploadAndMark = async (asset: Asset) => {
+  const uploadAndMark = (asset: Asset) => {
     if (!auth.currentUser) return;
-    setBusyId(asset.id!);
-    let files;
-    const toastId = `upload_${asset.id}`;
-    try {
-      files = await uploadFinishedFiles(asset, p => {
-        toast.loading(
-          `上傳中 ${p.percent}%${p.fileCount > 1 ? `（第 ${p.fileIndex + 1}／${p.fileCount} 個檔）` : ''}，傳完前請不要關掉這頁`,
-          { id: toastId },
-        );
-      });
-      toast.dismiss(toastId);
-    } catch (error: any) {
+    startUpload(asset.id!, asset.title, async onProgress => {
+      const files = await uploadFinishedFiles(asset, p => onProgress(p.percent));
+      if (files.length === 0) return false;
+      await writeUploaded(asset);
+      toast.success(`「${asset.title}」已上傳完成，列入請款`);
+      return true;
+    }).catch(error => {
       console.error('In-app finished upload failed:', error);
-      toast.error(error?.message || '上傳失敗，請再試一次', { id: toastId });
-      setBusyId(null);
-      return;
-    }
-    setBusyId(null);
-    if (files.length === 0) return;
-    await markUploaded(asset);
+      toast.error(`「${asset.title}」上傳失敗：${error?.message || '請再試一次'}`);
+    });
+  };
+
+  /** 標記上傳雲端的那一筆寫入。失敗會丟出去，由呼叫端決定怎麼告訴人 */
+  const writeUploaded = async (asset: Asset) => {
+    await updateDoc(
+      doc(db, 'assets', asset.id!),
+      buildCloudUploadUpdate(asset, {
+        byUid: auth.currentUser?.uid,
+        byName: userProfile?.displayName || userProfile?.username,
+        // 按下這顆鈕的人就是要請這支款的人。在這裡凍結，之後換剪輯師也不會把舊片的錢算到新人頭上。
+        billableEditorId: myEditorId,
+      })
+    );
+    // 上傳＝業主通過（見 buildCloudUploadUpdate），標記後就是 ready ⇒ 送客戶資料夾
+    requestClientCopy(asset.id);
   };
 
   const markUploaded = async (asset: Asset) => {
     if (!auth.currentUser) return;
     setBusyId(asset.id!);
     try {
-      await updateDoc(
-        doc(db, 'assets', asset.id!),
-        buildCloudUploadUpdate(asset, {
-          byUid: auth.currentUser.uid,
-          byName: userProfile?.displayName || userProfile?.username,
-          // 按下這顆鈕的人就是要請這支款的人。在這裡凍結，之後換剪輯師也不會把舊片的錢算到新人頭上。
-          billableEditorId: myEditorId,
-        })
-      );
-      // 上傳＝業主通過（見 buildCloudUploadUpdate），標記後就是 ready ⇒ 送客戶資料夾
-      requestClientCopy(asset.id);
-      toast.success('已上傳完成，這支已完成、列入本月請款');
+      await writeUploaded(asset);
+      toast.success('已標記完成，列入請款');
       // 同上，不推即時通知，交給每日彙總
     } catch (error) {
       console.error('Mark uploaded failed:', error);
@@ -1335,6 +1352,7 @@ export default function EditorAssetQueue({
     vendorName: vendorName(a.vendorId),
     posts,
     busy: busyId === a.id,
+    upload: uploads.find(u => u.assetId === a.id),
     reporterName: userProfile?.displayName || userProfile?.username,
   });
 
@@ -1781,7 +1799,9 @@ export default function EditorAssetQueue({
             <button
               type="button"
               disabled={batchBusy}
-              onClick={markUploadedBatch}
+              // ⚠️ 一定要包一層箭頭函式：直接傳 markUploadedBatch 會把點擊事件當成 list 傳進去，
+              //    .filter 當場出錯、按了沒反應（10-21 使用者回報「勾選後全部完成沒反應」）
+              onClick={() => markUploadedBatch()}
               className="px-4 py-2 rounded-xl bg-[#5A5A40] text-white text-[13px] font-bold disabled:opacity-50"
             >
               {batchBusy ? '處理中…' : `把選取的 ${selectedCount} 支標記已上傳`}

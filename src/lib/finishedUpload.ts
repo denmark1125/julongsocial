@@ -125,10 +125,9 @@ export async function uploadFinishedFiles(
   const grand = files.reduce((n, f) => n + f.size, 0) || 1;
   let doneBytes = 0;
   const uploaded: UploadedFile[] = [];
-  // 傳到一半關掉分頁＝白傳，先擋一下
-  const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
-  window.addEventListener('beforeunload', warn);
-  try {
+  // 關頁提醒由 uploadQueue 統一處理（帶「還有 N 支」），這裡不再各掛一個
+  onProgress?.({ fileIndex: 0, fileCount: files.length, fileName: files[0].name, percent: 0 });
+  {
     for (const [i, file] of files.entries()) {
       const { uploadUrl } = await callApi('/api/drive/editor-upload-session', {
         assetId: asset.id, fileName: file.name, size: file.size, mimeType: file.type || 'application/octet-stream',
@@ -138,8 +137,6 @@ export async function uploadFinishedFiles(
       doneBytes += file.size;
       uploaded.push({ id: result.id, name: file.name, sizeBytes: file.size });
     }
-  } finally {
-    window.removeEventListener('beforeunload', warn);
   }
   await callApi('/api/drive/editor-upload-done', { assetId: asset.id, fileIds: uploaded.map(f => f.id) });
   return uploaded;

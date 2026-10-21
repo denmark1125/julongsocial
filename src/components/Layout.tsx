@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import UploadPanel from './UploadPanel';
 import { 
   LayoutDashboard, 
   Users, 
@@ -512,6 +513,9 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
         <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8">
           {children}
         </div>
+
+        {/* 剪輯師上傳成片的進度（可以同時傳好幾支，切分頁也還在）。見 UploadPanel */}
+        {isEditor && <UploadPanel />}
 
         {/* Bottom Navigation - Mobile */}
         <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-black/5 px-2 py-2 flex justify-around items-stretch md:hidden z-40 pb-safe">
