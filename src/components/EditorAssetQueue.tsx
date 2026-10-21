@@ -131,7 +131,7 @@ function Step({
 }
 
 function FlowSteps({
-  asset, busy, onAdvance, onUpload, onUploadFiles, compact,
+  asset, busy, onAdvance, onUpload, onUploadFiles, compact, scheduledNote,
 }: {
   asset: Asset;
   busy: boolean;
@@ -150,6 +150,12 @@ function FlowSteps({
    *    「我的所有片」那頁維持兩段式（在那裡看得出整支片走到哪才有意義）。
    */
   compact?: boolean;
+  /**
+   * 這支已經被小編排程／發布（例如「小編已排 10/20 上片」）。有值時上傳那一步只剩一顆「標記完成」：
+   * 小編排得出來＝成片雲端早就有了，剪輯師不用再傳一次（使用者 10-21）。
+   * 按下去走同一個 onUpload（記請款依據＋業主審核中自動轉業主通過，見 buildCloudUploadUpdate）。
+   */
+  scheduledNote?: string;
 }) {
   const stage = deriveFlowStage(asset);
   const { convert, upload } = stepStates(asset);
@@ -170,6 +176,34 @@ function FlowSteps({
   // ⚠️ 兩顆一樣大、並排，而不是一顆大按鈕＋一行小字：10-15 實測時使用者反映按了就直接跳上傳視窗，
   //    習慣自己丟檔的人找不到另一條路（09-30 毛片上傳就是只剩一條路、同事整個棄用）。
   const uploadChoice = !!onUploadFiles && !!onUpload && upload === 'active';
+
+  if (scheduledNote && onUpload && upload === 'active') {
+    return (
+      <div className="flex items-stretch gap-2 max-w-lg">
+        {!(compact && convert === 'done') && (
+          <Step
+            state={convert}
+            label="交片送審"
+            caption={convertCaption}
+            icon={<Film size={12} />}
+            tone="primary"
+            busy={busy}
+            onClick={onAdvance}
+            compact={compact}
+          />
+        )}
+        <ChoiceButton
+          label="標記完成"
+          caption={`${scheduledNote}，標記後列入請款`}
+          icon={<CheckCircle2 size={12} />}
+          solid
+          busy={busy}
+          onClick={onUpload}
+          compact={compact}
+        />
+      </div>
+    );
+  }
 
   if (uploadChoice) {
     // 三格並排：交片送審｜上傳雲端｜已自行上傳，一樣大。
@@ -562,6 +596,16 @@ export function AssetCard({
   const cardDeadlineStatus = cardDeadline ? deadlineStatus(cardDeadline, asset.createdAt) : null;
   const days = getFlowDaysStuck(asset);
   const stale = isFlowStale(asset);
+  // 已經被小編排程／發布、還沒標記完成：上傳那一步改成只有「標記完成」（見 FlowSteps 的 scheduledNote）
+  const usedPost = asset.usedInPostId && !asset.cloudUploadedAt ? posts.find(x => x.id === asset.usedInPostId) : undefined;
+  // 逐支指派到「不是自己負責的 IP」的片，剪輯師依規則讀不到那家的貼文（例 10-21 謝謝的 CWORKS）。
+  // 讀得到這家任何一篇貼文＝找不到就是被刪了；一篇都讀不到＝沒權限，只能說「已掛上貼文」。
+  const postUnreadable = !!asset.usedInPostId && !asset.cloudUploadedAt && asset.status === 'used'
+    && !usedPost && !posts.some(x => x.vendorId === asset.vendorId);
+  const scheduledNote = usedPost?.status === 'published' ? '已發布'
+    : usedPost?.status === 'scheduled' && usedPost.scheduledAt ? `小編已排 ${format(parseISO(usedPost.scheduledAt), 'M/d')} 上片`
+      : postUnreadable ? '小編已掛上貼文'
+        : undefined;
 
   return (
     <div className={rowOnDesktop
@@ -624,17 +668,6 @@ export function AssetCard({
           </a>
         )}
 
-        {/* 已經被小編排程／發布、但還沒上傳雲端：講出來，剪輯師才知道這支為什麼該先傳（陳述，不派工） */}
-        {(flowStage === 'client_review' || flowStage === 'to_upload') && !asset.cloudUploadedAt && (() => {
-          const p = asset.usedInPostId ? posts.find(x => x.id === asset.usedInPostId) : undefined;
-          if (!p || (p.status !== 'scheduled' && p.status !== 'published')) return null;
-          return (
-            <p className={`text-[13px] text-gray-500 mt-1 ${compact ? 'lg:text-[15px]' : ''}`}>
-              {p.status === 'published' ? '已發布' : `小編已排 ${format(parseISO(p.scheduledAt), 'M/d')} 上片`}
-            </p>
-          );
-        })()}
-
         {/* 素材夠不夠剪＋「素材有問題？」回報。只在還要剪的時候出現（2026-10-20 漏片防護） */}
         {(flowStage === 'to_edit' || flowStage === 'revising') && (
           <RawStatus asset={asset} mode="editor" myName={reporterName} large={compact} />
@@ -677,7 +710,7 @@ export function AssetCard({
       {/* 按鈕與「按錯了」連結包成同一欄：電腦版精簡卡把這一欄放在右側固定寬度。
           手機版這層 div 的 space-y-3 跟外層一樣，間距不變。 */}
       <div className={rowOnDesktop ? 'space-y-3 lg:w-52 lg:shrink-0' : 'space-y-3'}>
-      <FlowSteps asset={asset} busy={busy} onAdvance={onAdvance} onUpload={onUpload} onUploadFiles={onUploadFiles} compact={compact} />
+      <FlowSteps asset={asset} busy={busy} onAdvance={onAdvance} onUpload={onUpload} onUploadFiles={onUploadFiles} compact={compact} scheduledNote={scheduledNote} />
 
       {onUndoSubmit && deriveFlowStage(asset) === 'client_review' && !asset.cloudUploadedAt && !asset.editorInvoiceId && !asset.usedInPostId && (
         <button
