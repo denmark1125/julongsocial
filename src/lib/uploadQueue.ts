@@ -121,11 +121,6 @@ export function useUploads(): UploadItem[] {
  * ⚠️ 這樣使用者可以在正式站自己測，剪輯師在他自己電腦上照舊是原本的送審，不受影響。測完確認沒問題再拿掉這個開關、全面開。
  */
 export function isReviewUploadOn(): boolean {
-  try {
-    const q = new URLSearchParams(window.location.search).get('reviewUpload');
-    if (q === 'on' || q === 'off') localStorage.setItem('julong.reviewUpload', q);
-    return localStorage.getItem('julong.reviewUpload') === 'on';
-  } catch {
-    return false;
-  }
+  // 2026-10-21 使用者測完、決定全面打開：所有剪輯師送審都走系統上傳。開關只剩名字，之後可整個拿掉。
+  return true;
 }
