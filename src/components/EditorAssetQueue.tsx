@@ -69,7 +69,7 @@ const ACTIONABLE: Bucket[] = ['to_edit', 'to_upload'];
 
 const TABS: { key: Bucket; title: string; icon: ReactNode; onClass: string }[] = [
   { key: 'to_edit', title: '待剪', icon: <Film size={12} />, onClass: 'bg-[#5A5A40] border-[#5A5A40] text-white' },
-  { key: 'to_upload', title: '待上傳雲端', icon: <UploadCloud size={12} />, onClass: 'bg-sky-600 border-sky-600 text-white' },
+  { key: 'to_upload', title: '送審中', icon: <UploadCloud size={12} />, onClass: 'bg-sky-600 border-sky-600 text-white' },
   { key: 'done', title: '已完成', icon: <PackageCheck size={12} />, onClass: 'bg-gray-500 border-gray-500 text-white' },
 ];
 
@@ -132,170 +132,111 @@ function Step({
   );
 }
 
+/**
+ * 剪輯師卡片的動作區。2026-10-21 重新設計（使用者：「上傳雲端」被一直問在幹嘛、藍色按鈕讓人以為還要上傳）：
+ * 一句狀態＋這一步要做的事，不再三四顆並排。
+ *
+ * - 待剪：只有「交片送審」（選剪好的影片上傳給業主看）。沒輪到的步驟不擺出來。
+ * - 送審後：狀態一句（業主看片中／業主已通過・第幾版・幾號送審）＋兩顆：
+ *     「上傳修改版」（業主要改）｜「完成這支」（業主 OK 後按，列入請款）。
+ *   ⚠️ 完成一定由剪輯師按（使用者 10-21）：業主常只在 LINE 回 OK、不會去預覽頁按，
+ *      目標放在剪輯師身上——他不按就不能請款，所以不會漏。業主審核中直接按也可以（自動轉業主通過，見 buildCloudUploadUpdate）。
+ * - 舊片（送審時影片沒經過系統、成片可能還不在雲端）：完成照樣一顆；下面一行小字「成片還沒放到雲端？選檔上傳」走系統代傳。
+ * - 完成後：一行「✓ 幾號完成・已列入請款」。
+ */
 function FlowSteps({
-  asset, busy, onAdvance, onUpload, onUploadFiles, compact, scheduledNote,
+  asset, busy, onAdvance, onUpload, onUploadFiles, onResubmit, compact, scheduledNote,
 }: {
   asset: Asset;
   busy: boolean;
   onAdvance?: () => void;
+  /** 完成這支（記請款依據；送審時有傳到審核區的，順便把那支搬進成片夾） */
   onUpload?: () => void;
-  /**
-   * 有傳＝這個 IP 設了成片夾，可以在系統裡直接傳（系統代傳，檔案算聚浪的）。
-   * 這時上傳那一步變成兩顆並排：「上傳雲端」（開上傳視窗）與「已自行上傳」（只標記，舊流程）。
-   * ⚠️ 不能把「只標記」拿掉：09-30 毛片上傳就是因為只剩一條路、被綁在上傳視窗前，同事整個棄用。
-   */
+  /** 舊片用：成片還沒在雲端，選檔由系統代傳 */
   onUploadFiles?: () => void;
-  /**
-   * 排程清單裡只留當下能按的那一步。
-   * ⚠️ 那邊每一張卡都停在「待剪」，第二步永遠是灰的卻佔掉一半寬度 ——
-   *    一顆按不下去的按鈕不會幫人理解進度，只會讓人想按。
-   *    「我的所有片」那頁維持兩段式（在那裡看得出整支片走到哪才有意義）。
-   */
+  /** 業主要改：上傳修改版 */
+  onResubmit?: () => void;
   compact?: boolean;
-  /**
-   * 這支已經被小編排程／發布（例如「小編已排 10/20 上片」）。有值時上傳那一步只剩一顆「標記完成」：
-   * 小編排得出來＝成片雲端早就有了，剪輯師不用再傳一次（使用者 10-21）。
-   * 按下去走同一個 onUpload（記請款依據＋業主審核中自動轉業主通過，見 buildCloudUploadUpdate）。
-   */
+  /** 小編已排程／發布：成片雲端早就有了（使用者 10-21），完成鈕說明照講列入請款即可 */
   scheduledNote?: string;
 }) {
   const stage = deriveFlowStage(asset);
-  // 送審時影片已經傳到審核區：上傳雲端不用再選檔，一顆按鈕（系統把那支搬進成片夾）
-  const reviewReady = !!asset.reviewFiles?.length;
   const { convert, upload } = stepStates(asset);
+  const big = compact ? 'lg:text-[15px]' : '';
 
-  const convertCaption =
-    convert === 'done'
-      ? asset.submittedAt ? `${format(parseISO(asset.submittedAt), 'MM/dd')} 已送審` : '已送審'
-      : '剪完按這裡交給業主審';
-
-  const uploadCaption =
-    upload === 'done'
-      ? asset.cloudUploadedAt ? `${format(parseISO(asset.cloudUploadedAt), 'MM/dd')} 已上傳` : '已上傳'
-      : upload === 'active'
-        ? '審片通過、傳完雲端後按這裡'
-        : '送審後才需要上傳';
-
-  // IP 有設成片夾＝兩條路並排：系統代傳（主）、自己傳好只標記（次）。
-  // ⚠️ 兩顆一樣大、並排，而不是一顆大按鈕＋一行小字：10-15 實測時使用者反映按了就直接跳上傳視窗，
-  //    習慣自己丟檔的人找不到另一條路（09-30 毛片上傳就是只剩一條路、同事整個棄用）。
-  const uploadChoice = !!onUploadFiles && !!onUpload && upload === 'active';
-
-  if ((scheduledNote || reviewReady) && onUpload && upload === 'active') {
+  if (upload === 'done') {
     return (
-      <div className="flex items-stretch gap-2 max-w-lg">
-        {!(compact && convert === 'done') && (
-          <Step
-            state={convert}
-            label="交片送審"
-            caption={convertCaption}
-            icon={<Film size={12} />}
-            tone="primary"
-            busy={busy}
-            onClick={onAdvance}
-            compact={compact}
-          />
-        )}
-        <ChoiceButton
-          label={scheduledNote ? '標記完成' : '上傳雲端'}
-          // 只講剪輯師需要知道的：按了就完成、會算錢。不講小編排了哪天、發布沒有（使用者 10-21：講太多會誤解）
-          caption={scheduledNote ? '標記後列入請款' : '影片已在審核區，按了就完成'}
-          icon={<CheckCircle2 size={12} />}
-          solid
-          busy={busy}
-          onClick={onUpload}
-          compact={compact}
-        />
-      </div>
+      <p className={`max-w-lg flex items-center gap-1.5 text-[13px] font-bold text-green-700 ${big}`}>
+        <CheckCircle2 size={14} />
+        {asset.cloudUploadedAt ? `${format(parseISO(asset.cloudUploadedAt), 'MM/dd')} 完成` : '已完成'}・已列入請款
+      </p>
     );
   }
 
-  if (uploadChoice) {
-    // 三格並排：交片送審｜上傳雲端｜已自行上傳，一樣大。
-    // ⚠️ 10-15 試過「送審縮成一行小字」（被說弱化了已送審）和「右半邊兩顆直疊」（被說醜），都退掉了。
-    // 排程清單（compact）本來就收掉做完的那一步，剩兩顆左右各半，說明可以寫長一點。
-    const showConvert = !(compact && convert === 'done');
+  if (convert === 'active') {
     return (
-      <div className="flex items-stretch gap-1.5 max-w-lg">
-        {showConvert && (
-          <Step
-            state={convert}
-            label="交片送審"
-            caption={convertCaption}
-            icon={<Film size={12} />}
-            tone="primary"
-            busy={busy}
-            onClick={onAdvance}
-            compact={compact}
-            tight
-          />
-        )}
-        <ChoiceButton
-          label="上傳雲端"
-          caption={showConvert ? '系統直接傳' : '選檔案，系統直接傳'}
-          icon={<UploadCloud size={12} />}
-          solid
-          busy={busy}
-          onClick={onUploadFiles!}
-          compact={compact}
-          tight={showConvert}
-        />
-        <ChoiceButton
-          label="已自行上傳"
-          caption={showConvert ? '只標記' : '自己傳好了，只要標記'}
-          icon={<CheckCircle2 size={12} />}
-          busy={busy}
-          onClick={onUpload!}
-          compact={compact}
-          tight={showConvert}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-stretch gap-2 max-w-lg">
-      {/* ⚠️ compact 時做完的那一步也收掉，不只是沒輪到的那一步。
-          2026-10-02 行動版實測：待上傳的卡片上「交片送審」已是灰的按不下去，
-          卻佔走一半寬度，把「上傳雲端」的說明擠成三行並留下孤字「主」。
-          收掉之後剩下的那一步拿到整個寬度，字就不斷了。 */}
-      {!(compact && convert === 'done') && (
-      <Step
-        state={convert}
-        // 剪輯師端一律講「送審」——「轉成片」是我們內部的講法，對外包剪輯師不直觀
-        label="交片送審"
-        caption={convertCaption}
-        icon={<Film size={12} />}
-        tone="primary"
-        busy={busy}
+      <button
+        type="button"
         onClick={onAdvance}
-        compact={compact}
-      />
-      )}
-      {/* IP 還沒設成片資料夾：系統傳不了，只剩「自己傳好、回來標記」。
-          ⚠️ 用跟三格版同一顆「已自行上傳」，不要叫「上傳雲端」——10-15 實測時同一個人看到兩種長相、
-             同一個名字一個會開上傳視窗一個不會，以為壞了。 */}
-      {upload === 'active' && onUpload && (
-        <ChoiceButton
-          label="已自行上傳"
-          caption="傳完雲端後按這裡標記"
-          icon={<CheckCircle2 size={12} />}
-          busy={busy}
-          onClick={onUpload}
-          compact={compact}
-        />
-      )}
-      {!(compact && upload !== 'active') && !(upload === 'active' && onUpload) && (
-        <Step
-          state={upload}
-          label="上傳雲端"
-          caption={uploadCaption}
-          icon={<UploadCloud size={12} />}
-          tone="cloud"
-          busy={busy}
-          onClick={onUpload}
-          compact={compact}
-        />
+        disabled={busy || !onAdvance}
+        className={`w-full max-w-lg rounded-xl px-3 py-2.5 text-left border bg-[#5A5A40] border-[#5A5A40] text-white shadow-sm hover:bg-[#4a4a35] disabled:opacity-60`}
+      >
+        <span className={`flex items-center gap-1.5 text-sm font-bold whitespace-nowrap ${big}`}>
+          <Film size={14} /> {busy ? '處理中...' : '交片送審'}
+        </span>
+        <span className="block text-[12px] mt-0.5 text-white/75 whitespace-nowrap overflow-hidden text-ellipsis">選剪好的影片，上傳給業主看</span>
+      </button>
+    );
+  }
+
+  const versions = Math.max(asset.submissions?.length || 0, asset.reviewFiles?.length || 0);
+  const status = stage === 'client_review' ? '業主看片中' : '業主已通過';
+  const legacy = !asset.reviewFiles?.length;
+  return (
+    <div className="max-w-lg space-y-2">
+      <p className={`flex items-center gap-1.5 text-[13px] text-gray-600 ${big}`}>
+        <Clock size={13} className="shrink-0" />
+        <span className="font-bold">{status}</span>
+        <span className="truncate">
+          {versions > 1 ? `・第 ${versions} 版` : ''}
+          {asset.submittedAt ? `・${format(parseISO(asset.submittedAt), 'MM/dd')} 送審` : ''}
+        </span>
+      </p>
+      <div className="flex items-stretch gap-2">
+        {onResubmit && (
+          <button
+            type="button"
+            onClick={onResubmit}
+            disabled={busy}
+            className="flex-1 min-w-0 rounded-xl px-3 py-2 text-left border-2 border-[#5A5A40]/25 text-[#5A5A40] hover:bg-[#5A5A40]/5 disabled:opacity-60"
+          >
+            <span className={`flex items-center gap-1.5 text-sm font-bold whitespace-nowrap ${big}`}><RotateCw size={13} /> 上傳修改版</span>
+            <span className="block text-[12px] mt-0.5 text-[#5A5A40]/70 whitespace-nowrap overflow-hidden text-ellipsis">業主要改時用</span>
+          </button>
+        )}
+        {onUpload && (
+          <button
+            type="button"
+            onClick={onUpload}
+            disabled={busy}
+            className="flex-1 min-w-0 rounded-xl px-3 py-2 text-left border bg-green-600 border-green-600 text-white shadow-sm hover:bg-green-700 disabled:opacity-60"
+          >
+            <span className={`flex items-center gap-1.5 text-sm font-bold whitespace-nowrap ${big}`}><CheckCircle2 size={13} /> {busy ? '處理中...' : '完成這支'}</span>
+            <span className="block text-[12px] mt-0.5 text-white/80 whitespace-nowrap overflow-hidden text-ellipsis">
+              {scheduledNote || !legacy ? '業主 OK 後按，列入請款' : '成片在雲端後按，列入請款'}
+            </span>
+          </button>
+        )}
+      </div>
+      {legacy && !scheduledNote && onUploadFiles && (
+        <button
+          type="button"
+          onClick={onUploadFiles}
+          disabled={busy}
+          className="text-[13px] text-sky-700 hover:text-sky-900 underline underline-offset-2 disabled:opacity-50"
+        >
+          成片還沒放到雲端？選檔上傳
+        </button>
       )}
     </div>
   );
@@ -661,12 +602,6 @@ export function AssetCard({
             沒填的舊素材整塊不渲染，卡片維持原本的樣子。 */}
         <EditingBrief brief={asset.editingBrief} clipNotes={asset.clipNotes} desktopLarge={compact} />
 
-        {/* 送審過幾版、最後一次什麼時候送：剪輯師跟內部都一眼看得出這支改過幾次（2026-10-21） */}
-        {!!asset.submissions?.length && (flowStage === 'client_review' || flowStage === 'to_upload') && !asset.cloudUploadedAt && (
-          <p className={`text-[13px] text-gray-500 mt-1 ${compact ? 'lg:text-[15px]' : ''}`}>
-            第 {Math.max(asset.submissions.length, asset.reviewFiles?.length || 0)} 版・{format(parseISO(asset.submissions[asset.submissions.length - 1].submittedAt), 'M/d HH:mm')} 送審
-          </p>
-        )}
 
         {/* 沒有這個連結的話，系統告訴他「有 3 個片段」之後他還是得自己去 Drive 翻資料夾 ——
             整套自動歸檔的價值會在最後一哩斷掉。
@@ -726,17 +661,6 @@ export function AssetCard({
       {/* 按鈕與「按錯了」連結包成同一欄：電腦版精簡卡把這一欄放在右側固定寬度。
           手機版這層 div 的 space-y-3 跟外層一樣，間距不變。 */}
       <div className={rowOnDesktop ? 'space-y-3 lg:w-52 lg:shrink-0' : 'space-y-3'}>
-      {/* 業主要改：直接傳修改版，不用撤回、不用重選長度。片留在原本那一欄 */}
-      {onResubmit && upload?.status !== 'uploading' && (flowStage === 'client_review' || flowStage === 'to_upload') && !asset.cloudUploadedAt && (
-        <button
-          type="button"
-          onClick={onResubmit}
-          disabled={busy}
-          className="w-full max-w-lg flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border-2 border-[#5A5A40]/30 text-[#5A5A40] text-sm font-bold hover:bg-[#5A5A40]/5 disabled:opacity-40 whitespace-nowrap"
-        >
-          <RotateCw size={14} /> 上傳修改版
-        </button>
-      )}
       {upload?.status === 'uploading' ? (
         // 這支在傳：按鈕換成進度條，其他卡片照常可以按（可以同時傳好幾支）
         <div className="max-w-lg rounded-xl border border-sky-200 bg-sky-50 px-3 py-2">
@@ -749,7 +673,7 @@ export function AssetCard({
           </div>
         </div>
       ) : (
-        <FlowSteps asset={asset} busy={busy} onAdvance={onAdvance} onUpload={onUpload} onUploadFiles={onUploadFiles} compact={compact} scheduledNote={scheduledNote} />
+        <FlowSteps asset={asset} busy={busy} onAdvance={onAdvance} onUpload={onUpload} onUploadFiles={onUploadFiles} onResubmit={onResubmit} compact={compact} scheduledNote={scheduledNote} />
       )}
       {upload?.status === 'failed' && (
         <p className="text-[13px] text-red-600">上傳沒有成功，可以再按一次上傳</p>
@@ -1253,7 +1177,7 @@ export default function EditorAssetQueue({
       toast.error('這支已經送進請款單了，不能再取消上傳');
       return;
     }
-    if (!window.confirm('確定要取消「已上傳雲端」嗎？取消後這支不會列入請款，要重新上傳並再按一次。')) return;
+    if (!window.confirm('確定要取消「完成」嗎？取消後這支不會列入請款，要再按一次「完成這支」。')) return;
     setBusyId(asset.id!);
     try {
       await updateDoc(
@@ -1284,12 +1208,20 @@ export default function EditorAssetQueue({
     if (!auth.currentUser) return;
     const targets = (Array.isArray(list) ? list : currentList).filter(a => selectedIds[a.id!]);
     if (targets.length === 0) return;
-    if (!window.confirm(`把選取的 ${targets.length} 支都標記為已上傳雲端？
+    if (!window.confirm(`把選取的 ${targets.length} 支都標記為完成？
 
 這一步決定這幾支算不算你這個月的請款。`)) return;
 
+    // 修改版還在傳的不能一起完成：完成會把「目前最新版」搬進成片夾，傳到一半的新版會被晾在審核區
+    if (targets.some(a => getUploads().some(u => u.assetId === a.id && u.status === 'uploading'))) {
+      toast.error('選取的片裡有影片還在上傳，等右下角傳完再按');
+      return;
+    }
     setBatchBusy(true);
     try {
+      // 送審時影片傳到審核區的：先搬進成片夾（跟單支「完成這支」同一步，見 markUploaded）。
+      // ⚠️ 10-21 前漏了這步：批次完成的片留在審核區、給業主的預覽連結也沒收掉
+      for (const asset of targets) if (asset.reviewFiles?.length) await finalizeReviewFile(asset);
       // Firestore 一批上限 500，取 400 留餘裕（比照後台舊帳盤點的做法）
       for (let i = 0; i < targets.length; i += 400) {
         const batch = writeBatch(db);
@@ -1307,7 +1239,7 @@ export default function EditorAssetQueue({
       }
       // 業主早就通過的片，這一下就變成 ready ⇒ 請後端看要不要送客戶（沒通過的後端會自己跳過）
       targets.forEach(a => requestClientCopy(a.id));
-      toast.success(`已標記 ${targets.length} 支上傳完成`);
+      toast.success(`已完成 ${targets.length} 支，列入請款`);
       setSelectedIds({});
     } catch (error) {
       console.error('Batch mark uploaded failed:', error);
@@ -1403,6 +1335,10 @@ export default function EditorAssetQueue({
     setBusyId(asset.id!);
     try {
       // 送審時已經傳到審核區的片：搬進 IP 成片夾當成片，不用再傳一次（2026-10-21）
+      if (getUploads().some(u => u.assetId === asset.id && u.status === 'uploading')) {
+        toast.error('這支的修改版還在上傳，等右下角傳完再按');
+        return;
+      }
       if (asset.reviewFiles?.length) await finalizeReviewFile(asset);
       await writeUploaded(asset);
       toast.success('已標記完成，列入請款');
@@ -1517,8 +1453,8 @@ export default function EditorAssetQueue({
             <>
               <FoldHeader
                 open={showToUpload}
-                title="剪好了，還沒傳雲端"
-                hint="審片通過後上傳，並按「上傳雲端」，這支就完成了。"
+                title="送審中"
+                hint="業主要改就按「上傳修改版」；業主 OK 後按「完成這支」，就列入請款。"
                 count={queueToUpload.length}
                 tone="cloud"
                 icon={<UploadCloud size={14} />}
@@ -1655,7 +1591,7 @@ export default function EditorAssetQueue({
               //    而派工是同事在做的事（見 feedback_editor_facing_wording）。
               // ⚠️ 不加編號：使用者 10-20 要的是「排序本身是對的、由上往下照著剪」，圓圈數字反而醜
               ? '由上往下照交片期限排好，最近的在最上面；沒片的排在最後。'
-              : '手上全部的片。剪完按「交片送審」；審片通過後上傳並按「上傳雲端」，這支就完成了。'}
+              : '手上全部的片。剪完按「交片送審」；業主要改就「上傳修改版」，業主 OK 後按「完成這支」。'}
           </p>
         </div>
         <div className={`flex items-center gap-2 shrink-0 ${activeView === 'queue' ? 'lg:hidden' : ''}`}>
@@ -1698,9 +1634,8 @@ export default function EditorAssetQueue({
           {/* 剪輯師是外包，不熟我們的後台。整套流程只有三步，一行講完就不用再問誰。
               ⚠️ 講的是「按鈕在哪、按了會怎樣」，不是「你該剪哪一支」—— 後者是同事的事。 */}
           <p className="text-[13px] text-gray-500 bg-black/[0.03] rounded-2xl px-4 py-2.5 leading-relaxed">
-            剪完按<span className="font-bold text-[#5A5A40]">「交片送審」</span>，我們會拿去給業主看；
-            檔案傳上雲端後再按<span className="font-bold text-[#5A5A40]">「上傳雲端」</span>。
-            兩步都在這一頁。
+            剪完按<span className="font-bold text-[#5A5A40]">「交片送審」</span>選影片上傳；業主要改就按<span className="font-bold text-[#5A5A40]">「上傳修改版」</span>，
+            可以改很多次；業主 OK 後按<span className="font-bold text-green-700">「完成這支」</span>，就列入請款。
           </p>
 
           {queue.rows.length === 0 ? (
@@ -1900,8 +1835,8 @@ export default function EditorAssetQueue({
           上傳是請款的認定依據，必須由剪輯師自己按，也不該被審核進度卡住。 */}
       {activeView === 'list' && activeTab === 'to_upload' && (
         <Section
-          title="待上傳雲端"
-          hint="已交片的都在這。審片通過後上傳並按「上傳雲端」，這支就完成了 —— 這一步決定這支算不算你這個月的請款。"
+          title="送審中"
+          hint="已交片的都在這。業主要改就按「上傳修改版」（可以改很多次）；業主 OK 後按「完成這支」——這一步決定這支算不算你這個月的請款。"
           count={toUpload.length}
           tone="cloud"
           icon={<UploadCloud size={14} />}
@@ -2020,7 +1955,7 @@ export default function EditorAssetQueue({
             </>}
 
             <p className="mt-5 text-sm text-gray-500">
-              送出後會移到「待上傳雲端」{reviewUploadOn ? '，影片在背景上傳' : ''}。若誤按，在尚未上傳前都可以自己撤回。
+              送出後會移到「送審中」，影片在背景上傳，可以繼續做別支。業主要改時，到那張卡按「上傳修改版」就好。
             </p>
             <div className="mt-5 flex gap-3">
               <button type="button" onClick={() => setSubmitAsset(null)} disabled={!!busyId}

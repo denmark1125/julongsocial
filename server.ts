@@ -1275,6 +1275,9 @@ app.post("/api/drive/review-upload-done", async (req, res) => {
     const fileId = String(req.body?.fileId || '');
     if (!fileId) return res.status(400).json({ error: "沒有檔案" });
     const existing: any[] = asset.reviewFiles || [];
+    // 已經完成的片（剪輯師按了完成、檔案已搬進成片夾）又傳完一個版本：不登記，免得預覽連結復活、
+    // 成片夾裡卻是舊版。前端也擋了「傳到一半不能按完成」，這裡是最後一道。
+    if (asset.cloudUploadedAt) return res.status(409).json({ error: "這支已經完成，修改版沒有登記。要換片請找聚浪窗口" });
     const already = existing.find(r => r.fileId === fileId);
     if (already) return res.json({ previewUrl: already.previewToken ? `/v/${already.previewToken}` : null });
     // 不相信前端給的 fileId：確認它真的在「審核區 / 某月 / 這個 IP」底下。

@@ -255,7 +255,7 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
             <Receipt size={20} /> 我的請款
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            按過「上傳雲端」的片就會出現在這裡。核對金額後勾選送出，我們收到就會請你填勞報單。
+            按過「完成這支」的片就會出現在這裡。核對金額後勾選送出，我們收到就會請你填勞報單。
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -324,7 +324,7 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
 
         {billable.length === 0 ? (
           <div className="p-10 text-center text-gray-500 italic text-sm">
-            {monthLabel(month)}沒有可請款的片。按過「上傳雲端」的片才會出現在這裡。
+            {monthLabel(month)}沒有可請款的片。按過「完成這支」的片才會出現在這裡。
           </div>
         ) : (
           <div className="divide-y divide-black/5">
