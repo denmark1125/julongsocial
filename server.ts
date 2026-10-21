@@ -1276,7 +1276,8 @@ const previewPage = (body: string) =>
   `main{max-width:520px;margin:0 auto;padding:16px 16px calc(24px + env(safe-area-inset-bottom))}` +
   `h1{font-size:18px;font-weight:600;margin:4px 0 12px;line-height:1.4;word-break:break-word}` +
   `.v{width:100%;background:#000;border-radius:14px;overflow:hidden}` +
-  `video{display:block;width:100%;max-height:72vh;background:#000}` +
+  // 先固定直式比例的框：影片資料載入前後高度不變，畫面不會跳、按鈕不會被推來推去（使用者 10-21：畫面晃動不好按）
+  `.v{aspect-ratio:9/16;max-height:72vh;margin:0 auto}video{display:block;width:100%;height:100%;object-fit:contain;background:#000}` +
   `iframe{display:block;width:100%;aspect-ratio:9/16;max-height:72vh;border:0}` +
   `.btns{display:flex;flex-direction:column;gap:10px;margin-top:16px}` +
   `.btn{display:block;width:100%;padding:15px;border-radius:12px;border:0;font-size:16px;font-weight:700;text-align:center;text-decoration:none;cursor:pointer}` +
