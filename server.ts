@@ -1318,7 +1318,7 @@ app.get("/v/:token", async (req, res) => {
     const t = encodeURIComponent(token);
     return send(
       `<h1>${escapeHtml(d.title || '影片預覽')}${d.version > 1 ? `<span style="font-size:14px;color:#9ad;font-weight:500">（第 ${Number(d.version)} 版）</span>` : ''}</h1>` +
-      `<div class="v" id="v"><video id="vid" controls playsinline preload="metadata" src="/v/${t}/video"></video></div>` +
+      `<div class="v" id="v"><video id="vid" controls playsinline preload="auto" src="/v/${t}/video"></video></div>` +
       actions +
       `<script>` +
       // 播不了（例如手機不支援的編碼）才退回雲端播放器
