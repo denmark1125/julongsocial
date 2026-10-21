@@ -1244,6 +1244,14 @@ app.post("/api/drive/review-to-finished", async (req, res) => {
     const v = (await adminDb.collection("vendors").doc(String(asset.vendorId)).get()).data();
     if (v?.finishedFolderId) await moveFileFull(latest.fileId, v.finishedFolderId);
     if (latest.publicPermissionId) await removePermission(latest.fileId, latest.publicPermissionId).catch(() => {});
+    // 定案了：舊版本（v1…）刪掉，只留搬進成片夾的最終版（使用者 10-21：審核期間留著對照，通過後刪）。
+    // 刪不掉不擋流程，紀錄照樣留（標 deletedAt）
+    const nowDel = new Date().toISOString();
+    const cleaned = await Promise.all(files.map(async r => {
+      if (r.fileId === latest.fileId || r.deletedAt) return r;
+      try { await deleteFilePermanently(r.fileId); return { ...r, deletedAt: nowDel }; }
+      catch (err: any) { console.warn("delete old review version failed:", r.fileId, err?.message); return r; }
+    }));
     // 給客戶的預覽連結一起收掉：之後打開會顯示「已經失效」，而不是一個放不出來的播放器
     await Promise.all(files.filter(r => r.previewToken).map(r =>
       adminDb.collection("previewLinks").doc(r.previewToken).delete().catch(() => {})));
@@ -1251,6 +1259,7 @@ app.post("/api/drive/review-to-finished", async (req, res) => {
     await adminDb.collection("assets").doc(asset.id).set({
       finishedFiles: [{ id: latest.fileId, name: latest.name, uploadedAt: now }],
       clientCopyPending: true,
+      reviewFiles: cleaned,
     }, { merge: true });
     return res.json({ moved: !!v?.finishedFolderId });
   } catch (e: any) {
@@ -1271,8 +1280,6 @@ app.post("/api/drive/review-to-finished", async (req, res) => {
  * ⚠️ 畫面只放片名、播放器、兩顆按鈕，不放內部資訊。業主通過後剪輯師按上傳雲端、片搬走，這頁就失效。
  */
 const escapeHtml = (t: string) => t.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]);
-/** 有問題請業主 LINE 聯繫聚浪。空字串＝不顯示那顆按鈕（等使用者給官方帳號連結） */
-const JULANG_LINE_URL = process.env.JULANG_LINE_URL || '';
 
 const previewPage = (body: string) =>
   `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="robots" content="noindex"><title>影片預覽｜聚浪</title>` +
@@ -1301,8 +1308,9 @@ app.get("/v/:token", async (req, res) => {
     const asset: any = (await adminDb.collection("assets").doc(String(d.assetId)).get()).data() || {};
     const stage = deriveFlowStage(asset);
     const approved = !!d.clientApprovedAt || stage === 'to_upload' || stage === 'ready';
-    const line = JULANG_LINE_URL
-      ? `<a class="btn line" href="${escapeHtml(JULANG_LINE_URL)}" target="_blank" rel="noopener">有問題，LINE 聯繫聚浪</a>` : '';
+    // 有問題：回到傳連結的那個 LINE 群組講（使用者 10-21：不用官方帳號）。連結多半是在 LINE 裡點開的，
+    // 關掉這頁就回到群組；關不掉（一般瀏覽器）就退回上一頁，再不行就留一句話。
+    const line = `<button class="btn line" id="line">有問題？回 LINE 群組告訴我們</button><p id="lineTip" style="display:none;text-align:center">請回到 LINE 群組直接留言，我們會盡快處理。</p>`;
     const actions = approved
       ? `<div class="done">已審核通過，謝謝！</div><div class="btns">${line}</div>`
       : `<div class="btns"><button class="btn ok" id="ok">審核通過</button>${line}</div><div id="msg"></div>`;
@@ -1314,6 +1322,7 @@ app.get("/v/:token", async (req, res) => {
       `<script>` +
       // 播不了（例如手機不支援的編碼）才退回雲端播放器
       `document.getElementById('vid').addEventListener('error',function(){document.getElementById('v').innerHTML='<iframe src="https://drive.google.com/file/d/${encodeURIComponent(d.fileId)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>'});` +
+      `var lb=document.getElementById('line');if(lb)lb.addEventListener('click',function(){try{window.close()}catch(e){}setTimeout(function(){if(history.length>1)history.back();document.getElementById('lineTip').style.display='block'},300)});` +
       `var ok=document.getElementById('ok');if(ok)ok.addEventListener('click',function(){` +
       `if(!confirm('確定這支影片審核通過嗎？'))return;ok.disabled=true;ok.textContent='送出中…';` +
       `fetch('/v/${t}/approve',{method:'POST'}).then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||'送出失敗');` +
