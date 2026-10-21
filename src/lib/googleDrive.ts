@@ -174,7 +174,8 @@ export async function ensureFolder(name: string, parentId?: string, opts: { full
   ].filter(Boolean).join(' and ');
 
   const found = await driveFetch(
-    `/files?q=${encodeURIComponent(clauses)}&fields=files(id,name)&pageSize=2&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    // orderBy createdTime：萬一同時有兩個請求各建了一個同名資料夾，大家都固定用最早那個
+    `/files?q=${encodeURIComponent(clauses)}&fields=files(id,name)&pageSize=2&orderBy=createdTime&supportsAllDrives=true&includeItemsFromAllDrives=true`,
     {}, token
   );
   if (found.files?.length) return found.files[0].id;

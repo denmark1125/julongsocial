@@ -1196,10 +1196,15 @@ app.post("/api/drive/review-upload-done", async (req, res) => {
     const existing: any[] = asset.reviewFiles || [];
     const already = existing.find(r => r.fileId === fileId);
     if (already) return res.json({ previewUrl: already.previewToken ? `/v/${already.previewToken}` : null });
-    // 不相信前端給的 fileId：確認它真的落在這支片的審核區資料夾
+    // 不相信前端給的 fileId：確認它真的在「審核區 / 某月 / 這個 IP」底下。
+    // ⚠️ 看上兩層是不是審核區，不比對單一資料夾 id：兩個人同時傳當月第一支時可能各建出一個同名資料夾，
+    //    檔案落在其中一個，比 id 會誤判成「不在審核區」（10-21 實測時想到的）。
     const f = await getFileFull(fileId);
-    const folderId = await ensureReviewFolder(asset.vendorName);
-    if (!f.parents?.includes(folderId)) return res.status(400).json({ error: "這個檔案不在審核區的資料夾裡" });
+    const parent = f.parents?.[0] ? await getFileFull(f.parents[0]) : null;
+    const month = parent?.parents?.[0] ? await getFileFull(parent.parents[0]) : null;
+    if (!parent || parent.name !== sanitizeFolderName(asset.vendorName || '未分類') || !month?.parents?.includes(REVIEW_ROOT_FOLDER_ID)) {
+      return res.status(400).json({ error: "這個檔案不在審核區的資料夾裡" });
+    }
     // 給客戶的預覽：雲端檔案開「知道連結可看」，再包一層我們自己的短網址
     const publicPermissionId = await setAnyoneReader(fileId);
     const previewToken = crypto.randomBytes(9).toString('base64url');
@@ -1234,6 +1239,9 @@ app.post("/api/drive/review-to-finished", async (req, res) => {
     const v = (await adminDb.collection("vendors").doc(String(asset.vendorId)).get()).data();
     if (v?.finishedFolderId) await moveFileFull(latest.fileId, v.finishedFolderId);
     if (latest.publicPermissionId) await removePermission(latest.fileId, latest.publicPermissionId).catch(() => {});
+    // 給客戶的預覽連結一起收掉：之後打開會顯示「已經失效」，而不是一個放不出來的播放器
+    await Promise.all(files.filter(r => r.previewToken).map(r =>
+      adminDb.collection("previewLinks").doc(r.previewToken).delete().catch(() => {})));
     const now = new Date().toISOString();
     await adminDb.collection("assets").doc(asset.id).set({
       finishedFiles: [{ id: latest.fileId, name: latest.name, uploadedAt: now }],
