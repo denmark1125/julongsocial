@@ -654,6 +654,8 @@ export interface Asset {
   reviewFiles?: ReviewFile[];
   /** 送審歷程（每按一次交片送審附加一筆）。submittedAt 仍是最近一次。剪輯師只能附加 */
   submissions?: { version: number; submittedAt: string; byName?: string }[];
+  /** 業主在預覽頁（/v/代碼）按「審核通過」的時間。後端寫；日後算送審→業主審完要多久 */
+  clientApprovedAt?: string;
   /** 影片實際長度跟剪輯師選的分級（60 秒以下／以上）不符。內部看，不擋流程 */
   durationMismatch?: boolean;
   /**

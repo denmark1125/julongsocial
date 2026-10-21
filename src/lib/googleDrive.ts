@@ -321,6 +321,17 @@ export async function getFileFull(fileId: string): Promise<DriveFileInfo & { dur
   };
 }
 
+/**
+ * 讀檔案的一段位元組（給預覽頁的播放器邊看邊載）。全範圍 token，只在後端用。
+ * 回傳 Google 的原始回應（206＋Content-Range），呼叫端負責把它轉給瀏覽器。
+ */
+export async function fetchFileRange(fileId: string, start: number, end: number): Promise<Response> {
+  const token = await getFullAccessToken();
+  return fetch(`${DRIVE_API}/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`, {
+    headers: { Authorization: `Bearer ${token}`, Range: `bytes=${start}-${end}` },
+  });
+}
+
 /** 把檔案搬到另一個資料夾（metadata 操作，不重傳）。全範圍 token */
 export async function moveFileFull(fileId: string, toFolderId: string): Promise<void> {
   const token = await getFullAccessToken();

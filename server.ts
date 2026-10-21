@@ -15,7 +15,7 @@ import { fileURLToPath } from "url";
 import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVideoTrackingScope, getDeficitBreakdown } from "./src/lib/vendorStatus.js";
 // 交棒狀態的判定要跟前端同一份，不然推播說的「目前狀態」會跟畫面上不一致
 import { deriveFlowStage, FLOW_STAGE_LABEL } from "./src/types.js";
-import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFolderName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, renameFile, copyFile, listFolderFiles, createResumableSession, getFileFull, moveFileFull, setAnyoneReader, removePermission, isFullDriveConfigured, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
+import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFolderName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, renameFile, copyFile, listFolderFiles, createResumableSession, getFileFull, moveFileFull, fetchFileRange, setAnyoneReader, removePermission, isFullDriveConfigured, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
 import { summarizeFolder } from "./src/lib/rawFolder.js";
 import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
 
@@ -1258,22 +1258,142 @@ app.post("/api/drive/review-to-finished", async (req, res) => {
 
 /**
  * 給客戶的預覽頁。不用登入、不用權限：連結本身就是鑰匙（隨機 12 碼）。
- * ⚠️ 畫面只放片名與播放器，不放內部資訊。業主通過後檔案搬走、公開連結關掉，這頁就看不到了。
+ *
+ * ⚠️ 2026-10-21 改成**自己的播放器**（<video> 讀 /v/<代碼>/video）：原本內嵌 Google 雲端播放器，
+ *    手機上常卡在「播放中」轉圈、剛上傳的片還要等 Google 轉檔。自己播的話不用等轉檔、看不到雲端痕跡，
+ *    日後換存放位置連結也不變。播不了（例如手機不支援的 .mov 編碼）才退回雲端播放器。
+ * ⚠️ 業主可以直接按「審核通過」：效果跟內部按「業主通過」一樣，並記下時間（日後算審片要多久）。
+ * ⚠️ 畫面只放片名、播放器、兩顆按鈕，不放內部資訊。業主通過後剪輯師按上傳雲端、片搬走，這頁就失效。
  */
 const escapeHtml = (t: string) => t.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]);
+/** 有問題請業主 LINE 聯繫聚浪。空字串＝不顯示那顆按鈕（等使用者給官方帳號連結） */
+const JULANG_LINE_URL = process.env.JULANG_LINE_URL || '';
+
+const previewPage = (body: string) =>
+  `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="robots" content="noindex"><title>影片預覽｜聚浪</title>` +
+  `<style>` +
+  `*{box-sizing:border-box}body{margin:0;background:#111;color:#eee;font-family:system-ui,-apple-system,"PingFang TC","Noto Sans TC",sans-serif}` +
+  `main{max-width:520px;margin:0 auto;padding:16px 16px calc(24px + env(safe-area-inset-bottom))}` +
+  `h1{font-size:18px;font-weight:600;margin:4px 0 12px;line-height:1.4;word-break:break-word}` +
+  `.v{width:100%;background:#000;border-radius:14px;overflow:hidden}` +
+  `video{display:block;width:100%;max-height:72vh;background:#000}` +
+  `iframe{display:block;width:100%;aspect-ratio:9/16;max-height:72vh;border:0}` +
+  `.btns{display:flex;flex-direction:column;gap:10px;margin-top:16px}` +
+  `.btn{display:block;width:100%;padding:15px;border-radius:12px;border:0;font-size:16px;font-weight:700;text-align:center;text-decoration:none;cursor:pointer}` +
+  `.ok{background:#2f9e5b;color:#fff}.ok:disabled{opacity:.6}.line{background:#06c755;color:#fff}.ghost{background:#2a2a2a;color:#ddd}` +
+  `.done{margin-top:16px;padding:14px;border-radius:12px;background:#1d3a28;color:#b6f0c8;text-align:center;font-weight:700}` +
+  `p{color:#aaa;font-size:14px;line-height:1.6}` +
+  `</style></head><body><main>${body}</main></body></html>`;
+
 app.get("/v/:token", async (req, res) => {
-  const page = (body: string, status = 200) => res.status(status).type('html').send(
-    `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>影片預覽</title>` +
-    `<style>body{margin:0;background:#111;color:#eee;font-family:system-ui,sans-serif}main{max-width:960px;margin:0 auto;padding:16px}h1{font-size:18px;font-weight:600;margin:8px 0 12px}.v{position:relative;width:100%;max-width:480px;aspect-ratio:9/16;margin:0 auto;background:#000;border-radius:12px;overflow:hidden}iframe{position:absolute;inset:0;width:100%;height:100%;border:0}p{color:#aaa;font-size:14px}</style>` +
-    `</head><body><main>${body}</main></body></html>`);
+  const send = (body: string, status = 200) => res.status(status).type('html').set('Cache-Control', 'no-store').send(previewPage(body));
   try {
-    const snap = await adminDb.collection("previewLinks").doc(String(req.params.token)).get();
-    if (!snap.exists) return page('<h1>這個預覽連結已經失效</h1><p>請向聚浪窗口索取新的連結。</p>', 404);
+    const token = String(req.params.token);
+    const snap = await adminDb.collection("previewLinks").doc(token).get();
+    if (!snap.exists) return send('<h1>這個預覽連結已經失效</h1><p>請向聚浪窗口索取新的連結。</p>', 404);
     const d: any = snap.data();
-    return page(`<h1>${escapeHtml(d.title || '影片預覽')}</h1><div class="v"><iframe src="https://drive.google.com/file/d/${encodeURIComponent(d.fileId)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe></div>`);
+    const asset: any = (await adminDb.collection("assets").doc(String(d.assetId)).get()).data() || {};
+    const stage = deriveFlowStage(asset);
+    const approved = !!d.clientApprovedAt || stage === 'to_upload' || stage === 'ready';
+    const line = JULANG_LINE_URL
+      ? `<a class="btn line" href="${escapeHtml(JULANG_LINE_URL)}" target="_blank" rel="noopener">有問題，LINE 聯繫聚浪</a>` : '';
+    const actions = approved
+      ? `<div class="done">已審核通過，謝謝！</div><div class="btns">${line}</div>`
+      : `<div class="btns"><button class="btn ok" id="ok">審核通過</button>${line}</div><div id="msg"></div>`;
+    const t = encodeURIComponent(token);
+    return send(
+      `<h1>${escapeHtml(d.title || '影片預覽')}</h1>` +
+      `<div class="v" id="v"><video id="vid" controls playsinline preload="metadata" src="/v/${t}/video"></video></div>` +
+      actions +
+      `<script>` +
+      // 播不了（例如手機不支援的編碼）才退回雲端播放器
+      `document.getElementById('vid').addEventListener('error',function(){document.getElementById('v').innerHTML='<iframe src="https://drive.google.com/file/d/${encodeURIComponent(d.fileId)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>'});` +
+      `var ok=document.getElementById('ok');if(ok)ok.addEventListener('click',function(){` +
+      `if(!confirm('確定這支影片審核通過嗎？'))return;ok.disabled=true;ok.textContent='送出中…';` +
+      `fetch('/v/${t}/approve',{method:'POST'}).then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||'送出失敗');` +
+      `ok.parentNode.outerHTML='<div class="done">已審核通過，謝謝！</div>';})}).catch(function(e){ok.disabled=false;ok.textContent='審核通過';alert(e.message+'，請再試一次或 LINE 聯繫聚浪')})});` +
+      `</script>`
+    );
   } catch (e: any) {
     console.error("preview page failed:", e?.message);
-    return page('<h1>預覽暫時打不開</h1><p>請稍後再試。</p>', 500);
+    return send('<h1>預覽暫時打不開</h1><p>請稍後再試。</p>', 500);
+  }
+});
+
+/**
+ * 預覽頁的影片：照瀏覽器要的範圍一段一段回（最多 4MB 一段）。
+ * ⚠️ 一段上限 4MB：Vercel 函式回應上限 4.5MB；<video> 收到比要求短的 206 會自己接著要下一段。
+ */
+const PREVIEW_CHUNK = 4 * 1024 * 1024;
+const previewSizeCache = new Map<string, { size: number; mime: string }>();
+app.get("/v/:token/video", async (req, res) => {
+  try {
+    const snap = await adminDb.collection("previewLinks").doc(String(req.params.token)).get();
+    if (!snap.exists) return res.status(404).end();
+    const fileId = String(snap.data()!.fileId);
+    let meta = previewSizeCache.get(fileId);
+    if (!meta) {
+      const f = await getFileFull(fileId);
+      meta = { size: f.sizeBytes, mime: f.mimeType || 'video/mp4' };
+      previewSizeCache.set(fileId, meta);
+    }
+    const m = /bytes=(\d*)-(\d*)/.exec(String(req.headers.range || ''));
+    let start = m && m[1] ? Number(m[1]) : 0;
+    let end = m && m[2] ? Number(m[2]) : meta.size - 1;
+    if (m && !m[1] && m[2]) { start = Math.max(0, meta.size - Number(m[2])); end = meta.size - 1; } // bytes=-N
+    if (start >= meta.size) return res.status(416).set('Content-Range', `bytes */${meta.size}`).end();
+    end = Math.min(end, start + PREVIEW_CHUNK - 1, meta.size - 1);
+    const g = await fetchFileRange(fileId, start, end);
+    if (!g.ok) return res.status(502).end();
+    const buf = Buffer.from(await g.arrayBuffer());
+    res.status(206).set({
+      'Content-Type': meta.mime === 'video/quicktime' ? 'video/mp4' : meta.mime,
+      'Content-Range': `bytes ${start}-${start + buf.length - 1}/${meta.size}`,
+      'Content-Length': String(buf.length),
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'private, max-age=600',
+    }).send(buf);
+  } catch (e: any) {
+    console.error("preview video failed:", e?.message);
+    res.status(502).end();
+  }
+});
+
+/**
+ * 業主在預覽頁按「審核通過」。效果跟內部看板按「業主通過」一樣：
+ * 業主審核中 → 待上傳雲端（剪輯師已經上傳過的話直接可排程）。重複按不會出錯。
+ * ⚠️ 這裡不 import assetFlow（Vercel 原生 ESM，lib 裡沒寫 .js 的執行期 import 會整支掛掉），欄位手寫，
+ *    對應 buildFlowUpdate＋getClientApprovalTarget 的結果。
+ */
+app.post("/v/:token/approve", async (req, res) => {
+  try {
+    const token = String(req.params.token);
+    const linkRef = adminDb.collection("previewLinks").doc(token);
+    const result = await adminDb.runTransaction(async (tx: any) => {
+      const link = await tx.get(linkRef);
+      if (!link.exists) return { status: 404, error: '這個預覽連結已經失效' };
+      const ref = adminDb.collection("assets").doc(String(link.data().assetId));
+      const snap = await tx.get(ref);
+      if (!snap.exists) return { status: 404, error: '找不到這支影片' };
+      const a: any = snap.data();
+      const from = deriveFlowStage(a);
+      const now = new Date().toISOString();
+      if (from === 'client_review') {
+        const to = a.cloudUploadedAt ? 'ready' : 'to_upload';
+        tx.update(ref, {
+          flowStage: to, flowSince: now, stage: 'finished', approved: to === 'ready',
+          flowLog: [...(a.flowLog || []), { from, to, at: now, byName: '業主（預覽連結）', note: '業主在預覽頁按審核通過' }],
+          clientApprovedAt: now,
+        });
+      }
+      tx.update(linkRef, { clientApprovedAt: link.data().clientApprovedAt || now });
+      return { status: 200 };
+    });
+    if (result.status !== 200) return res.status(result.status).json({ error: result.error });
+    return res.json({ ok: true });
+  } catch (e: any) {
+    console.error("preview approve failed:", e?.message);
+    return res.status(502).json({ error: '送出失敗' });
   }
 });
 
