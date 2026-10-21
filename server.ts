@@ -1205,16 +1205,27 @@ app.post("/api/drive/review-upload-done", async (req, res) => {
     if (!parent || parent.name !== sanitizeFolderName(asset.vendorName || '未分類') || !month?.parents?.includes(REVIEW_ROOT_FOLDER_ID)) {
       return res.status(400).json({ error: "這個檔案不在審核區的資料夾裡" });
     }
-    // 給客戶的預覽：雲端檔案開「知道連結可看」，再包一層我們自己的短網址
+    // 給客戶的預覽：雲端檔案開「知道連結可看」，再包一層我們自己的短網址。
+    // ⚠️ 一支片只有一個預覽連結、固定不變（使用者 10-21）：重送時同一個連結改播新版，
+    //    業主不管點哪一次收到的連結都是最新版，按通過也一定是通過最新版。
     const publicPermissionId = await setAnyoneReader(fileId);
-    const previewToken = crypto.randomBytes(9).toString('base64url');
+    const previewToken = existing.find(r => r.previewToken)?.previewToken || crypto.randomBytes(9).toString('base64url');
+    const version = existing.length + 1;
     const now = new Date().toISOString();
     await adminDb.collection("previewLinks").doc(previewToken).set({
-      assetId: asset.id, fileId, title: asset.title || '', vendorName: asset.vendorName || '', createdAt: now,
-    });
-    const entry: any = { version: existing.length + 1, fileId, name: f.name, uploadedAt: now, previewToken, publicPermissionId };
+      assetId: asset.id, fileId, version, title: asset.title || '', vendorName: asset.vendorName || '',
+      updatedAt: now, clientApprovedAt: FieldValue.delete(),
+    }, { merge: true });
+    const entry: any = { version, fileId, name: f.name, uploadedAt: now, previewToken, publicPermissionId };
     if (f.durationSec) entry.durationSec = f.durationSec;
-    await adminDb.collection("assets").doc(asset.id).update({ reviewFiles: [...existing, entry] });
+    // ⚠️ 覆蓋：新版登記成功之後才刪舊檔（使用者 10-21：資料夾每支片只留一個檔）。
+    //    順序不能反：先刪舊的、新的又傳壞，雲端就一個都沒有。紀錄（第幾版、何時）保留，只標 deletedAt。
+    const kept = await Promise.all(existing.map(async r => {
+      if (r.deletedAt) return r;
+      try { await deleteFilePermanently(r.fileId); } catch (err: any) { console.warn("delete old review version failed:", r.fileId, err?.message); return r; }
+      return { ...r, deletedAt: now };
+    }));
+    await adminDb.collection("assets").doc(asset.id).update({ reviewFiles: [...kept, entry] });
     return res.json({ previewUrl: `/v/${previewToken}` });
   } catch (e: any) {
     if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
@@ -1303,7 +1314,7 @@ app.get("/v/:token", async (req, res) => {
       : `<div class="btns"><button class="btn ok" id="ok">審核通過</button>${line}</div><div id="msg"></div>`;
     const t = encodeURIComponent(token);
     return send(
-      `<h1>${escapeHtml(d.title || '影片預覽')}</h1>` +
+      `<h1>${escapeHtml(d.title || '影片預覽')}${d.version > 1 ? `<span style="font-size:14px;color:#9ad;font-weight:500">（第 ${Number(d.version)} 版）</span>` : ''}</h1>` +
       `<div class="v" id="v"><video id="vid" controls playsinline preload="metadata" src="/v/${t}/video"></video></div>` +
       actions +
       `<script>` +

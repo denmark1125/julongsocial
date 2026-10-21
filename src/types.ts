@@ -834,6 +834,8 @@ export interface ReviewFile {
   previewToken?: string;
   /** 「知道連結可看」那條權限的 id，業主通過搬成片時關掉 */
   publicPermissionId?: string;
+  /** 這一版的檔案已經被新版覆蓋刪掉（紀錄留著，檔案沒了） */
+  deletedAt?: string;
 }
 
 export interface RawCheck {
