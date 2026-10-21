@@ -4,8 +4,10 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import {
-  Asset, DURATION_TIER_LABEL, EDITOR_FEE_BY_TIER, EDITOR_INVOICING_ENABLED, EditorInvoice, UserProfile, Vendor,
+  Asset, DURATION_TIER_LABEL, EDITOR_FEE_BY_TIER, EDITOR_INVOICING_ENABLED, Editor, EditorInvoice, UserProfile, Vendor,
 } from '../types';
+import { useLiveCollection } from '../lib/liveData';
+import { isInternalWork } from '../lib/editorRoster';
 import {
   billingMonthOptions, buildInvoiceItems, getAssetFee, getBillingMonth,
   groupByVendor, listBillable, monthLabel, sumItems,
@@ -133,13 +135,16 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
   // 只算掛在我名下的片：素材可逐支覆寫剪輯師，別人的片不該進我的請款單。
   // ⚠️ 刻意**不排除 archived**：業主不用那支片時我們會封存，但剪輯師已經剪完也上傳了，
   //    錢照算。用不用是我們的事，不是他的事。
+  const roster = useLiveCollection<Editor>('editors');
   const myAssets = useMemo(
     () => assets.filter(a =>
       a.type === 'video' &&
+      // 內部剪的片不請款（使用者 10-21）
+      !isInternalWork(a, vendors, roster) &&
       (!myEditorId || !a.billableEditorId || a.billableEditorId === myEditorId) &&
       (!myEditorId || !a.editorId || a.editorId === myEditorId)
     ),
-    [assets, myEditorId]
+    [assets, myEditorId, vendors, roster]
   );
 
   const monthOptions = useMemo(() => billingMonthOptions(myAssets), [myAssets]);

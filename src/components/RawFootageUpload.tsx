@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import EditorOptions from './EditorOptions';
 import { auth } from '../firebase';
 import { Vendor, Editor, Post, Asset } from '../types';
 import { useLiveCollection } from '../lib/liveData';
@@ -502,7 +503,7 @@ export default function RawFootageUpload({
                               跟著 IP（{vendor?.editorName || '未設定'}）
                             </option>
                             <option value={INTERNAL}>內部剪輯（不派給外包）</option>
-                            {editors.map(ed => <option key={ed.id} value={ed.id}>{ed.name}</option>)}
+                            <EditorOptions editors={editors} currentId={g.editorId} />
                           </select>
                           {!g.internalEdit && !g.editorId && !vendor?.editorId && (
                             // 三個都空＝這支片不會出現在任何人的待辦裡，現在就要講

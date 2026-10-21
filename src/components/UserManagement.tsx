@@ -754,7 +754,7 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
                     onChange={(e) => setNewUser({ ...newUser, linkedEditorId: e.target.value })}
                   >
                     <option value="">請選擇(需先在「廠商管理」建立剪輯師標籤)</option>
-                    {editors.filter(ed => !ed.linkedUserUid).map(ed => (
+                    {editors.filter(ed => !ed.linkedUserUid && !ed.leftAt).map(ed => (
                       <option key={ed.id} value={ed.id}>{ed.name}</option>
                     ))}
                   </select>

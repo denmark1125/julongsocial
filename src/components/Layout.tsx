@@ -30,7 +30,7 @@ import { signOut } from 'firebase/auth';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { UserProfile, Post, Vendor, Asset, DismissedHabit } from '../types';
+import { UserProfile, Post, Vendor, Asset, DismissedHabit, Editor } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import { useBoundPostSync } from '../lib/useBoundPostSync';
 import { trackedVendors, getVideoStockAlert, getOwedVideoCount, getAvailableVideoAssets, hasVideoTrackingScope } from '../lib/vendorStatus';
@@ -64,6 +64,9 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
 
   // 共用即時資料層：整個 session 只訂閱一次，切分頁不再重讀
   const posts = useLiveCollection<Post>('posts', !isEditor);
+  // 內部剪輯師不請款（使用者 10-21：只有外包要請款）→ 不給「我的請款」分頁
+  const editorRoster = useLiveCollection<Editor>('editors', isEditor);
+  const isInternalEditor = isEditor && editorRoster.find(e => e.id === userProfile?.linkedEditorId)?.kind === 'internal';
   const vendors = useLiveCollection<Vendor>('vendors', !isEditor);
   const assets = useLiveCollection<Asset>('assets', !isEditor);
   const dismissedHabits = useLiveCollection<DismissedHabit>('dismissedHabits', !isEditor);
@@ -227,8 +230,9 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
   const currentLabel = menuItems.find(i => i.id === activeTab)?.label
     ?? Object.values(subItems).flat().find(sub => sub.id === activeTab)?.label;
 
-  const filteredMenu = menuItems.filter(item => 
-    !userProfile || item.roles.includes(userProfile.role)
+  const filteredMenu = menuItems.filter(item =>
+    (!userProfile || item.roles.includes(userProfile.role)) &&
+    !(item.id === 'editorInvoice' && isInternalEditor)
   );
 
   return (

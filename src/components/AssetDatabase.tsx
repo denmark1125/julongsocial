@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import EditorOptions from './EditorOptions';
 import { format, parseISO } from 'date-fns';
 import {
   collection,
@@ -1147,7 +1148,7 @@ ${after}`)) return;
                           onBlur={() => setReassigningId(null)}
                           onChange={(e) => reassignEditor(asset, e.target.value)}
                         >
-                          {editors.map(ed => <option key={ed.id} value={ed.id}>{ed.name}</option>)}
+                          <EditorOptions editors={editors} currentId={asset.editorId} />
                           <option value={INTERNAL_EDIT}>內部剪輯（不給外包）</option>
                           {/* 「先不指定」不等於「不剪輯」——它是跟著 IP 的預設剪輯師走。
                               把實際會生效的人名寫進選項，才不會被讀成「這支沒有人要剪」。 */}
@@ -1520,9 +1521,7 @@ ${after}`)) return;
                       {defaultEditorId && (
                         <option value={defaultEditorId}>（預設）{getEditorName(defaultEditorId)} · 這個 IP 的剪輯師</option>
                       )}
-                      {editors.filter(ed => ed.id !== defaultEditorId).map(ed => (
-                        <option key={ed.id} value={ed.id}>{ed.name}</option>
-                      ))}
+                      <EditorOptions editors={editors} currentId={newAsset.editorId} exclude={defaultEditorId} />
                       <option value="">先不指定</option>
                     </select>
                     {isOverride && (
@@ -1903,9 +1902,7 @@ ${after}`)) return;
                       className="w-full p-3 bg-white rounded-xl border border-gray-200 text-sm font-bold focus:ring-2 focus:ring-[#5A5A40]"
                     >
                       <option value="">-- 請選擇剪輯師 --</option>
-                      {editors.map(ed => (
-                        <option key={ed.id} value={ed.id}>{ed.name}</option>
-                      ))}
+                      <EditorOptions editors={editors} includeLeft />
                     </select>
                   ) : (
                     <select 

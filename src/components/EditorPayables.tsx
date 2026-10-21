@@ -1,3 +1,4 @@
+import { isInternalWork } from '../lib/editorRoster';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, deleteField, doc, onSnapshot, updateDoc, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../firebase';
@@ -74,7 +75,7 @@ export default function EditorPayables() {
   const monthOptions = useMemo(() => billingMonthOptions(videoAssets), [videoAssets]);
 
   const summaries = useMemo(
-    () => summarizeByEditor(month, videoAssets, vendors, editorName, invoices),
+    () => summarizeByEditor(month, videoAssets, vendors, editorName, invoices, editors),
     [month, videoAssets, vendors, editors, invoices]
   );
 
@@ -96,6 +97,7 @@ export default function EditorPayables() {
   const unsubmittedOf = (editorId: string) =>
     videoAssets.filter(a =>
       isBillable(a) &&
+      !isInternalWork(a, vendors, editors) &&
       getBillingMonth(a) === month &&
       (getBillableEditorId(a, vendors) || UNASSIGNED) === editorId
     );

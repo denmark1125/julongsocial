@@ -553,8 +553,12 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       // 請款單引用 editorId/editorName，這份名冊等於薪酬對象清單，剪輯師本人絕不該能改。
       // 不收斂到 isManager() 是因為廠商管理（employee 也能進）的「新增剪輯師」在用。
-      allow create: if isAuthenticated() && !isEditorRole();
-      allow update: if isAuthenticated() && !isEditorRole();
+      allow create: if isAuthenticated() && !isEditorRole() && !('leftAt' in request.resource.data);
+      // 外包／內部（kind）決定要不要請款 → 只有主管能改。離職（leftAt）只能走後端 /api/editors/:id/leave
+      //（要先改派片與 IP、停用登入），前端一律不能直接寫。2026-10-21
+      allow update: if isAuthenticated() && !isEditorRole() &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['leftAt']) &&
+        (isManager() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['kind']));
       allow delete: if isManager();
     }
 

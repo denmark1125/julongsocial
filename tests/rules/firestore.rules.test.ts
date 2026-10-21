@@ -280,3 +280,30 @@ describe('送審歷程 submissions（2026-10-21）', () => {
     await assertFails(getDoc(doc(as('boss'), 'previewLinks', 't1')));
   });
 });
+
+describe('editors 名冊：外包／內部、離職', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async ctx => {
+      await setDoc(doc(ctx.firestore(), 'editors', 'E1'), { name: '謝謝', kind: 'external', createdAt: NOW });
+    });
+  });
+  it('主管可以改外包／內部', async () => {
+    await assertSucceeds(updateDoc(doc(as('mgr'), 'editors', 'E1'), { kind: 'internal' }));
+  });
+  it('一般員工不能改外包／內部（會影響請款）', async () => {
+    await assertFails(updateDoc(doc(as('staff'), 'editors', 'E1'), { kind: 'internal' }));
+  });
+  it('一般員工改名字照樣可以（對照組）', async () => {
+    await assertSucceeds(updateDoc(doc(as('staff'), 'editors', 'E1'), { name: '謝謝2' }));
+  });
+  it('連主管都不能從前端直接標離職', async () => {
+    await assertFails(updateDoc(doc(as('mgr'), 'editors', 'E1'), { leftAt: NOW }));
+  });
+  it('新增時不能直接帶離職；正常新增可以（對照組）', async () => {
+    await assertFails(setDoc(doc(as('mgr'), 'editors', 'E9'), { name: 'x', createdAt: NOW, leftAt: NOW }));
+    await assertSucceeds(setDoc(doc(as('staff'), 'editors', 'E8'), { name: 'x', kind: 'external', createdAt: NOW }));
+  });
+  it('剪輯師本人不能改名冊', async () => {
+    await assertFails(updateDoc(doc(as('ed'), 'editors', 'E1'), { name: 'x' }));
+  });
+});

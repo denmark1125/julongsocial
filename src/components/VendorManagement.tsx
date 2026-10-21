@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import EditorOptions from './EditorOptions';
+import EditorRosterModal from './EditorRosterModal';
 import { format } from 'date-fns';
 import {
   collection,
@@ -94,7 +96,6 @@ export default function VendorManagement() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditorModalOpen, setIsEditorModalOpen] = useState(false);
-  const [newEditorName, setNewEditorName] = useState('');
   const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
   const [vendorSecrets, setVendorSecrets] = useState<Record<string, Record<string, string>>>({});
@@ -226,33 +227,7 @@ export default function VendorManagement() {
     return acc.password || '';
   };
 
-  const handleAddEditor = async () => {
-    if (!newEditorName.trim()) return;
-    try {
-      await addDoc(collection(db, 'editors'), {
-        name: newEditorName.trim(),
-        createdAt: new Date().toISOString()
-      });
-      setNewEditorName('');
-      toast.success('已新增剪輯師');
-    } catch (error) {
-      toast.error('新增失敗');
-    }
-  };
 
-  const handleDeleteEditor = async (id: string) => {
-    const editor = editors.find(e => e.id === id);
-    const confirmMsg = editor?.linkedUserUid
-      ? '此剪輯師已有登入帳號，刪除標籤後該帳號的廠商權限將不會再自動更新。確定要刪除嗎？'
-      : '確定要刪除此剪輯師嗎？';
-    if (!window.confirm(confirmMsg)) return;
-    try {
-      await deleteDoc(doc(db, 'editors', id));
-      toast.success('已刪除');
-    } catch (error) {
-      toast.error('刪除失敗');
-    }
-  };
 
   const handleAddAccount = () => {
     setFormData({
@@ -976,10 +951,8 @@ export default function VendorManagement() {
                     }}
                     className="w-full p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-[#5A5A40]"
                   >
-                    <option value="">選擇剪輯師 (外包)</option>
-                    {editors.map(ed => (
-                      <option key={ed.id} value={ed.id}>{ed.name}</option>
-                    ))}
+                    <option value="">選擇剪輯師</option>
+                    <EditorOptions editors={editors} currentId={formData.editorId} />
                   </select>
                 </div>
 
@@ -1817,62 +1790,8 @@ export default function VendorManagement() {
           </div>
         </div>
       )}
-      {/* Editor Management Modal */}
-      {isEditorModalOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-[#F5F5F0]/50">
-              <h3 className="text-xl font-bold serif text-[#5A5A40]">外包剪輯師管理</h3>
-              <button onClick={() => setIsEditorModalOpen(false)} className="p-2 hover:bg-white rounded-full transition-colors">
-                <X size={20} />
-              </button>
-            </div>
-            <div className="p-6 space-y-6">
-              <div className="flex gap-2">
-                <input 
-                  type="text"
-                  placeholder="輸入剪輯師姓名"
-                  value={newEditorName}
-                  onChange={(e) => setNewEditorName(e.target.value)}
-                  className="flex-1 p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-[#5A5A40]"
-                />
-                <button 
-                  onClick={handleAddEditor}
-                  className="bg-[#5A5A40] text-white px-4 rounded-xl font-bold hover:bg-[#4a4a35] transition-colors"
-                >
-                  新增
-                </button>
-              </div>
-              
-              <div className="max-h-[300px] overflow-y-auto space-y-2 pr-2">
-                {editors.map(ed => (
-                  <div key={ed.id} className="flex justify-between items-center p-3 bg-[#F5F5F0] rounded-xl group">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-[#5A5A40]">{ed.name}</span>
-                      {ed.linkedUserUid && (
-                        <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-[13px] font-bold border border-green-200">
-                          已有登入帳號
-                        </span>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => handleDeleteEditor(ed.id!)}
-                      className="text-red-400 hover:text-red-600 p-1 opacity-0 group-hover:opacity-100 transition-all"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                ))}
-                {editors.length === 0 && (
-                  <div className="text-center py-8 text-gray-400 text-sm italic">
-                    尚未建立剪輯師資料
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 剪輯師管理：外包／內部、離職改派（2026-10-21） */}
+      {isEditorModalOpen && <EditorRosterModal editors={editors} onClose={() => setIsEditorModalOpen(false)} />}
     </div>
   );
 }

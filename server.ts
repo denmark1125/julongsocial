@@ -111,6 +111,8 @@ async function requireUser(req: any): Promise<AuthedUser> {
   // 以前這裡會預設成 employee，等於任何 Google 帳號都能拿到 Drive 權杖。
   if (!snap.exists) throw Object.assign(new Error("這個帳號尚未被授權"), { httpStatus: 403 });
   const d = snap.data() || {};
+  // 離職剪輯師（見 /api/editors/:id/leave）：Firebase 帳號已停用，這裡再擋一次舊的登入憑證
+  if (d.disabledAt) throw Object.assign(new Error("這個帳號已停用"), { httpStatus: 403 });
   return {
     uid: decoded.uid,
     email: decoded.email,
@@ -1124,6 +1126,81 @@ app.post("/api/drive/editor-upload-session", async (req, res) => {
  * 標記「已上傳雲端」（請款依據）**不在這裡做**，前端接著走原本的 markUploaded ——
  * 請款那條路的兩個坑（|| 不用 ??、billableEditorId 只寫一次）只維護一份。
  */
+/**
+ * 剪輯師離職（2026-10-21）：先把他手上還沒完成的片、他是預設剪輯師的 IP 改派，再標離職、停用登入。
+ * `dryRun: true` 只回清單給確認畫面看，不寫入。
+ * 改派對象：`toEditorId`＝某位在職剪輯師；空字串＝「內部、先不指定是誰」（片標 internalEdit、IP 預設清空）。
+ * ⚠️ 已上傳雲端／已作廢的片不動：那些的剪輯費已歸屬（billableEditorId 凍結），歷史照樣顯示他的名字。
+ * ⚠️ 不刪 editors 文件：刪了舊片與請款單會掛空。
+ */
+app.post("/api/editors/:id/leave", async (req, res) => {
+  try {
+    const me = await requireUser(req);
+    if (me.role !== 'manager' && me.role !== 'engineer') return res.status(403).json({ error: "只有主管可以設定離職" });
+    const id = String(req.params.id);
+    const toId = String(req.body?.toEditorId || '');
+    const dryRun = !!req.body?.dryRun;
+    const edRef = adminDb.collection("editors").doc(id);
+    const ed: any = (await edRef.get()).data();
+    if (!ed) return res.status(404).json({ error: "找不到這位剪輯師" });
+    if (ed.leftAt) return res.status(409).json({ error: "已經是離職狀態" });
+    let to: any = null;
+    if (toId) {
+      if (toId === id) return res.status(400).json({ error: "不能改派給自己" });
+      to = (await adminDb.collection("editors").doc(toId).get()).data();
+      if (!to || to.leftAt) return res.status(400).json({ error: "改派對象不存在或已離職" });
+    }
+    const [assetSnap, vendorSnap] = await Promise.all([
+      adminDb.collection("assets").where("editorId", "==", id).get(),
+      adminDb.collection("vendors").where("editorId", "==", id).get(),
+    ]);
+    const open = assetSnap.docs.filter((d: any) => { const a = d.data(); return !a.cloudUploadedAt && !a.voidedAt && !a.editorInvoiceId; });
+    const preview = {
+      assets: open.map((d: any) => ({ id: d.id, title: d.data().title || '', vendorName: d.data().vendorName || '' })),
+      vendors: vendorSnap.docs.map((d: any) => ({ id: d.id, name: d.data().name || '' })),
+    };
+    if (dryRun) return res.json(preview);
+
+    const now = new Date().toISOString();
+    const toName = to ? to.name : '內部剪輯';
+    const writes: [any, any][] = [];
+    for (const d of open) {
+      const a = d.data();
+      writes.push([d.ref, {
+        editorId: toId,
+        internalEdit: !toId,
+        flowLog: [...(a.flowLog || []), {
+          from: a.flowStage || '', to: a.flowStage || '', at: now, byUid: me.uid, byName: me.displayName || '',
+          note: `${ed.name} 離職，改派剪輯師：${ed.name} → ${toName}`,
+        }],
+      }]);
+    }
+    for (const d of vendorSnap.docs) writes.push([d.ref, { editorId: toId, editorName: to ? to.name : '' }]);
+    writes.push([edRef, { leftAt: now }]);
+    for (let i = 0; i < writes.length; i += 400) {
+      const batch = adminDb.batch();
+      for (const [ref, data] of writes.slice(i, i + 400)) batch.update(ref, data);
+      await batch.commit();
+    }
+    // 停用他的登入：Firebase 帳號停用＋踢掉現有登入；users 文件清掉負責 IP（後端 requireUser 也會擋 disabledAt）
+    if (ed.linkedUserUid) {
+      await adminAuth.updateUser(ed.linkedUserUid, { disabled: true }).catch((e: any) => console.warn("disable user failed:", e?.message));
+      await adminAuth.revokeRefreshTokens(ed.linkedUserUid).catch(() => {});
+      await adminDb.collection("users").doc(ed.linkedUserUid).update({ assignedVendorIds: [], disabledAt: now }).catch(() => {});
+    }
+    // 接手的人有登入的話，同步他看得到的 IP（同 VendorManagement.syncEditorVendorAccess）
+    if (to?.linkedUserUid) {
+      const mine = await adminDb.collection("vendors").where("editorId", "==", toId).get();
+      await adminDb.collection("users").doc(to.linkedUserUid).update({ assignedVendorIds: mine.docs.map((d: any) => d.id) });
+    }
+    return res.json({ ok: true, movedAssets: open.length, movedVendors: vendorSnap.size });
+  } catch (e: any) {
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("editor leave failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "設定離職失敗" });
+  }
+});
+
 /* ───────────── 交片送審＝上傳到剪輯影片審核區（2026-10-21） ─────────────
  * 剪輯師以前自己把片丟到雲端「謝謝剪輯影片審核區（內部）」再按送審。現在按送審就選檔，系統直傳到
  *   審核區 / 2026/10 / IP名 /
@@ -1175,7 +1252,10 @@ app.post("/api/drive/review-upload-session", async (req, res) => {
     }
     const version = (asset.reviewFiles?.length || 0) + 1;
     const ext = (String(req.body?.fileName || '').match(/\.[A-Za-z0-9]{2,5}$/) || ['.mp4'])[0];
-    const name = sanitizeFolderName(`${asset.vendorName || ''}_${(asset.title || '').trim()}_v${version}`).slice(0, 180) + ext;
+    // 檔名帶剪輯師名字（使用者 10-21：審核區大家共用，依 年/月/IP 分，看檔名知道誰剪的）
+    const editorDocId = me.linkedEditorId || asset.editorId || '';
+    const editorName = editorDocId ? String((await adminDb.collection("editors").doc(editorDocId).get()).data()?.name || '') : '';
+    const name = sanitizeFolderName(`${asset.vendorName || ''}_${(asset.title || '').trim()}_v${version}${editorName ? `_${editorName}` : ''}`).slice(0, 180) + ext;
     const parentId = await ensureReviewFolder(asset.vendorName);
     const uploadUrl = await createResumableSession({ name, parentId, mimeType, size, origin, full: true });
     return res.json({ uploadUrl, version });

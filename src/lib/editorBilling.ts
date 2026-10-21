@@ -10,8 +10,10 @@ import {
   EDITOR_FEE_BY_TIER,
   EditorInvoice,
   EditorInvoiceItem,
+  Editor,
   Vendor,
 } from '../types';
+import { isInternalWork } from './editorRoster';
 
 // 剪輯師請款的純計算層，前台(剪輯師請款頁)與後台(應付對帳)共用，不碰 Firestore。
 // 定位跟 vendorStatus.ts 一樣：所有「誰該領多少錢」的判定只能有這一份實作。
@@ -116,7 +118,10 @@ export function needsLegacyReview(asset: LegacyReviewAsset): boolean {
 
 export function isBillable(asset: Pick<Asset,
   'cloudUploadedAt' | 'editorInvoiceId' | 'voidedAt' | 'legacySettlementStatus'
->): boolean {
+> & Partial<Pick<Asset, 'internalEdit'>>): boolean {
+  // 內部自己剪的片不請款（使用者 10-21：只有外包要請款）。負責人是內部剪輯師的情況見 isInternalWork，
+  // 那個要名冊才判斷得出來，由 summarizeByEditor／請款頁另外擋。
+  if (asset.internalEdit) return false;
   // 作廢＝這支根本不該存在（多半是建重複了）。不擋在這裡的話，同一個東西的 A/B 兩支都會進請款清單。
   // ⚠️ 注意「封存」故意不擋：封存是業主暫時不用，剪輯師的工還是要算錢。兩者語意不同，別合併。
   if (asset.voidedAt) return false;
@@ -306,7 +311,9 @@ export function summarizeByEditor(
   assets: Asset[],
   vendors: Vendor[],
   editorName: (editorId: string) => string,
-  invoices: { editorId: string; billingMonth: string; status: string; itemCount: number; totalAmount: number }[]
+  invoices: { editorId: string; billingMonth: string; status: string; itemCount: number; totalAmount: number }[],
+  /** 剪輯師名冊：有給的話，內部剪輯師的片不算進應付（只有外包請款） */
+  editors: Pick<Editor, 'id' | 'kind'>[] = []
 ): EditorMonthSummary[] {
   const rows = new Map<string, EditorMonthSummary>();
   const row = (editorId: string): EditorMonthSummary => {
@@ -328,6 +335,7 @@ export function summarizeByEditor(
 
   for (const a of assets) {
     if (!isBillable(a) || getBillingMonth(a) !== month) continue; // isBillable 已排除有單的
+    if (isInternalWork(a, vendors, editors)) continue;
     const eid = getBillableEditorId(a, vendors) || '__unassigned__';
     const r = row(eid);
     r.unsubmittedCount += 1;

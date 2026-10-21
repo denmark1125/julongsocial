@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import EditorOptions from './EditorOptions';
 import { Vendor, Editor, Post, Asset } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import { resolvePostPicks, waitingPostsFor } from '../lib/postMatch';
@@ -250,7 +251,7 @@ export default function ClaimFoldersModal({
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-base"
                   >
                     <option value="">跟著 IP{vendor?.editorId ? `（${editors.find(x => x.id === vendor.editorId)?.name || '未指定'}）` : ''}</option>
-                    {editors.map(ed => <option key={ed.id} value={ed.id}>{ed.name}</option>)}
+                    <EditorOptions editors={editors} currentId={editorChoice} />
                     <option value={INTERNAL}>內部剪輯（不給外包）</option>
                   </select>
                 </div>

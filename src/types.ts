@@ -297,7 +297,20 @@ export interface Editor {
   name: string;
   linkedUserUid?: string; // 若此剪輯師有登入帳號，指向 users/{uid}；用來讓廠商管理的指派變動自動同步登入帳號的權限範圍
   createdAt: string;
+  /**
+   * 外包／內部（2026-10-21 使用者定義）：只有外包要請款。內部（自己的員工）剪的片不進任何請款。
+   * 沒填＝外包（舊資料只有謝謝一位，他是外包）。
+   */
+  kind?: EditorKind;
+  /**
+   * 離職日（ISO）。有值＝離職：不出現在指派選單、登入停用，但歷史片與請款單照樣顯示名字。
+   * ⚠️ 不再刪除剪輯師：刪了舊片會掛空。離職前先把手上的片與負責的 IP 改派（見 /api/editors/:id/leave）。
+   */
+  leftAt?: string;
 }
+
+export type EditorKind = 'external' | 'internal';
+export const EDITOR_KIND_LABEL: Record<EditorKind, string> = { external: '外包', internal: '內部' };
 
 export interface PauseRecord {
   from: string;      // YYYY-MM-DD 該次冷凍起始日
