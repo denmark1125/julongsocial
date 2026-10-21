@@ -114,3 +114,18 @@ export function getUploads(): UploadItem[] {
 export function useUploads(): UploadItem[] {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
+
+/**
+ * 「交片送審＝選檔上傳到審核區」的試用開關（2026-10-21）。只對開了的那台瀏覽器生效：
+ * 網址帶 ?reviewUpload=on 打開、?reviewUpload=off 關掉，記在這台瀏覽器。
+ * ⚠️ 這樣使用者可以在正式站自己測，剪輯師在他自己電腦上照舊是原本的送審，不受影響。測完確認沒問題再拿掉這個開關、全面開。
+ */
+export function isReviewUploadOn(): boolean {
+  try {
+    const q = new URLSearchParams(window.location.search).get('reviewUpload');
+    if (q === 'on' || q === 'off') localStorage.setItem('julong.reviewUpload', q);
+    return localStorage.getItem('julong.reviewUpload') === 'on';
+  } catch {
+    return false;
+  }
+}

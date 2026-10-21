@@ -29,7 +29,7 @@ import {
 } from '../lib/materialSupply';
 import RawStatus from './RawStatus';
 import { buildCompanyQueue, editorQueueView } from '../lib/companyQueue';
-import { startUpload, useUploads, type UploadItem } from '../lib/uploadQueue';
+import { isReviewUploadOn, startUpload, useUploads, type UploadItem } from '../lib/uploadQueue';
 import { listPlannedSlots } from '../lib/plannedSlots';
 import { buildPostIndex, isAssetSelectable, slotVendors, trackedVendors, visibleVendors as visibleVendorsOf } from '../lib/vendorStatus';
 import {
@@ -877,6 +877,7 @@ export default function EditorAssetQueue({
   const [submitTier, setSubmitTier] = useState<DurationTier>('under60');
   /** 交片送審時選的影片檔（必選：送審就是把片傳到審核區，2026-10-21） */
   const [submitFile, setSubmitFile] = useState<File | null>(null);
+  const [reviewUploadOn] = useState(isReviewUploadOn);
 
   // 每個指派廠商各自訂閱單一文件，不用集合查詢——避開 Firestore `in` 條件上限，也符合權限規則(逐廠商路徑核可)
   useEffect(() => {
@@ -1148,7 +1149,8 @@ export default function EditorAssetQueue({
   const confirmSubmit = async () => {
     const asset = submitAsset;
     const file = submitFile;
-    if (!asset || !file || !auth.currentUser) return;
+    if (!asset || !auth.currentUser) return;
+    if (reviewUploadOn && !file) return;
     setBusyId(asset.id!);
     const byName = userProfile?.displayName || userProfile?.username;
     const now = new Date().toISOString();
@@ -1169,6 +1171,10 @@ export default function EditorAssetQueue({
       );
       setSubmitAsset(null);
       setSubmitFile(null);
+      if (!reviewUploadOn || !file) {
+        toast.success('已送審，等待業主回覆');
+        return;
+      }
       toast.success('已送審，影片上傳中，可以繼續做別的事');
       startUpload(asset.id!, asset.title, async onProgress => {
         await uploadReviewFile(asset, file, onProgress);
@@ -1895,7 +1901,9 @@ export default function EditorAssetQueue({
               ))}
             </div>
 
-            {/* 送審就是把片傳到審核區（2026-10-21）：選好檔才送得出去；送出後影片在背景傳，不用等 */}
+            {/* 送審就是把片傳到審核區（2026-10-21）：選好檔才送得出去；送出後影片在背景傳，不用等。
+                試用期間只在開了開關的瀏覽器出現（見 isReviewUploadOn） */}
+            {reviewUploadOn && <>
             <p className="mt-5 text-base font-bold text-gray-700">影片檔</p>
             <label className="mt-2 flex items-center gap-2 p-3 rounded-2xl border-2 border-dashed border-black/15 hover:border-[#5A5A40]/50 cursor-pointer">
               <UploadCloud size={18} className="shrink-0 text-[#5A5A40]" />
@@ -1905,16 +1913,17 @@ export default function EditorAssetQueue({
               <input type="file" accept="video/*" className="hidden"
                 onChange={e => setSubmitFile(e.target.files?.[0] || null)} />
             </label>
+            </>}
 
             <p className="mt-5 text-sm text-gray-500">
-              送出後會移到「待上傳雲端」，影片在背景上傳。若誤按，在尚未上傳前都可以自己撤回。
+              送出後會移到「待上傳雲端」{reviewUploadOn ? '，影片在背景上傳' : ''}。若誤按，在尚未上傳前都可以自己撤回。
             </p>
             <div className="mt-5 flex gap-3">
               <button type="button" onClick={() => setSubmitAsset(null)} disabled={!!busyId}
                 className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-bold disabled:opacity-40">
                 取消
               </button>
-              <button type="button" onClick={confirmSubmit} disabled={!!busyId || !submitFile}
+              <button type="button" onClick={confirmSubmit} disabled={!!busyId || (reviewUploadOn && !submitFile)}
                 className="flex-1 py-3 rounded-xl bg-[#5A5A40] text-white font-bold disabled:opacity-40">
                 {busyId ? '送出中…' : '確定送審'}
               </button>
