@@ -433,7 +433,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                             <X size={12} />
                           </button>
                         )}
-                        {!past && !isSlotDay && dayPosts.length === 0 && canAddSlot && vendor && !hasHabitOn(vendor, d) && (
+                        {!past && !isSlotDay && dayPosts.length === 0 && canAddSlot && vendor && (
                           <button
                             type="button"
                             onClick={e => { e.stopPropagation(); void changeExtra(() => addExtraSlot(vendor, d), `${format(d, 'M/d')} 加了一個發片日`); }}

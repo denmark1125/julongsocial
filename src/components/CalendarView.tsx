@@ -409,7 +409,9 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
                 // 不列入統計／已終止／冷凍沒填解凍日的 IP 加了也不會算，不給加
                 const pickedVendor = selectedVendorId !== 'all' ? slotVendors(vendors).find(v => v.id === selectedVendorId) : undefined;
                 const canAddSlot = !!pickedVendor && day >= startOfDay(new Date()) && daySlots.length === 0
-                  && !dayPosts.some(p => p.contentType !== 'post') && !hasHabitOn(pickedVendor, day);
+                  && !dayPosts.some(p => p.contentType !== 'post');
+                // ⚠️ 不再看「是不是固定的星期幾」（使用者 10-21）：固定日那格被移走/刪掉後格子是空的，要能補回。
+                //    同一天已經有格子（daySlots）就不給加：一天兩格會被同一支貼文一起當成已發，見 plannedSlots.isFulfilled。
 
                 return (
                   <div 
