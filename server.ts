@@ -1336,64 +1336,14 @@ app.get("/v/:token", async (req, res) => {
   }
 });
 
-/**
- * 預覽頁的影片：照瀏覽器要的範圍一段一段回（最多 4MB 一段）。
- * ⚠️ 一段上限 4MB：Vercel 函式回應上限 4.5MB；<video> 收到比要求短的 206 會自己接著要下一段。
- */
-const PREVIEW_CHUNK = 4 * 1024 * 1024;
 const previewSizeCache = new Map<string, { size: number; mime: string }>();
-app.get("/v/:token/video", async (req, res) => {
-  try {
-    const snap = await adminDb.collection("previewLinks").doc(String(req.params.token)).get();
-    if (!snap.exists) return res.status(404).end();
-    const fileId = String(snap.data()!.fileId);
-    let meta = previewSizeCache.get(fileId);
-    if (!meta) {
-      const f = await getFileFull(fileId);
-      meta = { size: f.sizeBytes, mime: f.mimeType || 'video/mp4' };
-      previewSizeCache.set(fileId, meta);
-    }
-    const m = /bytes=(\d*)-(\d*)/.exec(String(req.headers.range || ''));
-    let start = m && m[1] ? Number(m[1]) : 0;
-    let end = m && m[2] ? Number(m[2]) : meta.size - 1;
-    if (m && !m[1] && m[2]) { start = Math.max(0, meta.size - Number(m[2])); end = meta.size - 1; } // bytes=-N
-    if (start >= meta.size) return res.status(416).set('Content-Range', `bytes */${meta.size}`).end();
-    end = Math.min(end, start + PREVIEW_CHUNK - 1, meta.size - 1);
-    // ⚠️ 拆成 8 小段同時抓再接起來：Google 雲端單一連線只給約 1MB/s，高畫質成片（約 2MB/s）會播一下停一下；
-    //    8 條並行實測約 3.6MB/s（10-21）。
-    const PARTS = 8;
-    const step = Math.ceil((end - start + 1) / PARTS);
-    const parts = await Promise.all(Array.from({ length: PARTS }, (_, i) => {
-      const s0 = start + i * step;
-      const e0 = Math.min(end, s0 + step - 1);
-      if (s0 > e0) return Promise.resolve(Buffer.alloc(0));
-      return fetchFileRange(fileId, s0, e0).then(async g => {
-        if (!g.ok) throw new Error(`Drive range ${g.status}`);
-        return Buffer.from(await g.arrayBuffer());
-      });
-    }));
-    const buf = Buffer.concat(parts);
-    res.status(206).set({
-      'Content-Type': meta.mime === 'video/quicktime' ? 'video/mp4' : meta.mime,
-      'Content-Range': `bytes ${start}-${start + buf.length - 1}/${meta.size}`,
-      'Content-Length': String(buf.length),
-      'Accept-Ranges': 'bytes',
-      'Cache-Control': 'private, max-age=600',
-    }).send(buf);
-  } catch (e: any) {
-    console.error("preview video failed:", e?.message);
-    res.status(502).end();
-  }
-});
-
 /**
- * 預覽影片（串流版，實驗中）：一次回一大段（最多 64MB），邊從雲端收邊送給瀏覽器。
- * ⚠️ 10-21 實測：雲端每次請求要先等 2–3 秒才開始給資料，之後很快（35MB 不到半秒）。
- *    舊版 4MB 一段＝每 2 秒的片就要重等一次 → 一直卡。串流只在開頭和拖進度條時等一次。
- *    還在確認 Vercel 會不會截斷超過 4.5MB 的串流回應；確認前預覽頁仍用 /video。
+ * 預覽頁的影片：一次回一大段（最多 64MB），邊從雲端收邊送給瀏覽器（串流）。
+ * ⚠️ 10-21 實測：雲端每次請求要先等 2–3 秒才開始給資料，之後很快。舊版 4MB 一段（為了 Vercel 4.5MB 回應上限）
+ *    ＝每 2 秒的片就重等一次 → 一直卡。串流不受 4.5MB 限制（實測 64MB 完整送達、約 11MB/s），只在開頭和拖進度條時等一次。
  */
 const PREVIEW_STREAM_MAX = 64 * 1024 * 1024;
-app.get("/v/:token/stream", async (req, res) => {
+app.get("/v/:token/video", async (req, res) => {
   const ac = new AbortController();
   req.on('close', () => ac.abort());
   try {
