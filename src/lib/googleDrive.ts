@@ -162,7 +162,9 @@ export async function getQuota(force = false): Promise<DriveQuota> {
  * ⚠️ 這裡用 `files.list` 找同名資料夾是安全的，因為 `drive.file` 下只找得到
  *    **我們自己建的**檔案 —— 不會撈到使用者 Drive 裡其他同名的東西。
  */
-export async function ensureFolder(name: string, parentId?: string): Promise<string> {
+export async function ensureFolder(name: string, parentId?: string, opts: { full?: boolean } = {}): Promise<string> {
+  // full：父資料夾不是這個 app 建的（例如剪輯師審核區），drive.file 看不到，要用全範圍 token（只在後端）
+  const token = opts.full ? await getFullAccessToken() : undefined;
   const safe = name.replace(/'/g, "\\'");
   const clauses = [
     `name='${safe}'`,
@@ -172,11 +174,12 @@ export async function ensureFolder(name: string, parentId?: string): Promise<str
   ].filter(Boolean).join(' and ');
 
   const found = await driveFetch(
-    `/files?q=${encodeURIComponent(clauses)}&fields=files(id,name)&pageSize=2`
+    `/files?q=${encodeURIComponent(clauses)}&fields=files(id,name)&pageSize=2&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+    {}, token
   );
   if (found.files?.length) return found.files[0].id;
 
-  const created = await driveFetch('/files?fields=id', {
+  const created = await driveFetch('/files?fields=id&supportsAllDrives=true', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -185,7 +188,7 @@ export async function ensureFolder(name: string, parentId?: string): Promise<str
       ...(parentId ? { parents: [parentId] } : {}),
       appProperties: { source: APP_TAG },
     }),
-  });
+  }, token);
   return created.id;
 }
 
@@ -280,8 +283,10 @@ export async function getFile(fileId: string): Promise<DriveFileInfo> {
  */
 export async function createResumableSession(opts: {
   name: string; parentId: string; mimeType: string; size: number; origin: string;
+  /** 目的資料夾不是 app 建的（剪輯師審核區）→ 用全範圍 token 開通道。token 本身不會給瀏覽器，給的只有這一個檔的上傳網址 */
+  full?: boolean;
 }): Promise<string> {
-  const token = await getAccessToken();
+  const token = opts.full ? await getFullAccessToken() : await getAccessToken();
   const res = await fetch(`${DRIVE_UPLOAD_API}/files?uploadType=resumable&supportsAllDrives=true&fields=id,name,size,parents`, {
     method: 'POST',
     headers: {
@@ -299,6 +304,49 @@ export async function createResumableSession(opts: {
     throw new Error(`開上傳通道失敗（${data?.error?.errors?.[0]?.reason || res.status}）`);
   }
   return location;
+}
+
+/** 讀一個檔案的基本資料＋影片長度（全範圍 token：審核區的檔案用） */
+export async function getFileFull(fileId: string): Promise<DriveFileInfo & { durationSec?: number }> {
+  const token = await getFullAccessToken();
+  const f = await driveFetch(
+    `/files/${encodeURIComponent(fileId)}?fields=id,name,size,mimeType,webViewLink,parents,videoMediaMetadata(durationMillis)&supportsAllDrives=true`,
+    {}, token
+  );
+  const ms = Number(f.videoMediaMetadata?.durationMillis);
+  return {
+    id: f.id, name: f.name, sizeBytes: Number(f.size || 0), mimeType: f.mimeType,
+    webViewLink: f.webViewLink, parents: f.parents, durationSec: ms > 0 ? Math.round(ms / 1000) : undefined,
+  };
+}
+
+/** 把檔案搬到另一個資料夾（metadata 操作，不重傳）。全範圍 token */
+export async function moveFileFull(fileId: string, toFolderId: string): Promise<void> {
+  const token = await getFullAccessToken();
+  const cur = await driveFetch(`/files/${encodeURIComponent(fileId)}?fields=parents&supportsAllDrives=true`, {}, token);
+  const q = new URLSearchParams({ addParents: toFolderId, fields: 'id,parents', supportsAllDrives: 'true' });
+  if (cur.parents?.length) q.set('removeParents', cur.parents.join(','));
+  await driveFetch(`/files/${encodeURIComponent(fileId)}?${q}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{}' }, token);
+}
+
+/**
+ * 開／關「知道連結的人都能看」。給客戶的預覽頁（/v/代碼）內嵌雲端播放器要靠它，客戶才不用登入。
+ * 回傳建立的權限 id（關閉時要用）。
+ */
+export async function setAnyoneReader(fileId: string): Promise<string> {
+  const token = await getFullAccessToken();
+  const r = await driveFetch(`/files/${encodeURIComponent(fileId)}/permissions?fields=id&supportsAllDrives=true`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role: 'reader', type: 'anyone', allowFileDiscovery: false }),
+  }, token);
+  return r.id;
+}
+export async function removePermission(fileId: string, permissionId: string): Promise<void> {
+  const token = await getFullAccessToken();
+  const res = await fetch(`${DRIVE_API}/files/${encodeURIComponent(fileId)}/permissions/${encodeURIComponent(permissionId)}?supportsAllDrives=true`, {
+    method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok && res.status !== 404) throw new Error(`關閉公開連結失敗（${res.status}）`);
 }
 
 export interface FolderFile {

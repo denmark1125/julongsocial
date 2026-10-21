@@ -143,6 +143,27 @@ export async function uploadFinishedFiles(
 }
 
 /**
+ * 交片送審：把剪輯師選的那一支直傳到「剪輯影片審核區 / YYYY/MM / IP名」，傳完登記並拿到給客戶的預覽頁網址。2026-10-21 起。
+ * ⚠️ 送審本身（轉業主審核中、記送審時間）在呼叫端先寫好；這裡只負責檔案，失敗可以從上傳面板重試，不影響送審狀態。
+ */
+export async function uploadReviewFile(
+  asset: Asset, file: File, onProgress?: (percent: number) => void,
+): Promise<{ previewUrl: string | null }> {
+  const { uploadUrl } = await callApi('/api/drive/review-upload-session', {
+    assetId: asset.id, fileName: file.name, size: file.size, mimeType: file.type || 'video/mp4',
+  });
+  onProgress?.(0);
+  const result = await putResumable(uploadUrl, file, sent => onProgress?.(Math.floor((sent / (file.size || 1)) * 100)));
+  const done = await callApi('/api/drive/review-upload-done', { assetId: asset.id, fileId: result.id });
+  return { previewUrl: done.previewUrl ? `${window.location.origin}${done.previewUrl}` : null };
+}
+
+/** 業主通過後「上傳雲端」：審核區已經有這支片，請後端搬進 IP 成片夾（不重傳） */
+export async function finalizeReviewFile(asset: Asset): Promise<void> {
+  await callApi('/api/drive/review-to-finished', { assetId: asset.id });
+}
+
+/**
  * 「這支片可能剛變成 ready，請後端看要不要送客戶」。
  * 刻意不等、不報錯：送客戶是背景工作，不能讓按鈕卡住或跳錯誤嚇到人；失敗交給每日 cron 補。
  */

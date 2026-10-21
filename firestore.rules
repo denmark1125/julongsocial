@@ -114,7 +114,9 @@ service cloud.firestore {
                   'flowStage', 'flowSince', 'flowLog', 'cloudUploadedAt',
                   'durationTier', 'editorFee', 'billableEditorId', 'editorInvoiceId',
                   // 剪輯師回報素材問題（2026-10-20）。resolvedAt 另外擋，見 editorReportUntouchedResolution
-                  'editorReport']);
+                  'editorReport',
+                  // 送審歷程（2026-10-21）：每次交片送審附加一筆，見 submissionsOnlyAppended
+                  'submissions']);
     }
 
     // 這位使用者代表哪一位剪輯師標籤。請款單的擁有權判斷全部靠這個。
@@ -260,6 +262,16 @@ service cloud.firestore {
              (!('resolvedAt' in r) || r.resolvedAt is string);
     }
 
+    // 送審歷程只能往後加，不能改掉或刪掉以前的紀錄（日後要算送審→業主審完的時間、第幾次送審）
+    function submissionsOnlyAppended() {
+      return !('submissions' in request.resource.data)
+        || (request.resource.data.submissions is list
+            && request.resource.data.submissions.size() <= 50
+            && (!('submissions' in resource.data)
+                || (request.resource.data.submissions.size() >= resource.data.submissions.size()
+                    && request.resource.data.submissions[0:resource.data.submissions.size()] == resource.data.submissions)));
+    }
+
     // 剪輯師只能回報、改回報、撤回；「已處理」(resolvedAt) 是內部人員的事，剪輯師不能自己標。
     function editorReportUntouchedResolution() {
       return !('editorReport' in request.resource.data)
@@ -320,6 +332,10 @@ service cloud.firestore {
              (!('plannedPostId' in data) || data.plannedPostId is string) &&
              // 素材夠不夠剪（後端建檔時寫）、剪輯師回報素材問題。2026-10-20 起，見 src/lib/rawCheck.ts。
              (!('rawCheck' in data) || data.rawCheck is map) &&
+             // 送審上傳（2026-10-21）：reviewFiles／durationMismatch 只有後端寫（admin SDK 不經規則），這裡只擋型別
+             (!('reviewFiles' in data) || data.reviewFiles is list) &&
+             (!('submissions' in data) || data.submissions is list) &&
+             (!('durationMismatch' in data) || data.durationMismatch is bool) &&
              (!('editorReport' in data) || isValidEditorReport(data.editorReport)) &&
              // 剪輯順序：batchIndex＝上片時這一批裡的第幾支（後端寫）；editOrder＝同事事後排的位置。
              // 兩個都不在 isEditorAssetUpdate 白名單＝剪輯師改不了先剪哪一支。
@@ -517,7 +533,8 @@ service cloud.firestore {
             editorCanAccessAsset(resource.data) &&
             editorCanAccessAsset(request.resource.data) &&
             isEditorAssetUpdate() &&
-            editorReportUntouchedResolution()
+            editorReportUntouchedResolution() &&
+            submissionsOnlyAppended()
           )
         );
       // 刪除保護：剪輯師已標記上傳雲端（＝已可請款）或已納入請款單的片一律不可刪。

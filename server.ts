@@ -15,7 +15,7 @@ import { fileURLToPath } from "url";
 import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVideoTrackingScope, getDeficitBreakdown } from "./src/lib/vendorStatus.js";
 // 交棒狀態的判定要跟前端同一份，不然推播說的「目前狀態」會跟畫面上不一致
 import { deriveFlowStage, FLOW_STAGE_LABEL } from "./src/types.js";
-import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFolderName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, renameFile, copyFile, listFolderFiles, createResumableSession, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
+import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFolderName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, renameFile, copyFile, listFolderFiles, createResumableSession, getFileFull, moveFileFull, setAnyoneReader, removePermission, isFullDriveConfigured, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
 import { summarizeFolder } from "./src/lib/rawFolder.js";
 import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
 
@@ -1123,6 +1123,152 @@ app.post("/api/drive/editor-upload-session", async (req, res) => {
  * 標記「已上傳雲端」（請款依據）**不在這裡做**，前端接著走原本的 markUploaded ——
  * 請款那條路的兩個坑（|| 不用 ??、billableEditorId 只寫一次）只維護一份。
  */
+/* ───────────── 交片送審＝上傳到剪輯影片審核區（2026-10-21） ─────────────
+ * 剪輯師以前自己把片丟到雲端「謝謝剪輯影片審核區（內部）」再按送審。現在按送審就選檔，系統直傳到
+ *   審核區 / 2026/10 / IP名 /
+ * 傳完開一個給客戶的預覽頁 /v/<代碼>（不用登入；底層是雲端檔案「知道連結可看」，日後換存放位置連結不變）。
+ * 業主通過後按「上傳雲端」不用再傳：把審核區這支搬進 IP 成片夾（review-to-finished）。
+ * ⚠️ 審核區不是系統建的資料夾 → 全部用全範圍 token（只在後端）。瀏覽器只拿到單一檔案的上傳網址。
+ */
+const REVIEW_ROOT_FOLDER_ID = '1_pKaXOzMWoYRLPhzf4kA0H_zNOrHdQdp'; // 謝謝剪輯影片審核區（內部）
+
+/** 審核區 / YYYY/MM / IP名（台灣時間的年月；使用者 10-21 定的格式，資料夾名含「/」是 Drive 允許的） */
+async function ensureReviewFolder(vendorName: string, now = new Date()): Promise<string> {
+  const tw = new Date(now.getTime() + 8 * 3600 * 1000);
+  const month = `${tw.getUTCFullYear()}/${String(tw.getUTCMonth() + 1).padStart(2, '0')}`;
+  const monthId = await ensureFolder(month, REVIEW_ROOT_FOLDER_ID, { full: true });
+  return ensureFolder(sanitizeFolderName(vendorName || '未分類'), monthId, { full: true });
+}
+
+/** 這支片能不能由這個人送審上傳：剪輯師只能傳派給自己的；還沒作廢、還沒完成 */
+async function loadReviewTarget(me: AuthedUser, assetId: string) {
+  if (!assetId) throw Object.assign(new Error("缺少 assetId"), { httpStatus: 400 });
+  const snap = await adminDb.collection("assets").doc(String(assetId)).get();
+  if (!snap.exists) throw Object.assign(new Error("找不到這支素材"), { httpStatus: 404 });
+  const asset: any = { id: snap.id, ...snap.data() };
+  if (me.role === 'editor') {
+    const byVendor = (me.assignedVendorIds || []).includes(asset.vendorId);
+    const byAssign = !!me.linkedEditorId && asset.editorId === me.linkedEditorId;
+    if (!byVendor && !byAssign) throw Object.assign(new Error("這支片不是派給你的"), { httpStatus: 403 });
+  }
+  if (asset.voidedAt) throw Object.assign(new Error("這支片已作廢"), { httpStatus: 409 });
+  return asset;
+}
+
+app.post("/api/drive/review-upload-session", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    if (!isFullDriveConfigured()) return res.status(503).json({ error: "審核區上傳還沒設定好，請通知主管" });
+    const me = await requireUser(req);
+    const asset = await loadReviewTarget(me, req.body?.assetId);
+    if (asset.cloudUploadedAt) return res.status(409).json({ error: "這支片已經完成，不用再送審" });
+    const size = Number(req.body?.size);
+    const mimeType = String(req.body?.mimeType || 'video/mp4').slice(0, 100);
+    if (!Number.isFinite(size) || size <= 0) return res.status(400).json({ error: "檔案大小不對" });
+    if (size > MAX_FINISHED_BYTES) return res.status(413).json({ error: "單一檔案超過 20 GB，請先壓縮再傳" });
+    const origin = String(req.headers.origin || '');
+    if (!UPLOAD_ORIGINS.some(r => r.test(origin))) return res.status(403).json({ error: "上傳來源不對" });
+    const quota = await getQuota();
+    if (quota.freeBytes - size < DRIVE_MIN_FREE_BYTES) {
+      return res.status(507).json({ error: "DRIVE_QUOTA_LOW", message: `公司雲端硬碟只剩 ${Math.round(quota.freeBytes / 1024 ** 3)} GB，已暫停上傳，請通知主管。` });
+    }
+    const version = (asset.reviewFiles?.length || 0) + 1;
+    const ext = (String(req.body?.fileName || '').match(/\.[A-Za-z0-9]{2,5}$/) || ['.mp4'])[0];
+    const name = sanitizeFolderName(`${asset.vendorName || ''}_${(asset.title || '').trim()}_v${version}`).slice(0, 180) + ext;
+    const parentId = await ensureReviewFolder(asset.vendorName);
+    const uploadUrl = await createResumableSession({ name, parentId, mimeType, size, origin, full: true });
+    return res.json({ uploadUrl, version });
+  } catch (e: any) {
+    if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("drive/review-upload-session failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "開上傳通道失敗" });
+  }
+});
+
+app.post("/api/drive/review-upload-done", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    const me = await requireUser(req);
+    const asset = await loadReviewTarget(me, req.body?.assetId);
+    const fileId = String(req.body?.fileId || '');
+    if (!fileId) return res.status(400).json({ error: "沒有檔案" });
+    const existing: any[] = asset.reviewFiles || [];
+    const already = existing.find(r => r.fileId === fileId);
+    if (already) return res.json({ previewUrl: already.previewToken ? `/v/${already.previewToken}` : null });
+    // 不相信前端給的 fileId：確認它真的落在這支片的審核區資料夾
+    const f = await getFileFull(fileId);
+    const folderId = await ensureReviewFolder(asset.vendorName);
+    if (!f.parents?.includes(folderId)) return res.status(400).json({ error: "這個檔案不在審核區的資料夾裡" });
+    // 給客戶的預覽：雲端檔案開「知道連結可看」，再包一層我們自己的短網址
+    const publicPermissionId = await setAnyoneReader(fileId);
+    const previewToken = crypto.randomBytes(9).toString('base64url');
+    const now = new Date().toISOString();
+    await adminDb.collection("previewLinks").doc(previewToken).set({
+      assetId: asset.id, fileId, title: asset.title || '', vendorName: asset.vendorName || '', createdAt: now,
+    });
+    const entry: any = { version: existing.length + 1, fileId, name: f.name, uploadedAt: now, previewToken, publicPermissionId };
+    if (f.durationSec) entry.durationSec = f.durationSec;
+    await adminDb.collection("assets").doc(asset.id).update({ reviewFiles: [...existing, entry] });
+    return res.json({ previewUrl: `/v/${previewToken}` });
+  } catch (e: any) {
+    if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("drive/review-upload-done failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "登記失敗" });
+  }
+});
+
+/**
+ * 業主通過後「上傳雲端」：把審核區最新一版搬進 IP 成片夾當成片（不重傳），關掉公開連結。
+ * 之後送客戶夾照舊走 finishedFiles＋copy-to-client。IP 沒設成片夾就留在審核區，只登記 finishedFiles。
+ */
+app.post("/api/drive/review-to-finished", async (req, res) => {
+  if (!requireDriveConfigured(res)) return;
+  try {
+    const me = await requireUser(req);
+    const asset = await loadReviewTarget(me, req.body?.assetId);
+    const files: any[] = asset.reviewFiles || [];
+    const latest = files[files.length - 1];
+    if (!latest) return res.status(404).json({ error: "這支沒有審核區的檔案" });
+    const v = (await adminDb.collection("vendors").doc(String(asset.vendorId)).get()).data();
+    if (v?.finishedFolderId) await moveFileFull(latest.fileId, v.finishedFolderId);
+    if (latest.publicPermissionId) await removePermission(latest.fileId, latest.publicPermissionId).catch(() => {});
+    const now = new Date().toISOString();
+    await adminDb.collection("assets").doc(asset.id).set({
+      finishedFiles: [{ id: latest.fileId, name: latest.name, uploadedAt: now }],
+      clientCopyPending: true,
+    }, { merge: true });
+    return res.json({ moved: !!v?.finishedFolderId });
+  } catch (e: any) {
+    if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("drive/review-to-finished failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "搬成片失敗" });
+  }
+});
+
+/**
+ * 給客戶的預覽頁。不用登入、不用權限：連結本身就是鑰匙（隨機 12 碼）。
+ * ⚠️ 畫面只放片名與播放器，不放內部資訊。業主通過後檔案搬走、公開連結關掉，這頁就看不到了。
+ */
+const escapeHtml = (t: string) => t.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]);
+app.get("/v/:token", async (req, res) => {
+  const page = (body: string, status = 200) => res.status(status).type('html').send(
+    `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>影片預覽</title>` +
+    `<style>body{margin:0;background:#111;color:#eee;font-family:system-ui,sans-serif}main{max-width:960px;margin:0 auto;padding:16px}h1{font-size:18px;font-weight:600;margin:8px 0 12px}.v{position:relative;width:100%;max-width:480px;aspect-ratio:9/16;margin:0 auto;background:#000;border-radius:12px;overflow:hidden}iframe{position:absolute;inset:0;width:100%;height:100%;border:0}p{color:#aaa;font-size:14px}</style>` +
+    `</head><body><main>${body}</main></body></html>`);
+  try {
+    const snap = await adminDb.collection("previewLinks").doc(String(req.params.token)).get();
+    if (!snap.exists) return page('<h1>這個預覽連結已經失效</h1><p>請向聚浪窗口索取新的連結。</p>', 404);
+    const d: any = snap.data();
+    return page(`<h1>${escapeHtml(d.title || '影片預覽')}</h1><div class="v"><iframe src="https://drive.google.com/file/d/${encodeURIComponent(d.fileId)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe></div>`);
+  } catch (e: any) {
+    console.error("preview page failed:", e?.message);
+    return page('<h1>預覽暫時打不開</h1><p>請稍後再試。</p>', 500);
+  }
+});
+
 app.post("/api/drive/editor-upload-done", async (req, res) => {
   if (!requireDriveConfigured(res)) return;
   try {

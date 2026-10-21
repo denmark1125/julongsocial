@@ -257,3 +257,26 @@ describe('剪輯師回報素材問題 editorReport（2026-10-20）', () => {
     await assertSucceeds(updateDoc(doc(as('staff'), 'assets', 'a1'), { rawCheck: { videoCount: 9, fileCount: 9, checkedAt: NOW } }));
   });
 });
+
+describe('送審歷程 submissions（2026-10-21）', () => {
+  const s1 = { version: 1, submittedAt: NOW, byName: '謝謝' };
+  const s2 = { version: 2, submittedAt: NOW, byName: '謝謝' };
+
+  it('剪輯師可以往後附加一筆；不能刪掉或改掉以前的', async () => {
+    await assertSucceeds(updateDoc(doc(as('ed'), 'assets', 'a1'), { submissions: [s1] }));
+    await assertSucceeds(updateDoc(doc(as('ed'), 'assets', 'a1'), { submissions: [s1, s2] }));
+    await assertFails(updateDoc(doc(as('ed'), 'assets', 'a1'), { submissions: [s2] }));
+    await assertFails(updateDoc(doc(as('ed'), 'assets', 'a1'), { submissions: [{ ...s1, submittedAt: '2020-01-01' }, s2] }));
+  });
+
+  it('剪輯師不能寫 reviewFiles／durationMismatch（後端才能寫）；員工可以', async () => {
+    await assertFails(updateDoc(doc(as('ed'), 'assets', 'a1'), { reviewFiles: [] }));
+    await assertFails(updateDoc(doc(as('ed'), 'assets', 'a1'), { durationMismatch: false }));
+    await assertSucceeds(updateDoc(doc(as('staff'), 'assets', 'a1'), { durationMismatch: false }));
+  });
+
+  it('前端讀不到 previewLinks', async () => {
+    await env.withSecurityRulesDisabled(async ctx => { await setDoc(doc(ctx.firestore(), 'previewLinks', 't1'), { assetId: 'a1' }); });
+    await assertFails(getDoc(doc(as('boss'), 'previewLinks', 't1')));
+  });
+});

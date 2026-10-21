@@ -23,7 +23,7 @@ import {
   buildEditorQueue, customDeadline, deadlineStatus, deliveryDeadline, EditorQueueRow, formatDeadline, shootBaseDate,
 } from '../lib/editorQueue';
 import { isBillable } from '../lib/editorBilling';
-import { canUploadFinishedInApp, uploadFinishedFiles, requestClientCopy, fetchFinishedUploadVendors } from '../lib/finishedUpload';
+import { canUploadFinishedInApp, uploadFinishedFiles, requestClientCopy, fetchFinishedUploadVendors, uploadReviewFile, finalizeReviewFile } from '../lib/finishedUpload';
 import {
   buildHorizonDemands, buildSupplyPlan, describeSupply, SUPPLY_HORIZON_DAYS,
 } from '../lib/materialSupply';
@@ -160,6 +160,8 @@ function FlowSteps({
   scheduledNote?: string;
 }) {
   const stage = deriveFlowStage(asset);
+  // 送審時影片已經傳到審核區：上傳雲端不用再選檔，一顆按鈕（系統把那支搬進成片夾）
+  const reviewReady = !!asset.reviewFiles?.length;
   const { convert, upload } = stepStates(asset);
 
   const convertCaption =
@@ -179,7 +181,7 @@ function FlowSteps({
   //    習慣自己丟檔的人找不到另一條路（09-30 毛片上傳就是只剩一條路、同事整個棄用）。
   const uploadChoice = !!onUploadFiles && !!onUpload && upload === 'active';
 
-  if (scheduledNote && onUpload && upload === 'active') {
+  if ((scheduledNote || reviewReady) && onUpload && upload === 'active') {
     return (
       <div className="flex items-stretch gap-2 max-w-lg">
         {!(compact && convert === 'done') && (
@@ -195,9 +197,9 @@ function FlowSteps({
           />
         )}
         <ChoiceButton
-          label="標記完成"
+          label={scheduledNote ? '標記完成' : '上傳雲端'}
           // 只講剪輯師需要知道的：按了就完成、會算錢。不講小編排了哪天、發布沒有（使用者 10-21：講太多會誤解）
-          caption="標記後列入請款"
+          caption={scheduledNote ? '標記後列入請款' : '影片已在審核區，按了就完成'}
           icon={<CheckCircle2 size={12} />}
           solid
           busy={busy}
@@ -873,6 +875,8 @@ export default function EditorAssetQueue({
   // 交片送審的確認視窗：同時要選這支是 60 秒以上還是以下（決定單價）
   const [submitAsset, setSubmitAsset] = useState<Asset | null>(null);
   const [submitTier, setSubmitTier] = useState<DurationTier>('under60');
+  /** 交片送審時選的影片檔（必選：送審就是把片傳到審核區，2026-10-21） */
+  const [submitFile, setSubmitFile] = useState<File | null>(null);
 
   // 每個指派廠商各自訂閱單一文件，不用集合查詢——避開 Firestore `in` 條件上限，也符合權限規則(逐廠商路徑核可)
   useEffect(() => {
@@ -1137,29 +1141,43 @@ export default function EditorAssetQueue({
   // 送審前先問長度分級：這一步同時決定這支多少錢，所以不能只用 window.confirm 帶過。
   const advance = (asset: Asset) => {
     setSubmitTier(asset.durationTier ?? 'under60');
+    setSubmitFile(null);
     setSubmitAsset(asset);
   };
 
   const confirmSubmit = async () => {
     const asset = submitAsset;
-    if (!asset || !auth.currentUser) return;
-    const msg = '已送審，等待業主回覆';
+    const file = submitFile;
+    if (!asset || !file || !auth.currentUser) return;
     setBusyId(asset.id!);
+    const byName = userProfile?.displayName || userProfile?.username;
+    const now = new Date().toISOString();
     try {
+      // ⚠️ 先算送審（立刻轉業主審核中、記送審時間），影片在背景傳：不能讓上傳卡住剪輯師（使用者 10-21）
       await updateDoc(
         doc(db, 'assets', asset.id!),
         {
-          ...buildFlowUpdate(asset, 'client_review', {
-            byUid: auth.currentUser.uid,
-            byName: userProfile?.displayName || userProfile?.username,
-          }),
+          ...buildFlowUpdate(asset, 'client_review', { byUid: auth.currentUser.uid, byName }),
           // 只寫分級、不寫 editorFee：金額要到請款送出那一刻才凍結，
           // 中間管帳若調整分級價或逐支改價都還來得及。
           durationTier: submitTier,
+          // 送審歷程只能往後加（規則擋），退片重送＝第 2 筆。日後算送審→業主審完要多久
+          submissions: [...(asset.submissions || []), {
+            version: (asset.submissions?.length || 0) + 1, submittedAt: now, ...(byName ? { byName } : {}),
+          }],
         }
       );
       setSubmitAsset(null);
-      toast.success(msg);
+      setSubmitFile(null);
+      toast.success('已送審，影片上傳中，可以繼續做別的事');
+      startUpload(asset.id!, asset.title, async onProgress => {
+        await uploadReviewFile(asset, file, onProgress);
+        toast.success(`「${asset.title}」影片已傳到審核區`);
+        return true;
+      }).catch(error => {
+        console.error('Review upload failed:', error);
+        toast.error(`「${asset.title}」影片上傳失敗：${error?.message || '請在右下角重試'}`);
+      });
       // 這裡故意不推即時通知：老闆 2026-08-12 回報「LINE 好吵」，
       // 剪輯師每交一支片就跳一則。改由每日 09:30 的 flow-digest-push 彙總成一則。
     } catch (error) {
@@ -1272,6 +1290,7 @@ export default function EditorAssetQueue({
    */
   const uploadAndMark = (asset: Asset) => {
     if (!auth.currentUser) return;
+    if (asset.reviewFiles?.length) { void markUploaded(asset); return; }
     startUpload(asset.id!, asset.title, async onProgress => {
       const files = await uploadFinishedFiles(asset, p => onProgress(p.percent));
       if (files.length === 0) return false;
@@ -1303,6 +1322,8 @@ export default function EditorAssetQueue({
     if (!auth.currentUser) return;
     setBusyId(asset.id!);
     try {
+      // 送審時已經傳到審核區的片：搬進 IP 成片夾當成片，不用再傳一次（2026-10-21）
+      if (asset.reviewFiles?.length) await finalizeReviewFile(asset);
       await writeUploaded(asset);
       toast.success('已標記完成，列入請款');
       // 同上，不推即時通知，交給每日彙總
@@ -1874,15 +1895,26 @@ export default function EditorAssetQueue({
               ))}
             </div>
 
+            {/* 送審就是把片傳到審核區（2026-10-21）：選好檔才送得出去；送出後影片在背景傳，不用等 */}
+            <p className="mt-5 text-base font-bold text-gray-700">影片檔</p>
+            <label className="mt-2 flex items-center gap-2 p-3 rounded-2xl border-2 border-dashed border-black/15 hover:border-[#5A5A40]/50 cursor-pointer">
+              <UploadCloud size={18} className="shrink-0 text-[#5A5A40]" />
+              <span className={`min-w-0 truncate text-sm ${submitFile ? 'text-gray-800 font-bold' : 'text-gray-500'}`}>
+                {submitFile ? `${submitFile.name}（${(submitFile.size / 1024 ** 2).toFixed(0)} MB）` : '選擇剪好的影片'}
+              </span>
+              <input type="file" accept="video/*" className="hidden"
+                onChange={e => setSubmitFile(e.target.files?.[0] || null)} />
+            </label>
+
             <p className="mt-5 text-sm text-gray-500">
-              送出後會移到「待上傳雲端」。若誤按，在尚未上傳前都可以自己撤回。
+              送出後會移到「待上傳雲端」，影片在背景上傳。若誤按，在尚未上傳前都可以自己撤回。
             </p>
             <div className="mt-5 flex gap-3">
               <button type="button" onClick={() => setSubmitAsset(null)} disabled={!!busyId}
                 className="flex-1 py-3 rounded-xl bg-gray-100 text-gray-700 font-bold disabled:opacity-40">
                 取消
               </button>
-              <button type="button" onClick={confirmSubmit} disabled={!!busyId}
+              <button type="button" onClick={confirmSubmit} disabled={!!busyId || !submitFile}
                 className="flex-1 py-3 rounded-xl bg-[#5A5A40] text-white font-bold disabled:opacity-40">
                 {busyId ? '送出中…' : '確定送審'}
               </button>

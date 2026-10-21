@@ -648,6 +648,15 @@ export interface Asset {
    */
   editorReport?: EditorReport;
   /**
+   * 交片送審時系統上傳到「剪輯影片審核區」的檔案，每送審一次一筆（退片重送＝第 2 版）。2026-10-21 起。
+   * 只有後端寫。最新一版是 reviewFiles[reviewFiles.length - 1]；業主通過後這支會被搬進 IP 成片夾當成片。
+   */
+  reviewFiles?: ReviewFile[];
+  /** 送審歷程（每按一次交片送審附加一筆）。submittedAt 仍是最近一次。剪輯師只能附加 */
+  submissions?: { version: number; submittedAt: string; byName?: string }[];
+  /** 影片實際長度跟剪輯師選的分級（60 秒以下／以上）不符。內部看，不擋流程 */
+  durationMismatch?: boolean;
+  /**
    * 上片／歸片時這支在這一批裡的位置（0 起算）。一批片共用同一個 createdAt，
    * 同一批誰先剪靠它。server 建檔時寫入。見 lib/editOrder.ts。
    */
@@ -810,6 +819,19 @@ export interface ExtraSlot {
   contentType: string; // 'video'
   createdBy?: string;
   createdAt: string;
+}
+
+export interface ReviewFile {
+  version: number;
+  fileId: string;
+  name: string;
+  uploadedAt: string;
+  /** 影片秒數（Google 處理完才有，晚幾分鐘補上） */
+  durationSec?: number;
+  /** 給客戶的預覽頁代碼：https://julongsocial.vercel.app/v/<previewToken> */
+  previewToken?: string;
+  /** 「知道連結可看」那條權限的 id，業主通過搬成片時關掉 */
+  publicPermissionId?: string;
 }
 
 export interface RawCheck {

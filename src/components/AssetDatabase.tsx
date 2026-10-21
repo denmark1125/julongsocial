@@ -28,6 +28,7 @@ import { ASSET_CATEGORIES, ASSET_CATEGORY_DATALIST_ID } from '../lib/assetCatego
 import { driveFolderIdFromUrl } from '../lib/driveNaming';
 import EditingBrief from './EditingBrief';
 import RawStatus from './RawStatus';
+import PreviewLinkButton from './PreviewLinkButton';
 import AttachFilesModal from './AttachFilesModal';
 import ClaimFoldersModal from './ClaimFoldersModal';
 import RawFootageUpload from './RawFootageUpload';
@@ -1193,6 +1194,7 @@ ${after}`)) return;
                 {asset.type === 'video' && !asset.voidedAt && ['to_edit', 'revising'].includes(deriveFlowStage(asset)) && (
                   <RawStatus asset={asset} mode="internal" />
                 )}
+                <PreviewLinkButton asset={asset} />
                 {reviewNotes[asset.id!] && (
                   <button
                     type="button"

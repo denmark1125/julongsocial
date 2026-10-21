@@ -27,6 +27,7 @@ import { Scissors, UserCheck, PenLine, Clock, Flame, CalendarClock, ThumbsUp, Ca
 import { buildCompanyQueue, datesOf } from '../lib/companyQueue';
 import { assetRawIssue, findSkippedAssets } from '../lib/rawCheck';
 import RawStatus from './RawStatus';
+import PreviewLinkButton from './PreviewLinkButton';
 import { format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -346,6 +347,7 @@ export default function ProductionFlowBoard({
                         <p className="text-[13px] text-gray-600 leading-snug break-words">{a.title}</p>
                         {skippedIds.has(a.id!) && <p className="text-[12px] font-bold text-red-600">疑似跳過</p>}
                         {col.stage === 'to_edit' && <RawStatus asset={a} mode="internal" />}
+                        <PreviewLinkButton asset={a} />
 
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="inline-flex items-center gap-1 text-[9.5px] text-gray-400">
