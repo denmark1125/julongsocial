@@ -194,7 +194,8 @@ function FlowSteps({
         )}
         <ChoiceButton
           label="標記完成"
-          caption={`${scheduledNote}，標記後列入請款`}
+          // 只講剪輯師需要知道的：按了就完成、會算錢。不講小編排了哪天、發布沒有（使用者 10-21：講太多會誤解）
+          caption="標記後列入請款"
           icon={<CheckCircle2 size={12} />}
           solid
           busy={busy}
