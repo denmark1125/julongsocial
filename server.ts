@@ -1343,9 +1343,20 @@ app.get("/v/:token/video", async (req, res) => {
     if (m && !m[1] && m[2]) { start = Math.max(0, meta.size - Number(m[2])); end = meta.size - 1; } // bytes=-N
     if (start >= meta.size) return res.status(416).set('Content-Range', `bytes */${meta.size}`).end();
     end = Math.min(end, start + PREVIEW_CHUNK - 1, meta.size - 1);
-    const g = await fetchFileRange(fileId, start, end);
-    if (!g.ok) return res.status(502).end();
-    const buf = Buffer.from(await g.arrayBuffer());
+    // ⚠️ 拆成 8 小段同時抓再接起來：Google 雲端單一連線只給約 1MB/s，高畫質成片（約 2MB/s）會播一下停一下；
+    //    8 條並行實測約 3.6MB/s（10-21）。
+    const PARTS = 8;
+    const step = Math.ceil((end - start + 1) / PARTS);
+    const parts = await Promise.all(Array.from({ length: PARTS }, (_, i) => {
+      const s0 = start + i * step;
+      const e0 = Math.min(end, s0 + step - 1);
+      if (s0 > e0) return Promise.resolve(Buffer.alloc(0));
+      return fetchFileRange(fileId, s0, e0).then(async g => {
+        if (!g.ok) throw new Error(`Drive range ${g.status}`);
+        return Buffer.from(await g.arrayBuffer());
+      });
+    }));
+    const buf = Buffer.concat(parts);
     res.status(206).set({
       'Content-Type': meta.mime === 'video/quicktime' ? 'video/mp4' : meta.mime,
       'Content-Range': `bytes ${start}-${start + buf.length - 1}/${meta.size}`,
