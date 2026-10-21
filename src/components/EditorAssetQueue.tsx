@@ -14,6 +14,7 @@ import {
   getFlowDueInfo,
   isClosedOutsideSystem,
   isFlowStale,
+  isOnEditorDesk,
   sortFlowColumn,
 } from '../lib/assetFlow';
 import { visibleVendors } from '../lib/vendorStatus';
@@ -623,6 +624,17 @@ export function AssetCard({
           </a>
         )}
 
+        {/* 已經被小編排程／發布、但還沒上傳雲端：講出來，剪輯師才知道這支為什麼該先傳（陳述，不派工） */}
+        {(flowStage === 'client_review' || flowStage === 'to_upload') && !asset.cloudUploadedAt && (() => {
+          const p = asset.usedInPostId ? posts.find(x => x.id === asset.usedInPostId) : undefined;
+          if (!p || (p.status !== 'scheduled' && p.status !== 'published')) return null;
+          return (
+            <p className={`text-[13px] text-gray-500 mt-1 ${compact ? 'lg:text-[15px]' : ''}`}>
+              {p.status === 'published' ? '已發布' : `小編已排 ${format(parseISO(p.scheduledAt), 'M/d')} 上片`}
+            </p>
+          );
+        })()}
+
         {/* 素材夠不夠剪＋「素材有問題？」回報。只在還要剪的時候出現（2026-10-20 漏片防護） */}
         {(flowStage === 'to_edit' || flowStage === 'revising') && (
           <RawStatus asset={asset} mode="editor" myName={reporterName} large={compact} />
@@ -918,27 +930,8 @@ export default function EditorAssetQueue({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vendorIdsKey]);
 
-  const settledPostIds = new Set(
-    posts.filter(p => p.status === 'scheduled' || p.status === 'published').map(p => p.id)
-  );
-
-  const myVideos = assets.filter(a =>
-    a.type === 'video' &&
-    // 作廢的片不該再出現在剪輯師的工作台，也不會進他的請款清單（見 isBillable）
-    !a.voidedAt &&
-    (!myEditorId || !a.editorId || a.editorId === myEditorId) &&
-    // 內部自己剪的片不進任何外包剪輯師的待辦。
-    // ⚠️ 這條一定要有：editorId 空的片本來是「每個被指派這家 IP 的人都看得到」。
-    !a.internalEdit &&
-    // 封存＝業主不用這支，我們丟進暫存區。已經上傳過的仍要留著（那是他的請款依據），
-    // 還沒做完就被封存的則不該再出現在他的待辦裡。
-    (a.status !== 'archived' || !!a.cloudUploadedAt) &&
-    // 已排程/已發布的貼文代表這支真的用掉了，不該再出現在工作清單
-    !(a.usedInPostId && settledPostIds.has(a.usedInPostId)) &&
-    // 從沒上傳過、但已被後台盤點成「舊制已結清」＝當年在系統外就領過錢了，這支已經結案。
-    // 沒有這條的話那批片會永遠掛在待辦裡（沒人會去按上傳雲端，按了反而變成重複請款）。
-    !isClosedOutsideSystem(a)
-  );
+  // ⚠️ 不看貼文是否已排程／發布（見 isOnEditorDesk）：剪了就要付錢，片不能因為小編排了就消失。
+  const myVideos = assets.filter(a => isOnEditorDesk(a, myEditorId));
 
   // 指名給我、但廠商不在我範圍內的片讀不到 vendor 文件，退回素材上的名稱快照
   const vendorName = (vendorId: string) =>

@@ -21,7 +21,7 @@ import {
 import { useLiveCollection } from '../lib/liveData';
 import AirDateBoard from './AirDateBoard';
 import EditOrderModal from './EditOrderModal';
-import { buildFlowUpdate, getClientApprovalTarget, getFlowDaysStuck, getFlowDueInfo, isClosedOutsideSystem, isFlowStale, isMarkedDoneManually, sortFlowColumn } from '../lib/assetFlow';
+import { buildFlowUpdate, getClientApprovalTarget, getFlowDaysStuck, getFlowDueInfo, isClosedOutsideSystem, isFlowFinished, isFlowStale, isMarkedDoneManually, sortFlowColumn } from '../lib/assetFlow';
 import { getAssetEditorOwner } from '../lib/editorBilling';
 import { Scissors, UserCheck, PenLine, Clock, Flame, CalendarClock, ThumbsUp, CalendarDays, ListOrdered, AlertTriangle } from 'lucide-react';
 import { buildCompanyQueue, datesOf } from '../lib/companyQueue';
@@ -130,7 +130,9 @@ export default function ProductionFlowBoard({
     // 作廢＝這支不該存在（多半是重複建檔），不該再佔看板欄位
     !a.voidedAt &&
     // 已排程/已發布代表真的用掉了，不再是「在製作中」
-    !(a.usedInPostId && settledPostIds.has(a.usedInPostId)) &&
+    // 已排程/已發布**而且流程走完**（已上傳雲端或可排程）才算真的用掉。
+    // ⚠️ 還在業主審核或還沒上傳就被排程的片要留著，不然同事按不到業主通過、剪輯師也傳不了（2026-10-21 祥濱）
+    !(a.usedInPostId && settledPostIds.has(a.usedInPostId) && isFlowFinished(a)) &&
     // 系統外已結案（舊制結清、從沒按上傳雲端）的片流程早就走完，不再佔「待上傳」欄
     !isClosedOutsideSystem(a) &&
     // 已標完成（系統外發布）的成片不是可排程庫存，不再佔「可排程」欄

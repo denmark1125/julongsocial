@@ -68,6 +68,38 @@ export function isClosedOutsideSystem(asset: Partial<Pick<Asset, 'legacySettleme
   return asset.legacySettlementStatus === 'paid' && !asset.cloudUploadedAt;
 }
 
+/** 剪輯流程走完了：剪輯師已按上傳雲端（＝請款依據），或已是可排程（ready） */
+export function isFlowFinished(asset: Pick<Asset, 'cloudUploadedAt'> & Partial<Pick<Asset, 'flowStage' | 'stage' | 'approved'>>): boolean {
+  return !!asset.cloudUploadedAt || deriveFlowStage(asset as Asset) === 'ready';
+}
+
+/**
+ * 這支片該不該出現在剪輯師的工作台（我的剪輯任務／我的所有片）。實際放哪一欄由 bucketOf 決定。
+ *
+ * ⚠️ **不看貼文狀態。** 以前有一條「掛的貼文已排程／已發布就整支不顯示」，結果片還在業主審核、
+ *    還沒上傳雲端就被小編排程，剪輯師就再也看不到 → 按不到上傳雲端 → 沒有請款依據（2026-10-21 祥濱
+ *    「潮寮里重陽九九敬老餐會」；全庫 11 支這樣、另 15 支做完沒請款的也從「已完成」消失）。
+ *    使用者定的規則：剪了就要付錢，排程／發布都不能讓片消失；「已完成」留到請完款為止（見 isBillable）。
+ */
+export function isOnEditorDesk(
+  a: Pick<Asset, 'type' | 'voidedAt' | 'editorId' | 'internalEdit' | 'status' | 'cloudUploadedAt' | 'legacySettlementStatus'>,
+  myEditorId: string | undefined,
+): boolean {
+  return a.type === 'video' &&
+    // 作廢的片不該再出現在剪輯師的工作台，也不會進他的請款清單（見 isBillable）
+    !a.voidedAt &&
+    (!myEditorId || !a.editorId || a.editorId === myEditorId) &&
+    // 內部自己剪的片不進任何外包剪輯師的待辦。
+    // ⚠️ 這條一定要有：editorId 空的片本來是「每個被指派這家 IP 的人都看得到」。
+    !a.internalEdit &&
+    // 封存＝業主不用這支，我們丟進暫存區。已經上傳過的仍要留著（那是他的請款依據），
+    // 還沒做完就被封存的則不該再出現在他的待辦裡。
+    (a.status !== 'archived' || !!a.cloudUploadedAt) &&
+    // 從沒上傳過、但已被後台盤點成「舊制已結清」＝當年在系統外就領過錢了，這支已經結案。
+    // 沒有這條的話那批片會永遠掛在待辦裡（沒人會去按上傳雲端，按了反而變成重複請款）。
+    !isClosedOutsideSystem(a);
+}
+
 /**
  * 成片已在素材資料庫按過「標記完成」（在系統外發布，沒掛貼文）＝已經用掉，不是可排程庫存。
  * 只拿來判斷「可排程」欄：還沒上傳雲端的片就算標完成，剪輯師仍要按上傳才能請款，不能藏。
