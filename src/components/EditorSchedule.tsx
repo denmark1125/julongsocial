@@ -6,10 +6,9 @@ import {
 } from '../types';
 import { slotVendors, trackedVendors, visibleVendors } from '../lib/vendorStatus';
 import { listPlannedSlots } from '../lib/plannedSlots';
-import {
-  buildSupplyPlan, buildHorizonDemands, describeSupply,
-  postDemandId, slotDemandId, SUPPLY_HORIZON_DAYS, SupplyAssignment,
-} from '../lib/materialSupply';
+import { postDemandId, slotDemandId, SUPPLY_HORIZON_DAYS } from '../lib/materialSupply';
+import { buildCompanyQueue, editorQueueView } from '../lib/companyQueue';
+import { isOnEditorDesk } from '../lib/assetFlow';
 import {
   addDays, addMonths, eachDayOfInterval, endOfMonth, format, getDay,
   isSameDay, isSameMonth, parseISO, startOfDay, startOfMonth, subMonths,
@@ -27,9 +26,10 @@ import { clsx } from 'clsx';
  * 也看不到「哪幾天還沒有片」。那些資訊全在小編的社群日曆裡，他進不去。
  *
  * ⚠️ **絕對不要在這裡重算排程或素材狀態。** 預排時段一律走 listPlannedSlots()、
- *    素材狀態一律走 buildSupplyPlan()/describeSupply()，跟社群日曆與上片排程表導出
- *    是同一套程式碼。這一頁只是換個地方顯示同一個答案 —— 兩邊講不同的話，
- *    剪輯師就會回頭來問小編，等於這功能白做。
+ *    每一格的狀態一律走「我的剪輯任務」同一份配對（buildEditorQueue，經 buildCompanyQueue）。
+ *    2026-10-21 以前這頁用的是另一套估算（buildSupplyPlan），又生 10/24 那格寫「等業主審」
+ *    （猜了一支別的片），剪輯任務卻說那天是「番茄後熟中」待剪 —— 每一天兩邊講的片都不一樣。
+ *    社群日曆與小編的排程表仍用 buildSupplyPlan，使用者只要改剪輯師這頁。
  * ⚠️ 唯讀：不能拖、不能刪、不能建貼文。剪輯師對排程沒有決定權，
  *    給他可以按的東西只會製造「誰動了排程」的爭議。
  */
@@ -50,6 +50,17 @@ interface ScheduleItem {
   postStatus?: Post['status'];
 }
 
+/** 一格的狀態，跟「我的剪輯任務」那一列同一個答案 */
+type CellKind = 'attached' | 'stock' | 'to_edit' | 'others' | 'none';
+const CELL: Record<CellKind, { label: string; tone: 'editor' | 'waiting' | 'alert' | 'idle' }> = {
+  attached: { label: '已有成片', tone: 'idle' },
+  stock: { label: '有成片等排程', tone: 'idle' },
+  to_edit: { label: '待剪', tone: 'editor' },
+  // 那天配到的是別人（內部或其他剪輯師）的片：不是沒片，只是不在他的清單上
+  others: { label: '已安排', tone: 'idle' },
+  none: { label: '還沒有片', tone: 'alert' },
+};
+
 const TONE_TEXT: Record<string, string> = {
   editor: 'text-amber-600',
   waiting: 'text-sky-600',
@@ -64,17 +75,8 @@ const TONE_CHIP: Record<string, string> = {
   idle: 'bg-gray-50 text-gray-500 border-gray-200',
 };
 
-function SupplyIcon({ kind, className }: { kind?: SupplyAssignment['kind']; className?: string }) {
-  const Icon = {
-    attached: CheckCircle2,
-    ready: CheckCircle2,
-    in_progress: Clock,
-    to_edit: Scissors,
-    booked: Camera,
-    booked_late: AlertTriangle,
-    none: AlertTriangle,
-    not_video: Minus,
-  }[kind || 'not_video'];
+function SupplyIcon({ kind, className }: { kind: CellKind; className?: string }) {
+  const Icon = { attached: CheckCircle2, stock: CheckCircle2, to_edit: Scissors, others: CheckCircle2, none: AlertTriangle }[kind];
   return <Icon className={className} />;
 }
 
@@ -172,32 +174,26 @@ export default function EditorSchedule({ userProfile, onOpenVendorQueue }: {
   }), [shownVendors, slotMoves, extraSlots, dismissedHabits, posts, monthStart, monthEnd]);
 
   /**
-   * 素材狀態。
-   * ⚠️ 配對用的是「今天起 SUPPLY_HORIZON_DAYS 天」這個固定視窗，**不是**現在翻到的月份 ——
-   *    這樣剪輯師翻到哪個月，同一天的答案都跟小編導出的排程表一模一樣。
+   * 每一格的狀態：跟「我的剪輯任務」同一份配對（同一批片、同一個視窗），兩頁保證講同一件事。
+   * 查不到的格子＝在配對視窗外（已經過去，或太遠），不畫。
    */
-  const supplyPlan = useMemo(() => {
-    const now = new Date();
-    return buildSupplyPlan({
-      demands: buildHorizonDemands({
-        posts,
-        slots: listPlannedSlots({
-          vendors: slotVendors(myVendors),
-          moves: slotMoves,
-          dismissed: dismissedHabits,
-          extras: extraSlots,
-          posts,
-          rangeStart: now,
-          rangeEnd: addDays(now, SUPPLY_HORIZON_DAYS),
-          fulfilledWindowDays: 1,
-        }),
-        now,
-      }),
-      assets,
-      posts,
-      bookings,
+  const cellKind = useMemo(() => {
+    const myEditorId = userProfile?.linkedEditorId;
+    // 全公司同一份配對（跟內部、跟我的剪輯任務一樣），再分出哪些是我的
+    const { queue: all } = buildCompanyQueue({
+      vendors: myVendors, assets, posts, moves: slotMoves, dismissed: dismissedHabits, extras: extraSlots,
     });
-  }, [posts, assets, bookings, myVendors, slotMoves, extraSlots, dismissedHabits]);
+    const queue = editorQueueView(all, a => isOnEditorDesk(a, myEditorId));
+    const map = new Map<string, CellKind>();
+    queue.settled.forEach(r => map.set(r.key, 'attached'));
+    queue.stocked.forEach(r => map.set(r.key, 'stock'));
+    queue.othersKeys.forEach(k => map.set(k, 'others'));
+    queue.rows.forEach(r => {
+      if (r.kind === 'to_edit') map.set(r.key, 'to_edit');
+      else if (r.kind === 'no_material') map.set(r.key, 'none');
+    });
+    return map;
+  }, [posts, assets, myVendors, slotMoves, extraSlots, dismissedHabits, userProfile?.linkedEditorId]);
 
   const itemsByDay = useMemo(() => {
     const map = new Map<string, ScheduleItem[]>();
@@ -273,27 +269,21 @@ export default function EditorSchedule({ userProfile, onOpenVendorQueue }: {
   }
 
   const renderChip = (item: ScheduleItem, size: 'tiny' | 'normal') => {
-    const assignment = supplyPlan.assignments.get(item.id);
-    // 查不到＝這格在配對視窗外（已經過去，或超過 SUPPLY_HORIZON_DAYS）。
-    // 那種格子不該擺一個「—」在那裡當噪音，直接不畫。
-    if (!assignment) return null;
-    // 圖文本來就不經過剪輯。卡片上已經標了「圖文」，再放一個空空的「—」標籤只是雜訊
-    // （表格裡的「—」是必要的佔位，卡片沒有這個需要）。
-    if (assignment.kind === 'not_video') return null;
-    const supply = describeSupply(assignment);
-    // 只有「庫存有 N 支待剪」可以點：那是唯一一種「球在我手上、而且我會想知道是哪幾支」的狀態。
-    // 點下去是帶到工作台那家 IP 的待剪清單，**不是**在這格展開片名：
-    // 把片名放在某一天旁邊等於宣稱那支被排給那天，而誰剪哪一支是同事人工分配的。
+    const kind = cellKind.get(item.id);
+    // 查不到＝這格在配對視窗外、或是圖文（剪輯師不做圖文），不畫
+    if (!kind) return null;
+    const supply = CELL[kind];
+    // 只有「待剪」可以點：帶去工作台看那家 IP 的待剪清單。
     // ⚠️ tiny 那版在月曆的日期格裡，**而日期格本身就是一顆 <button>**（點了開當日明細）。
     // 按鈕包按鈕是不合法的 HTML，而且實測過：點擊會被外層日期格接走，裡面那顆永遠不會觸發。
     // 所以月曆格維持純文字：點那一格會先開當日明細，明細裡的標籤才是可點的。
-    const canOpen = size === 'normal' && assignment.kind === 'to_edit' && !!onOpenVendorQueue;
+    const canOpen = size === 'normal' && kind === 'to_edit' && !!onOpenVendorQueue;
     const openQueue = () => onOpenVendorQueue?.(item.vendorId);
 
     if (size === 'tiny') {
       return (
         <span className={clsx('flex items-center gap-0.5 font-bold', TONE_TEXT[supply.tone])}>
-          <SupplyIcon kind={assignment.kind} className="w-2.5 h-2.5 shrink-0" />
+          <SupplyIcon kind={kind} className="w-2.5 h-2.5 shrink-0" />
           <span className="truncate">{supply.label}</span>
         </span>
       );
@@ -301,9 +291,8 @@ export default function EditorSchedule({ userProfile, onOpenVendorQueue }: {
 
     const inner = (
       <>
-        <SupplyIcon kind={assignment.kind} className="w-3 h-3 shrink-0" />
+        <SupplyIcon kind={kind} className="w-3 h-3 shrink-0" />
         {supply.label}
-        {supply.detail && <span className="font-medium opacity-70">・{supply.detail}</span>}
       </>
     );
     const cls = clsx('inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[13px] font-bold', TONE_CHIP[supply.tone]);
@@ -506,7 +495,7 @@ export default function EditorSchedule({ userProfile, onOpenVendorQueue }: {
 
       <p className="text-[13px] text-gray-500 leading-relaxed px-1">
         這頁是唯讀的，內容跟公司內部的社群日曆是同一份資料。
-        素材狀態只判斷今天起 {SUPPLY_HORIZON_DAYS} 天內的排程，更遠的顯示「—」。
+        素材狀態只判斷今天起 {SUPPLY_HORIZON_DAYS} 天內的排程，跟「我的剪輯任務」是同一份；更遠的日子不顯示。
         排程有問題請直接聯絡窗口，不用在這裡處理。
       </p>
     </div>

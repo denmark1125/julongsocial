@@ -28,6 +28,7 @@ import {
   buildHorizonDemands, buildSupplyPlan, describeSupply, SUPPLY_HORIZON_DAYS,
 } from '../lib/materialSupply';
 import RawStatus from './RawStatus';
+import { buildCompanyQueue, editorQueueView } from '../lib/companyQueue';
 import { startUpload, useUploads, type UploadItem } from '../lib/uploadQueue';
 import { listPlannedSlots } from '../lib/plannedSlots';
 import { buildPostIndex, isAssetSelectable, slotVendors, trackedVendors, visibleVendors as visibleVendorsOf } from '../lib/vendorStatus';
@@ -1038,7 +1039,6 @@ export default function EditorAssetQueue({
    * ⚠️ 已經交片送審／待上傳雲端的不進隊伍：隊伍回答的是「先剪哪一支」，
    *    剪完的片留在上面只會佔位置。它們改用底下那一行提示帶過去。
    */
-  const queuePending = displayed.filter(a => bucketOf(a) === 'to_edit');
 
   /**
    * 排程驅動的清單：一列＝社群日曆上的一格（哪天哪個 IP 要上片）。
@@ -1047,32 +1047,16 @@ export default function EditorAssetQueue({
    *    跟小編的上片排程表、剪輯師的唯讀日曆用同一組入口，三個畫面對同一天才會講同一句話。
    */
   const queue = useMemo(() => {
-    const now = new Date();
-    const mine = visibleVendorsOf(vendors);
-    const slots = listPlannedSlots({
-      vendors: slotVendors(mine),
-      moves: slotMoves,
-      dismissed: dismissedHabits,
-      extras: extraSlots,
-      posts,
-      rangeStart: now,
-      rangeEnd: addDays(now, SUPPLY_HORIZON_DAYS),
-      fulfilledWindowDays: 1,
+    // ⚠️ 用全公司同一份配對（buildCompanyQueue，跟排上片日、製作進度同一個），再藏掉不是我的片。
+    //    只拿自己的片重配的話，同一天內部跟剪輯師會講不同的片（10-21 謝謝 11 格對不起來）。
+    //    assets＝我讀得到的全部片（負責 IP 的所有片＋逐支指名給我的），包含內部剪、別的剪輯師的。
+    const { queue: all } = buildCompanyQueue({
+      vendors: visibleVendorsOf(vendors), assets, posts,
+      moves: slotMoves, dismissed: dismissedHabits, extras: extraSlots,
     });
-    // ⚠️ 只拿「哪天哪個 IP 要上片」這份需求，**不要**再叫 buildSupplyPlan —— 那支會把
-    //    有成片庫存的格子判成「不用動手」，剪輯師手上的毛片就整列消失（連錯三版的原因）。
-    const demands = buildHorizonDemands({ posts, slots, now });
-    const postIndex = buildPostIndex(posts);
-    return buildEditorQueue({
-      demands,
-      pendingAssets: queuePending,
-      // 已經剪好交出去、但還沒被排進任何貼文的片。它們補掉最近的上片日。
-      // ⚠️ 掛上貼文的片那一格早就被 demands 的 attachedAssetId 排除了，不濾掉會重複計算，
-      //    把一天算成兩天有著落。用 isAssetSelectable 而不是 !usedInPostId：掛的貼文被刪掉的片（孤兒）
-      //    其實還沒用掉，要算回庫存（跟排上片日拖拉板同一個判斷，兩邊才會遞補到同一支）。
-      deliveredAssets: displayed.filter(a => bucketOf(a) !== 'to_edit' && isAssetSelectable(a, postIndex)),
-    });
-  }, [vendors, posts, slotMoves, extraSlots, dismissedHabits, queuePending, displayed]);
+    const mineIds = new Set(displayed.map(a => a.id));
+    return editorQueueView(all, a => mineIds.has(a.id));
+  }, [vendors, assets, posts, slotMoves, extraSlots, dismissedHabits, displayed]);
 
   const toEdit = inBucket('to_edit');
   const toUpload = inBucket('to_upload');

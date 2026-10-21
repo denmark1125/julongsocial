@@ -72,3 +72,20 @@ export function datesOf(queue: EditorQueue): { airDates: Map<string, Date>; dead
   });
   return { airDates, deadlines };
 }
+
+/**
+ * 剪輯師看到的版本：**同一份全公司配對**，只是把不是他的待剪片藏起來。
+ *
+ * ⚠️ 不要拿「只有他的片」重新配一次：那樣同一天內部（排上片日、製作進度）說「待剪：老闆的一天」（內部剪），
+ *    剪輯師那邊卻說「沒片」或補上另一支 —— 10-21 盤查時謝謝的畫面有 11 格跟內部對不起來（使用者：內部跟剪輯要一致）。
+ * 別人的待剪列：從清單拿掉（不是他的工作），但那一天不是「沒片」，日曆照樣算有安排。
+ */
+export function editorQueueView(queue: EditorQueue, isMine: (a: Asset) => boolean): EditorQueue & { othersKeys: Set<string> } {
+  const othersKeys = new Set<string>();
+  const rows = queue.rows.filter(r => {
+    if (r.kind !== 'to_edit' || !r.asset || isMine(r.asset)) return true;
+    othersKeys.add(r.key);
+    return false;
+  });
+  return { ...queue, rows, unassigned: queue.unassigned.filter(isMine), othersKeys };
+}
