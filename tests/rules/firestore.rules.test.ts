@@ -307,3 +307,37 @@ describe('editors 名冊：外包／內部、離職', () => {
     await assertFails(updateDoc(doc(as('ed'), 'editors', 'E1'), { name: 'x' }));
   });
 });
+
+describe('posts：排上片日自動建的待補中貼文', () => {
+  const auto = (extra: Record<string, unknown> = {}) => ({
+    vendorId: 'v1', title: '熱泵', autoTitle: '熱泵', content: '', status: 'pending', assetId: 'to_be_added',
+    createdFrom: 'airDateBoard', createdBy: 'staff', createdAt: NOW, ...extra,
+  });
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async ctx => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, 'posts', 'auto'), auto());
+      await setDoc(doc(db, 'posts', 'renamed'), auto({ title: '小編改過' }));
+      await setDoc(doc(db, 'posts', 'withCopy'), auto({ content: '文案' }));
+      await setDoc(doc(db, 'posts', 'manual'), auto({ createdFrom: null, autoTitle: null }));
+    });
+  });
+  it('一般員工可以刪沒人動過的自動貼文', async () => {
+    await assertSucceeds(deleteDoc(doc(as('staff'), 'posts', 'auto')));
+  });
+  it('小編改過標題的不能刪', async () => {
+    await assertFails(deleteDoc(doc(as('staff'), 'posts', 'renamed')));
+  });
+  it('寫了文案的不能刪', async () => {
+    await assertFails(deleteDoc(doc(as('staff'), 'posts', 'withCopy')));
+  });
+  it('小編自己建的待補中不能刪（對照組）', async () => {
+    await assertFails(deleteDoc(doc(as('staff'), 'posts', 'manual')));
+  });
+  it('主管照舊什麼都能刪（對照組）', async () => {
+    await assertSucceeds(deleteDoc(doc(as('mgr'), 'posts', 'manual')));
+  });
+  it('剪輯師不能刪', async () => {
+    await assertFails(deleteDoc(doc(as('ed'), 'posts', 'auto')));
+  });
+});

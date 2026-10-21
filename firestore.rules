@@ -507,7 +507,14 @@ service cloud.firestore {
       allow read: if isAuthenticated() && editorCanAccessVendor(resource.data.vendorId);
       allow create: if isAuthenticated() && !isEditorRole() && isValidPost(request.resource.data);
       allow update: if isAuthenticated() && !isEditorRole() && isValidPost(request.resource.data);
-      allow delete: if isManager();
+      // 一般員工可以刪的只有「排上片日自動建、沒人動過」的待補中貼文（取消排日時跟著收掉，2026-10-21）。
+      // 條件跟 src/lib/boardPosts.ts isUntouchedAutoPost 一致；其他貼文照舊只有主管能刪。
+      allow delete: if isManager() || (isAuthenticated() && !isEditorRole() &&
+        resource.data.get('createdFrom', '') == 'airDateBoard' &&
+        resource.data.status == 'pending' &&
+        resource.data.get('assetId', 'to_be_added') in [null, '', 'to_be_added'] &&
+        resource.data.get('content', '') in [null, ''] &&
+        resource.data.title == resource.data.get('autoTitle', null));
     }
 
     match /assets/{assetId} {

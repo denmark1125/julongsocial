@@ -3,8 +3,9 @@ import {
   addMonths, differenceInCalendarDays, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameDay,
   isSameMonth, startOfDay, startOfMonth, startOfWeek,
 } from 'date-fns';
-import { deleteField, doc, writeBatch } from 'firebase/firestore';
-import { db } from '../firebase';
+import { collection, deleteField, doc, writeBatch } from 'firebase/firestore';
+import { auth, db } from '../firebase';
+import { buildAutoPost, isUntouchedAutoPost, movedSchedule } from '../lib/boardPosts';
 import { Asset, DismissedHabit, ExtraSlot, PlannedSlotMove, Post, Vendor } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import { buildCompanyQueue } from '../lib/companyQueue';
@@ -170,7 +171,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
     if (a.vendorId !== vendorId) return;
     if (target && target.date < today) return;
     const nextDay = target ? format(target.date, 'yyyy-MM-dd') : null;
-    const nextPost = target?.postId ?? null;
+    let nextPost = target?.postId ?? null;
     if ((a.plannedPostId || null) === nextPost && (a.plannedAirDate || null) === nextDay) return;
     if (isLocked(a)) { toast.error(`「${a.title}」已經排好了，要換先按「解鎖」`); return; }
     // 那篇貼文已經綁了別支、而且那支還鎖著：不能直接擠掉
@@ -180,13 +181,35 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
     setBusyId(assetId);
     try {
       const batch = writeBatch(db);
+      // 自動建的待補中貼文（使用者 10-21，見 boardPosts.ts）：那天沒有小編貼文就建一篇綁上；
+      // 換到別天就搬同一篇；拉回左邊或改綁小編的貼文，就把系統建、沒人動過的那篇刪掉。
+      const oldPost = a.plannedPostId ? posts.find(p => p.id === a.plannedPostId) : undefined;
+      const oldAuto = isUntouchedAutoPost(oldPost) ? oldPost : undefined;
+      let createdPost = false;
+      if (target && !nextPost && vendor) {
+        if (oldAuto) {
+          batch.update(doc(db, 'posts', oldAuto.id!), movedSchedule(oldAuto, target.date));
+          nextPost = oldAuto.id!;
+        } else {
+          const ref = doc(collection(db, 'posts'));
+          batch.set(ref, buildAutoPost(a, vendor, target.date, auth.currentUser?.uid || ''));
+          nextPost = ref.id;
+          createdPost = true;
+        }
+      } else if (oldAuto && oldAuto.id !== nextPost) {
+        batch.delete(doc(db, 'posts', oldAuto.id!));
+      }
       batch.update(doc(db, 'assets', assetId), {
         plannedAirDate: nextDay ?? deleteField(),
         plannedPostId: nextPost ?? deleteField(),
       });
       const bumped = nextPost ? pending.find(x => x.id !== assetId && x.plannedPostId === nextPost) : undefined;
       if (bumped) batch.update(doc(db, 'assets', bumped.id!), { plannedAirDate: deleteField(), plannedPostId: deleteField() });
+      // 擠掉別支、而那篇是系統建的：標題換成新這支的片名，不然貼文管理上的標題跟片對不起來
+      const targetAuto = nextPost && !createdPost ? posts.find(p => p.id === nextPost) : undefined;
+      if (bumped && targetAuto && isUntouchedAutoPost(targetAuto)) batch.update(doc(db, 'posts', targetAuto.id!), { title: a.title, autoTitle: a.title });
       await batch.commit();
+      if (createdPost) toast.success(`貼文管理已建一篇 ${format(target!.date, 'M/d')} 待補中，成片通過後會自動掛上`);
       if (bumped) toast(`「${bumped.title}」退回左邊（一篇貼文只配一支片）`);
       // 放到新位置就鎖回去
       setUnlockedIds(prev => { const next = new Set(prev); next.delete(assetId); return next; });

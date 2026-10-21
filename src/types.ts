@@ -419,6 +419,13 @@ export interface Post {
   isRecognized?: boolean; // Explicit flag for service recognition
   createdBy: string;
   createdAt: string;
+  /**
+   * 'airDateBoard'＝藏鏡人在「排上片日」把毛片排到某天時系統自動建的待補中貼文（2026-10-21）。
+   * 沒被小編動過（見 boardPosts.isUntouchedAutoPost）的才會被系統搬日期、改標題、刪除。
+   */
+  createdFrom?: string;
+  /** 系統建立時用的標題。title 還等於它＝小編沒改過 */
+  autoTitle?: string;
 }
 
 export type AssetType = 'video' | 'post';
