@@ -295,6 +295,8 @@ export type CooperationItem = 'short_video' | 'graphic_post';
 export interface Editor {
   id?: string;
   name: string;
+  /** 這位剪輯師的 LINE 群組 ID（藏鏡人在裡面）：交片送審時機器人發通知到這裡。見 src/lib/lineReviewNotify.ts */
+  lineGroupId?: string;
   linkedUserUid?: string; // 若此剪輯師有登入帳號，指向 users/{uid}；用來讓廠商管理的指派變動自動同步登入帳號的權限範圍
   createdAt: string;
   /**

@@ -18,6 +18,7 @@ import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVide
 import { deriveFlowStage, FLOW_STAGE_LABEL } from "./src/types.js";
 import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFolderName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, renameFile, copyFile, listFolderFiles, createResumableSession, getFileFull, moveFileFull, fetchFileRange, setAnyoneReader, removePermission, isFullDriveConfigured, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
 import { summarizeFolder } from "./src/lib/rawFolder.js";
+import { buildReminderMessage, buildReviewNotifyMessage, pickReviewReminders } from "./src/lib/lineReviewNotify.js";
 import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
 
 dotenv.config();
@@ -1304,6 +1305,22 @@ app.post("/api/drive/review-upload-done", async (req, res) => {
     if (f.durationSec) entry.durationSec = f.durationSec;
     // ⚠️ 舊版本（v1、v2…）的檔案保留，不覆蓋：使用者 10-21 決定留著，前後版本才能對照。
     await adminDb.collection("assets").doc(asset.id).update({ reviewFiles: [...existing, entry] });
+    // 通知這位剪輯師的群組（藏鏡人在裡面）拿去給客戶審。2026-10-22 起，見 src/lib/lineReviewNotify.ts。
+    // ⚠️ 要 await 完才回應（Vercel 回應後會凍結）；失敗只記 log，不能讓送審失敗。
+    try {
+      // 跟 getWorkingEditorId 一樣：逐支指派優先，沒有就是 IP 的預設剪輯師
+      const editorDocId = me.linkedEditorId || asset.editorId
+        || String((await adminDb.collection("vendors").doc(asset.vendorId).get()).data()?.editorId || '');
+      const editor: any = editorDocId ? (await adminDb.collection("editors").doc(editorDocId).get()).data() : null;
+      if (editor?.lineGroupId) {
+        await sendLinePushMessage(editor.lineGroupId, buildReviewNotifyMessage({
+          vendorName: asset.vendorName || '', title: asset.title || '', version, editorName: editor.name || '',
+          previewUrl: `https://${req.get('host')}/v/${previewToken}`, fileId,
+        }));
+      }
+    } catch (e: any) {
+      console.error("review notify failed:", e?.message);
+    }
     return res.json({ previewUrl: `/v/${previewToken}` });
   } catch (e: any) {
     if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
@@ -2408,6 +2425,29 @@ async function buildFlowDigestMessage(): Promise<any | null> {
   };
 }
 
+/** 每位有設 LINE 群組的剪輯師：挑出該提醒的片，一群一則 */
+async function pushReviewReminders(baseUrl: string) {
+  const editors = (await adminDb.collection("editors").get()).docs
+    .map((d: any) => ({ id: d.id, ...d.data() })).filter((e: any) => e.lineGroupId && !e.leftAt);
+  if (!editors.length) return { groups: 0 };
+  const vendorEditor = new Map<string, string>((await adminDb.collection("vendors").get()).docs
+    .map((d: any) => [d.id, String(d.data()?.editorId || '')]));
+  const assets = (await adminDb.collection("assets").where("flowStage", "in", ["client_review", "to_upload"]).get()).docs
+    .map((d: any) => ({ id: d.id, ...d.data() }));
+  const sent: any[] = [];
+  for (const ed of editors) {
+    const mine = assets
+      .filter((a: any) => (a.editorId || vendorEditor.get(a.vendorId)) === ed.id)
+      .map((a: any) => ({ ...a, stage: deriveFlowStage(a) }));
+    const picked = pickReviewReminders(mine);
+    const message = buildReminderMessage(picked, baseUrl);
+    if (!message) continue;
+    await sendLinePushMessage(ed.lineGroupId, message);
+    sent.push({ editor: ed.name, clientSlow: picked.clientSlow.length, notCompleted: picked.notCompleted.length });
+  }
+  return { groups: sent.length, sent };
+}
+
 app.get("/api/cron/flow-digest-push", async (req, res) => {
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret || req.headers.authorization !== `Bearer ${cronSecret}`) {
@@ -2415,9 +2455,17 @@ app.get("/api/cron/flow-digest-push", async (req, res) => {
   }
   if (!adminDb) return res.status(500).json({ error: "Firebase Admin not initialized" });
 
+  // 剪輯群組的每 2 天審片提醒（見 src/lib/lineReviewNotify.ts）。跟彙總互不影響，任一邊失敗另一邊照發。
+  let reminders: any = null;
+  try {
+    reminders = await pushReviewReminders(`https://${req.get('host')}`);
+  } catch (e: any) {
+    console.error("review reminders failed", e);
+  }
+
   try {
     const message = await buildFlowDigestMessage();
-    if (!message) return res.json({ pushed: false, reason: "no handoffs today" });
+    if (!message) return res.json({ pushed: false, reason: "no handoffs today", reminders });
 
     const recipients = await getRecipientsByRoles(
       [...new Set([...FLOW_NOTIFY_ROLES.submitted, ...FLOW_NOTIFY_ROLES.uploaded])]
@@ -2429,6 +2477,40 @@ app.get("/api/cron/flow-digest-push", async (req, res) => {
   } catch (e: any) {
     console.error("flow-digest-push failed", e);
     res.status(500).json({ error: e.message || "unknown error" });
+  }
+});
+
+// 剪輯群組的送審通知／審片提醒長什麼樣子：工程師帳號往「機器人所在的群組」發一則【測試】（2026-10-22）。
+// LINE 金鑰是 Vercel 敏感變數，本機拿不到，只能由正式站發。群組必須在 line_groups 裡，不能亂指定對象。
+app.post("/api/admin/test-review-notify", async (req, res) => {
+  try {
+    const me = await requireUser(req);
+    if (me.role !== "engineer") return res.status(403).json({ error: "engineer only" });
+    const groupId = String(req.body?.groupId || '');
+    const group = groupId ? await adminDb.collection("line_groups").doc(groupId).get() : null;
+    if (!group?.exists || group.data()?.leftAt) return res.status(400).json({ error: "機器人不在這個群組" });
+    // 拿最近一支走系統送審的真片當樣本
+    const snap = await adminDb.collection("assets").where("flowStage", "in", ["client_review", "to_upload", "ready"]).get();
+    const sample: any = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }))
+      .filter((a: any) => a.reviewFiles?.length)
+      .sort((a: any, b: any) => String(b.reviewFiles.at(-1).uploadedAt).localeCompare(String(a.reviewFiles.at(-1).uploadedAt)))[0];
+    if (!sample) return res.status(404).json({ error: "還沒有走系統送審的片可當樣本" });
+    const latest = sample.reviewFiles.at(-1);
+    const baseUrl = `https://${req.get('host')}`;
+    const vendorEditorId = String((await adminDb.collection("vendors").doc(sample.vendorId).get()).data()?.editorId || '');
+    const editorName = String((await adminDb.collection("editors").doc(sample.editorId || vendorEditorId || '_').get()).data()?.name || '');
+    const title = `【測試】${sample.title || ''}`;
+    await sendLinePushMessage(groupId, buildReviewNotifyMessage({
+      vendorName: sample.vendorName || '', title, version: latest.version || 1, editorName,
+      previewUrl: `${baseUrl}/v/${latest.previewToken}`, fileId: latest.fileId,
+    }));
+    const item = { assetId: sample.id, title, vendorName: sample.vendorName || '', days: 2, previewToken: latest.previewToken, version: latest.version };
+    await sendLinePushMessage(groupId, buildReminderMessage({ clientSlow: [item], notCompleted: [{ ...item, days: 2 }] }, baseUrl));
+    return res.json({ ok: true, sample: sample.title });
+  } catch (e: any) {
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("test-review-notify failed", e);
+    return res.status(500).json({ error: e?.message || "失敗" });
   }
 });
 
