@@ -2480,12 +2480,12 @@ app.get("/api/cron/flow-digest-push", async (req, res) => {
   }
 });
 
-// 剪輯群組的送審通知／審片提醒長什麼樣子：工程師帳號往「機器人所在的群組」發一則【測試】（2026-10-22）。
+// 剪輯群組的送審通知／審片提醒長什麼樣子：主管／工程師帳號往「機器人所在的群組」發一則【測試】（2026-10-22）。
 // LINE 金鑰是 Vercel 敏感變數，本機拿不到，只能由正式站發。群組必須在 line_groups 裡，不能亂指定對象。
 app.post("/api/admin/test-review-notify", async (req, res) => {
   try {
     const me = await requireUser(req);
-    if (me.role !== "engineer") return res.status(403).json({ error: "engineer only" });
+    if (me.role !== 'engineer' && me.role !== 'manager') return res.status(403).json({ error: "只有主管可以用" });
     const groupId = String(req.body?.groupId || '');
     const group = groupId ? await adminDb.collection("line_groups").doc(groupId).get() : null;
     if (!group?.exists || group.data()?.leftAt) return res.status(400).json({ error: "機器人不在這個群組" });
