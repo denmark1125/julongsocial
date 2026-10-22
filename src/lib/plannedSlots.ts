@@ -1,6 +1,6 @@
 import { addDays, format, getDay, isSameDay, parseISO, startOfDay } from 'date-fns';
 import { DismissedHabit, ExtraSlot, PlannedSlotMove, PostingHabit, Post, Vendor } from '../types';
-import { getEffectiveVendorStatus } from './vendorStatus';
+import { getEffectiveMonthlyTarget, getEffectiveVendorStatus } from './vendorStatus';
 
 // 預排時段（社群日曆上的橘色卡）的唯一計算入口。
 //
@@ -163,7 +163,42 @@ export function listPlannedSlots(opts: PlannedSlotOptions): PlannedSlot[] {
     });
   }
 
-  return slots.sort((a, b) => a.date.getTime() - b.date.getTime());
+  return capByMonthlyTarget(slots.sort((a, b) => a.date.getTime() - b.date.getTime()), vendorById, posts);
+}
+
+/**
+ * 當月片數到了就不再畫固定發片日（使用者 10-22：廣信 10 月改成 5 支、貼文排滿 5 篇，10/31 還被系統補一支片）。
+ * 每家每月：固定發片日最多留「月片數 − 這個月已經有的影片貼文」格，早的先留。
+ * - 貼文不分狀態都算（已發布／已排程／草稿／待補中）：排出來的就是這個月要發的。
+ * - 手動加的發片日（extraId）一律保留：那是有人明確要加的。
+ * - 月片數 0（沒設、還沒開始、已終止）不限制，維持原本行為。
+ * ⚠️ 只限影片的發片日；圖文的照舊。
+ */
+function capByMonthlyTarget(slots: PlannedSlot[], vendorById: Map<string, Vendor>, posts: Post[]): PlannedSlot[] {
+  const planned = new Map<string, number>();
+  for (const p of posts) {
+    if (p.contentType !== 'video' || !p.vendorId) continue;
+    const month = p.targetMonth || (p.scheduledAt || '').slice(0, 7);
+    if (!month) continue;
+    const key = `${p.vendorId}|${month}`;
+    planned.set(key, (planned.get(key) || 0) + 1);
+  }
+  const kept = new Map<string, number>();
+  // ⚠️ 已經過去的發片日不佔名額、也不拿掉：過去沒發的那幾格會把這個月剩下的名額吃光，害未來的格子全不見
+  const today = format(new Date(), 'yyyy-MM-dd');
+  return slots.filter(s => {
+    if (s.extraId || !(s.habit.contentTypes || []).includes('video')) return true;
+    if (s.toDate < today) return true;
+    const vendor = vendorById.get(s.vendorId);
+    const month = s.toDate.slice(0, 7);
+    const target = vendor ? getEffectiveMonthlyTarget(vendor, month) : 0;
+    if (target <= 0) return true;
+    const key = `${s.vendorId}|${month}`;
+    const room = target - (planned.get(key) || 0) - (kept.get(key) || 0);
+    if (room <= 0) return false;
+    kept.set(key, (kept.get(key) || 0) + 1);
+    return true;
+  });
 }
 
 /** 這個廠商在這天有沒有照週規則畫出來的發片日（有就不給再加一格，兩格身分會撞在一起） */

@@ -15,7 +15,7 @@ import { useLiveCollection } from '../lib/liveData';
 import { boundAssetLabel } from '../lib/boundPosts';
 import { visibleVendors, trackedVendors, slotVendors } from '../lib/vendorStatus';
 import { listPlannedSlots, groupSlotsByDay, hasHabitOn, PlannedSlot } from '../lib/plannedSlots';
-import { addExtraSlot, moveExtraSlot, removeExtraSlot } from '../lib/extraSlots';
+import { addExtraSlot, dismissPlannedSlot, moveExtraSlot, removeExtraSlot } from '../lib/extraSlots';
 import PostDetailModal from './PostDetailModal';
 import { 
   format, 
@@ -181,27 +181,8 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
    */
   const dismissSlot = async (slot: PlannedSlot) => {
     try {
-      // 手動加的發片日：整筆刪掉就好，不用記「這次不發」
-      if (slot.extraId) {
-        await removeExtraSlot(slot.extraId);
-        toast.success('已刪除加上去的發片日');
-        return;
-      }
-      await addDoc(collection(db, 'dismissedHabits'), {
-        vendorId: slot.vendorId,
-        habitTime: slot.time,
-        date: slot.fromDate,
-        createdAt: new Date().toISOString()
-      });
-      // 已經不顯示了，調整紀錄留著只會變成孤兒資料
-      if (slot.moveId) {
-        try {
-          await deleteDoc(doc(db, 'plannedSlotMoves', slot.moveId));
-        } catch (cleanupError) {
-          console.warn('Dismissed slot but failed to clean up its move record:', cleanupError);
-        }
-      }
-      toast.success('已刪除預定排程');
+      await dismissPlannedSlot(slot);
+      toast.success(slot.extraId ? '已刪除加上去的發片日' : '已刪除預定排程');
     } catch (error) {
       toast.error('刪除失敗');
     }

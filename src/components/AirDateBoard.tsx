@@ -10,14 +10,14 @@ import { Asset, DismissedHabit, ExtraSlot, PlannedSlotMove, Post, Vendor } from 
 import { useLiveCollection } from '../lib/liveData';
 import { buildCompanyQueue } from '../lib/companyQueue';
 import { slotVendors } from '../lib/vendorStatus';
-import { hasHabitOn, listPlannedSlots } from '../lib/plannedSlots';
+import { hasHabitOn, listPlannedSlots, PlannedSlot } from '../lib/plannedSlots';
 import { postDemandId } from '../lib/materialSupply';
 import { deliveryDeadline, EDIT_LEAD_DAYS, EditorQueueRow } from '../lib/editorQueue';
 import { compareRawEditOrder, rankByVendor } from '../lib/editOrder';
 import { isWaitingVideoPost } from '../lib/postMatch';
 import toast from 'react-hot-toast';
 import { CalendarDays, ChevronLeft, ChevronRight, Flame, Info, Lock, Plus, Unlock, X } from 'lucide-react';
-import { addExtraSlot, removeExtraSlot } from '../lib/extraSlots';
+import { addExtraSlot, dismissPlannedSlot, removeExtraSlot } from '../lib/extraSlots';
 
 /**
  * 排上片日：左邊是這個 IP 還沒排上片日的毛片，拖到右邊月曆的某一天＝這支預計那天上。
@@ -132,14 +132,15 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
    * 這個月要畫成橘色的日子（固定發片日、挪過來的、手動加的，加上小編的影片貼文日）。
    * 只管顯示；遞補和期限仍然只在 SUPPLY_HORIZON_DAYS 內算，那裡要跟剪輯師畫面一致。
    */
-  const shownSlotDays = useMemo(() => {
-    const set = new Set<string>();
-    if (!vendor) return set;
+  /** 這個月畫得出來的發片日：日子 → 那一格（固定發片日的 × 要拿它記「這次不發」） */
+  const shownSlots = useMemo(() => {
+    const map = new Map<string, PlannedSlot>();
+    if (!vendor) return map;
     listPlannedSlots({
       vendors: slotVendors([vendor]), moves: slotMoves, dismissed: dismissedHabits, extras: extraSlots, posts,
       rangeStart: gridDays[0], rangeEnd: gridDays[gridDays.length - 1], contentType: 'video', fulfilledWindowDays: 1,
-    }).forEach(s => set.add(s.toDate));
-    return set;
+    }).forEach(s => { if (!map.has(s.toDate)) map.set(s.toDate, s); });
+    return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vendor, slotMoves, dismissedHabits, extraSlots, posts, monthCursor]);
   /** 這個 IP 手動加的發片日，日子 → extraSlots id（刪除用） */
@@ -420,7 +421,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                   const past = d < today;
                   // ⚠️ 不能只看 demandsByCell：那份只算到今天起 SUPPLY_HORIZON_DAYS（跟剪輯師同一個視窗），
                   //    翻到下個月橘色就全部不見（使用者 10-20）。顯示用另外照這個月算。
-                  const isSlotDay = demandsByCell.has(`${vendorId}|${dateStr}`) || shownSlotDays.has(dateStr);
+                  const isSlotDay = demandsByCell.has(`${vendorId}|${dateStr}`) || shownSlots.has(dateStr);
                   const dayPosts = myVideoPosts.filter(p => postDay(p) === dateStr).sort((x, y) => x.scheduledAt.localeCompare(y.scheduledAt));
                   // 只排了日子、沒綁貼文的片
                   const loose = mine.filter(a => !boundPost(a) && a.plannedAirDate === dateStr);
@@ -446,6 +447,20 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                           {d.getDate() === 1 ? format(d, 'M/d') : d.getDate()}
                         </span>
                         {isSlotDay && !past && <span className="text-[12px] text-orange-700 truncate">{extraByDay.has(dateStr) ? '加的發片日' : '發片日'}</span>}
+                        {/* 固定發片日也能拿掉這一次（使用者 10-22：月片數到了，系統補的片拿不掉）。
+                            跟社群日曆刪預排同一筆紀錄（dismissPlannedSlot），兩邊一致 */}
+                        {!past && !extraByDay.has(dateStr) && shownSlots.get(dateStr) && !shownSlots.get(dateStr)!.extraId && (
+                          <button
+                            type="button"
+                            onClick={e => { e.stopPropagation(); if (window.confirm(`${format(d, 'M/d')} 這次不發片？
+
+這天的發片日會拿掉，系統補上的片會退回去等下一個發片日。`)) void changeExtra(() => dismissPlannedSlot(shownSlots.get(dateStr)!), `${format(d, 'M/d')} 這次不發片`); }}
+                            className="ml-auto p-0.5 rounded text-orange-700 hover:bg-orange-100 shrink-0"
+                            aria-label="這天這次不發片"
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
                         {!past && extraByDay.has(dateStr) && (
                           <button
                             type="button"

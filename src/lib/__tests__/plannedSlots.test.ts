@@ -66,3 +66,44 @@ describe('listPlannedSlots', () => {
       [day(10, 20), day(10, 27), day(11, 3), day(11, 10)].map(d => format(d, 'yyyy-MM-dd')));
   });
 });
+
+describe('月片數到了就不再畫固定發片日（10-22 廣信）', () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-20T10:00:00+08:00')); });
+  afterEach(() => { vi.useRealTimers(); });
+  // 固定週二、週六；10 月範圍內 10/24(六)、10/27(二)、10/31(六)
+  const gx = (extra: Partial<Vendor> = {}) => vendor({
+    id: 'gx', monthlyTargetVideos: 7,
+    postingHabits: [{ daysOfWeek: [2, 6], time: '20:00', contentTypes: ['video'], platforms: [] }], ...extra,
+  });
+  const octRange = { ...range, rangeEnd: day(10, 31) };
+  const post = (d: string, status: Post['status']) => ({ vendorId: 'gx', contentType: 'video', status, scheduledAt: `${d}T20:00`, targetMonth: d.slice(0, 7) } as Post);
+  const fivePosts = [post('2026-10-03', 'published'), post('2026-10-06', 'published'), post('2026-10-10', 'published'), post('2026-10-17', 'published'), post('2026-10-24', 'draft')];
+
+  it('廣信實際：10 月改 5 支、已經 5 篇（含草稿）→ 10/27、10/31 都不畫', () => {
+    const v = gx({ monthlyAdjustments: [{ month: '2026-10', videoDelta: -2, reason: '', createdAt: '' }] as any });
+    expect(days(listPlannedSlots({ ...octRange, vendors: [v], posts: fivePosts }))).toEqual([]);
+  });
+
+  it('月片數 7、已經 5 篇 → 只剩 2 格，早的先留', () => {
+    expect(days(listPlannedSlots({ ...octRange, vendors: [gx()], posts: fivePosts }))).toEqual(['2026-10-20', '2026-10-27']);
+  });
+
+  it('月片數 6、已經 5 篇 → 只留最早一格', () => {
+    expect(days(listPlannedSlots({ ...octRange, vendors: [gx({ monthlyTargetVideos: 6 })], posts: fivePosts }))).toEqual(['2026-10-20']);
+  });
+
+  it('過去沒發的發片日不佔名額：10/13 沒發，7 支、5 篇 → 未來照樣留 2 格', () => {
+    const slots = listPlannedSlots({ ...octRange, rangeStart: day(10, 13), vendors: [gx()], posts: fivePosts });
+    expect(days(slots).filter(d => d >= '2026-10-20')).toEqual(['2026-10-20', '2026-10-27']);
+  });
+
+  it('手動加的發片日不受限制（有人明確要加）', () => {
+    const v = gx({ monthlyAdjustments: [{ month: '2026-10', videoDelta: -2, reason: '', createdAt: '' }] as any });
+    const extras: ExtraSlot[] = [{ id: 'x1', vendorId: 'gx', date: '2026-10-29', time: '20:00', contentType: 'video', createdAt: '' }];
+    expect(days(listPlannedSlots({ ...octRange, vendors: [v], posts: fivePosts, extras }))).toEqual(['2026-10-29']);
+  });
+
+  it('沒設月片數：照舊全畫（對照組）', () => {
+    expect(days(listPlannedSlots({ ...octRange, vendors: [gx({ monthlyTargetVideos: 0 })], posts: fivePosts }))).toEqual(['2026-10-20', '2026-10-27', '2026-10-31']);
+  });
+});
