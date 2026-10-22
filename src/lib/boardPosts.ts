@@ -40,6 +40,22 @@ export function buildAutoPost(
   };
 }
 
+/**
+ * 在排上片日直接替某天打「預計片名」（2026-10-22 使用者：PM 要能在這裡先排名稱）。
+ * 就是一篇一般的待補中貼文，跟小編在貼文管理新增的一樣；毛片之後拖上去綁。
+ * ⚠️ 刻意不寫 autoTitle：這是有人親手打的名字，系統拖片／取消排日都不能刪它或改名（isUntouchedAutoPost 永遠 false）。
+ */
+export function buildTitledPost(
+  title: string,
+  vendor: Pick<Vendor, 'id' | 'postingHabits' | 'defaultPlatforms'>,
+  day: Date,
+  createdBy: string,
+  now: string = new Date().toISOString(),
+): Omit<Post, 'id'> {
+  const { autoTitle: _omit, ...base } = buildAutoPost({ title }, vendor, day, createdBy, now);
+  return { ...base, createdFrom: 'airDateBoardTitle' };
+}
+
 export function isUntouchedAutoPost(post: Pick<Post, 'createdFrom' | 'status' | 'assetId' | 'content' | 'title' | 'autoTitle'> | undefined): boolean {
   return !!post &&
     post.createdFrom === AUTO_POST_SOURCE &&

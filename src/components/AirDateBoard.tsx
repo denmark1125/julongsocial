@@ -3,9 +3,9 @@ import {
   addMonths, differenceInCalendarDays, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameDay,
   isSameMonth, startOfDay, startOfMonth, startOfWeek,
 } from 'date-fns';
-import { collection, deleteField, doc, writeBatch } from 'firebase/firestore';
+import { addDoc, collection, deleteField, doc, writeBatch } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import { buildAutoPost, isUntouchedAutoPost, movedSchedule } from '../lib/boardPosts';
+import { buildAutoPost, buildTitledPost, isUntouchedAutoPost, movedSchedule } from '../lib/boardPosts';
 import { Asset, DismissedHabit, ExtraSlot, PlannedSlotMove, Post, Vendor } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import { buildCompanyQueue } from '../lib/companyQueue';
@@ -66,6 +66,9 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
   const [busyId, setBusyId] = useState<string | null>(null);
   /** 拖曳經過的那一格／那篇貼文，給個底色讓人知道會放在哪 */
   const [hoverKey, setHoverKey] = useState<string | null>(null);
+  /** 正在打預計片名的那一天（yyyy-MM-dd） */
+  const [titleDay, setTitleDay] = useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = useState('');
   /**
    * 已經排好的片預設鎖住，拖不動（使用者 10-20：排好的片一碰就跑掉）。要換先按「解鎖」→ 確認，才拖得動。
    * 只存在這個畫面：重新整理或放到新位置後就又鎖回去。
@@ -149,6 +152,19 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
   // 冷凍沒填解凍日的 IP 預排不會算（slotVendors），加了也沒用
   const canAddSlot = !!vendor && slotVendors([vendor]).length > 0;
   const noHabits = !!vendor && (vendor.monthlyTargetVideos ?? 0) > 0 && !(vendor.postingHabits?.length);
+
+  /** 某天新增預計片名＝建一篇待補中貼文（見 boardPosts.ts buildTitledPost） */
+  const addTitledPost = async (d: Date) => {
+    const title = titleDraft.trim();
+    setTitleDay(null); setTitleDraft('');
+    if (!title || !vendor) return;
+    try {
+      await addDoc(collection(db, 'posts'), buildTitledPost(title, vendor, d, auth.currentUser?.uid || ''));
+      toast.success(`${format(d, 'M/d')} 已建預計片名，貼文管理會出現待補中`);
+    } catch {
+      toast.error('新增失敗');
+    }
+  };
 
   const changeExtra = async (write: () => Promise<void>, done: string) => {
     try {
@@ -522,6 +538,31 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                           : r.kind === 'no_material' && !past
                             ? <p key={r.key} className="text-[12px] px-1 text-amber-700">沒片</p>
                             : null)}
+
+                      {/* 預計片名：PM 直接替這天排名稱（使用者 10-22），建一篇待補中，之後把毛片拖上去綁 */}
+                      {!past && vendor && !selectedId && (titleDay === dateStr ? (
+                        <input
+                          autoFocus
+                          value={titleDraft}
+                          onChange={e => setTitleDraft(e.target.value)}
+                          onClick={e => e.stopPropagation()}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' && !e.nativeEvent.isComposing) void addTitledPost(d);
+                            if (e.key === 'Escape') { setTitleDay(null); setTitleDraft(''); }
+                          }}
+                          onBlur={() => { setTitleDay(null); setTitleDraft(''); }}
+                          placeholder="預計片名，Enter 送出"
+                          className="w-full text-[12px] px-1.5 py-1 rounded border border-blue-300 bg-white focus:outline-none focus:ring-1 focus:ring-blue-300"
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); setTitleDay(dateStr); setTitleDraft(''); }}
+                          className="hidden group-hover/day:flex items-center text-[12px] text-blue-700 px-1 rounded hover:bg-blue-50 whitespace-nowrap"
+                        >
+                          <Plus size={12} />預計片名
+                        </button>
+                      ))}
                     </div>
                   );
                 })}

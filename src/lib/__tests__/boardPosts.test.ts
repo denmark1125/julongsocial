@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAutoPost, isUntouchedAutoPost, movedSchedule } from '../boardPosts';
+import { buildAutoPost, buildTitledPost, isUntouchedAutoPost, movedSchedule } from '../boardPosts';
 
 const vendor = { id: 'v1', postingHabits: [{ daysOfWeek: [1], time: '19:30', contentTypes: ['video'], platforms: ['IG'] }], defaultPlatforms: { video: ['IG', 'TikTok'] } } as any;
 const day = new Date(2026, 9, 24);
@@ -31,4 +31,18 @@ describe('isUntouchedAutoPost', () => {
 describe('movedSchedule', () => {
   it('保留時分只換日子', () => expect(movedSchedule({ scheduledAt: '2026-10-24T19:30' }, new Date(2026, 10, 2)))
     .toEqual({ scheduledAt: '2026-11-02T19:30', targetMonth: '2026-11' }));
+});
+
+describe('buildTitledPost 預計片名', () => {
+  const p = buildTitledPost('全新食農桌遊體驗', vendor, day, 'u1', '2026-10-22T00:00:00Z');
+  it('一般待補中貼文，標題是打的名字', () => {
+    expect(p.title).toBe('全新食農桌遊體驗');
+    expect(p.status).toBe('pending');
+    expect(p.assetId).toBe('to_be_added');
+    expect(p.scheduledAt).toBe('2026-10-24T19:30');
+  });
+  it('親手打的名字：系統不能自動刪或改名', () => {
+    expect(p.autoTitle).toBeUndefined();
+    expect(isUntouchedAutoPost(p)).toBe(false);
+  });
 });
