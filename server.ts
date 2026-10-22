@@ -2489,10 +2489,10 @@ app.post("/api/admin/test-review-notify", async (req, res) => {
     const groupId = String(req.body?.groupId || '');
     const group = groupId ? await adminDb.collection("line_groups").doc(groupId).get() : null;
     if (!group?.exists || group.data()?.leftAt) return res.status(400).json({ error: "機器人不在這個群組" });
-    // 拿最近一支走系統送審的真片當樣本
-    const snap = await adminDb.collection("assets").where("flowStage", "in", ["client_review", "to_upload", "ready"]).get();
+    // 拿最近一支還在審核中的真片當樣本：已完成的片檔案搬走了、公開連結也收掉，按鈕會打不開（10-22 第一次測試就踩到）
+    const snap = await adminDb.collection("assets").where("flowStage", "in", ["client_review", "to_upload"]).get();
     const sample: any = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }))
-      .filter((a: any) => a.reviewFiles?.length)
+      .filter((a: any) => a.reviewFiles?.length && !a.cloudUploadedAt)
       .sort((a: any, b: any) => String(b.reviewFiles.at(-1).uploadedAt).localeCompare(String(a.reviewFiles.at(-1).uploadedAt)))[0];
     if (!sample) return res.status(404).json({ error: "還沒有走系統送審的片可當樣本" });
     const latest = sample.reviewFiles.at(-1);

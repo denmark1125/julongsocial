@@ -169,41 +169,59 @@ export function pickReviewReminders(assets: ReminderAsset[], now: Date = new Dat
   return { clientSlow, notCompleted };
 }
 
+/** LINE carousel 一則最多 12 張，超過整則會被回 400 */
+const CAROUSEL_MAX = 12;
+
+/**
+ * 一支片一張卡、左右滑（使用者 10-22：跟聚浪拍攝提醒一樣，訊息才不會爆一堆）。
+ * 客戶還沒審的排前面（要藏鏡人動手），再來是還沒按完成的；超過 12 張的在 altText 講總數。
+ */
 export function buildReminderMessage(
   r: { clientSlow: ReminderItem[]; notCompleted: ReminderItem[] },
   baseUrl: string,
 ) {
-  if (!r.clientSlow.length && !r.notCompleted.length) return null;
-  const itemBox = (it: ReminderItem, note: string, link?: string) => ({
-    type: 'box', layout: 'vertical', margin: 'md', paddingAll: '10px', cornerRadius: '8px', backgroundColor: '#F5F5F0',
-    contents: [
-      { type: 'text', text: `${it.vendorName}｜${it.title}`, size: 'sm', weight: 'bold', wrap: true, color: '#222222' },
-      { type: 'text', text: note, size: 'xs', color: '#8A8A7A', margin: 'xs' },
-      ...(link ? [{ type: 'button', style: 'link', height: 'sm', color: BRAND,
-        action: { type: 'clipboard', label: '複製客戶連結', clipboardText: link } }] : []),
-    ],
-  });
-  const section = (title: string, color: string, boxes: unknown[]) => [
-    { type: 'text', text: title, size: 'sm', weight: 'bold', color, margin: 'lg', wrap: true },
-    ...boxes,
-  ];
-  const body: unknown[] = [];
-  if (r.clientSlow.length) body.push(...section('⏳ 客戶還沒審片，請藏鏡人提醒客戶', '#B07A1E',
-    r.clientSlow.map(it => itemBox(it,
-      `送審 ${it.days} 天${it.version && it.version > 1 ? `・第 ${it.version} 版` : ''}`,
-      it.previewToken ? `${baseUrl}/v/${it.previewToken}` : undefined))));
-  if (r.notCompleted.length) body.push(...section('✅ 業主已通過，剪輯師還沒按「完成這支」（按了才列入請款）', '#2F7D5B',
-    r.notCompleted.map(it => itemBox(it, `業主通過 ${it.days} 天`))));
   const n = r.clientSlow.length + r.notCompleted.length;
+  if (!n) return null;
+  const card = (it: ReminderItem, kind: 'clientSlow' | 'notCompleted') => {
+    const slow = kind === 'clientSlow';
+    const link = slow && it.previewToken ? `${baseUrl}/v/${it.previewToken}` : undefined;
+    const row = (label: string, value: string) => ({
+      type: 'box', layout: 'horizontal', spacing: 'md', margin: 'sm',
+      contents: [
+        { type: 'text', text: label, size: 'sm', color: '#8A8A7A', flex: 2 },
+        { type: 'text', text: value, size: 'sm', color: '#333333', flex: 5, wrap: true },
+      ],
+    });
+    return {
+      type: 'bubble', size: 'kilo',
+      header: {
+        type: 'box', layout: 'vertical', paddingAll: '14px', backgroundColor: slow ? '#B07A1E' : '#2F7D5B',
+        contents: [
+          { type: 'text', text: slow ? '⏳ 客戶還沒審片' : '✅ 業主已通過', color: '#FFFFFF', weight: 'bold', size: 'md' },
+          { type: 'text', text: slow ? '請藏鏡人提醒客戶' : '剪輯師按「完成這支」才列入請款', color: '#FFFFFFCC', size: 'xs', margin: 'xs', wrap: true },
+        ],
+      },
+      body: {
+        type: 'box', layout: 'vertical', paddingAll: '14px',
+        contents: [
+          { type: 'text', text: it.vendorName || '—', weight: 'bold', size: 'lg', color: '#222222' },
+          { type: 'text', text: it.title, size: 'sm', color: '#444444', wrap: true, maxLines: 3, margin: 'xs' },
+          { type: 'separator', margin: 'md' },
+          slow ? row('送審', `${it.days} 天${it.version && it.version > 1 ? `・第 ${it.version} 版` : ''}`) : row('通過', `${it.days} 天`),
+        ],
+      },
+      ...(link ? { footer: { type: 'box', layout: 'vertical', paddingAll: '10px', contents: [
+        { type: 'button', style: 'primary', color: BRAND, height: 'sm', action: { type: 'clipboard', label: '複製客戶連結', clipboardText: link } },
+      ] } } : {}),
+    };
+  };
+  const cards = [
+    ...r.clientSlow.map(it => card(it, 'clientSlow')),
+    ...r.notCompleted.map(it => card(it, 'notCompleted')),
+  ].slice(0, CAROUSEL_MAX);
   return {
     type: 'flex',
-    altText: `審片提醒：${n} 支片等待處理`,
-    contents: {
-      type: 'bubble', size: 'mega',
-      header: { type: 'box', layout: 'vertical', backgroundColor: BRAND, paddingAll: '16px', contents: [
-        { type: 'text', text: '🔔 審片進度提醒', color: '#FFFFFF', weight: 'bold', size: 'lg' },
-      ] },
-      body: { type: 'box', layout: 'vertical', paddingAll: '16px', contents: body },
-    },
+    altText: `審片提醒：${n} 支片等待處理${n > CAROUSEL_MAX ? `（卡片先列 ${CAROUSEL_MAX} 支）` : ''}`,
+    contents: { type: 'carousel', contents: cards },
   };
 }

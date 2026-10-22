@@ -1,9 +1,9 @@
-import { useState } from 'react';
-import { addDoc, collection, doc, updateDoc } from 'firebase/firestore';
+import { useEffect, useState } from 'react';
+import { addDoc, collection, deleteField, doc, getDocs, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { Editor, EditorKind, EDITOR_KIND_LABEL } from '../types';
 import { assignableEditors, editorKind } from '../lib/editorRoster';
-import { X, UserMinus } from 'lucide-react';
+import { X, UserMinus, Send } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 /**
@@ -23,15 +23,57 @@ async function callLeave(id: string, body: Record<string, unknown>) {
   return data;
 }
 
+type LineGroup = { id: string; groupName?: string; leftAt?: string | null };
+
 type LeavePreview = { assets: { id: string; title: string; vendorName: string }[]; vendors: { id: string; name: string }[] };
 
-export default function EditorRosterModal({ editors, onClose }: { editors: Editor[]; onClose: () => void }) {
+/**
+ * LINE 群組（2026-10-22）：每位剪輯師選一個群組，他交片送審、每 2 個上班日的審片提醒都發到那裡。
+ * 選「不通知」＝關掉。群組清單是機器人所在的群組（webhook 記的 line_groups），只有主管看得到、改得到。
+ */
+export default function EditorRosterModal({ editors, onClose, canManage = false }: { editors: Editor[]; onClose: () => void; canManage?: boolean }) {
   const [name, setName] = useState('');
   const [kind, setKind] = useState<EditorKind>('external');
   const [leaving, setLeaving] = useState<Editor | null>(null);
   const [preview, setPreview] = useState<LeavePreview | null>(null);
   const [toId, setToId] = useState('');
   const [busy, setBusy] = useState(false);
+  const [groups, setGroups] = useState<LineGroup[]>([]);
+  const [testing, setTesting] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!canManage) return;
+    getDocs(collection(db, 'line_groups'))
+      .then(snap => setGroups(snap.docs.map(d => ({ id: d.id, ...d.data() } as LineGroup)).filter(g => !g.leftAt)))
+      .catch(() => setGroups([]));
+  }, [canManage]);
+
+  const changeGroup = async (e: Editor, groupId: string) => {
+    try {
+      await updateDoc(doc(db, 'editors', e.id!), { lineGroupId: groupId || deleteField() });
+      toast.success(groupId ? `${e.name} 的送審通知會發到這個群組` : `已關閉 ${e.name} 的群組通知`);
+    } catch {
+      toast.error('更新失敗');
+    }
+  };
+
+  const sendTest = async (groupId: string) => {
+    if (!window.confirm('往這個群組發兩則【測試】訊息（送審通知＋審片提醒）？群組裡的人都看得到。')) return;
+    setTesting(groupId);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      const res = await fetch('/api/admin/test-review-notify', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken, groupId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `伺服器回 ${res.status}`);
+      toast.success('已發出測試訊息');
+    } catch (err: any) {
+      toast.error(err.message || '發送失敗');
+    } finally {
+      setTesting(null);
+    }
+  };
 
   const add = async () => {
     if (!name.trim()) return;
@@ -86,8 +128,38 @@ export default function EditorRosterModal({ editors, onClose }: { editors: Edito
   const left = editors.filter(e => e.leftAt).sort((a, b) => (b.leftAt || '').localeCompare(a.leftAt || ''));
   const targets = assignableEditors(editors.filter(e => e.id !== leaving?.id));
 
+  const groupRow = (e: Editor) => {
+    const current = e.lineGroupId || '';
+    const known = groups.some(g => g.id === current);
+    return (
+      <div className="flex items-center gap-2 mt-2">
+        <span className="shrink-0 text-[13px] font-bold text-gray-500 whitespace-nowrap">LINE 群組</span>
+        <select
+          value={current}
+          onChange={ev => changeGroup(e, ev.target.value)}
+          className="flex-1 min-w-0 text-sm bg-white rounded-lg border border-black/10 px-2 py-1 truncate"
+        >
+          <option value="">不通知</option>
+          {current && !known && <option value={current}>（機器人已不在這群）</option>}
+          {groups.map(g => <option key={g.id} value={g.id}>{g.groupName || g.id}</option>)}
+        </select>
+        {current && known && (
+          <button
+            type="button"
+            onClick={() => sendTest(current)}
+            disabled={testing === current}
+            className="shrink-0 flex items-center gap-1 text-sm font-bold text-gray-500 hover:text-[#5A5A40] px-2 py-1 rounded-lg hover:bg-white whitespace-nowrap disabled:opacity-40"
+          >
+            <Send size={13} /> {testing === current ? '發送中…' : '發測試'}
+          </button>
+        )}
+      </div>
+    );
+  };
+
   const row = (e: Editor) => (
-    <div key={e.id} className="flex items-center justify-between gap-2 p-3 bg-[#F5F5F0] rounded-xl">
+    <div key={e.id} className="p-3 bg-[#F5F5F0] rounded-xl">
+    <div className="flex items-center justify-between gap-2">
       <div className="flex items-center gap-2 min-w-0">
         <span className="font-bold text-[#5A5A40] truncate">{e.name}</span>
         {e.linkedUserUid && !e.leftAt && (
@@ -115,6 +187,8 @@ export default function EditorRosterModal({ editors, onClose }: { editors: Edito
           </button>
         </div>
       )}
+    </div>
+    {canManage && !e.leftAt && groupRow(e)}
     </div>
   );
 
@@ -174,6 +248,9 @@ export default function EditorRosterModal({ editors, onClose }: { editors: Edito
               <button onClick={add} className="bg-[#5A5A40] text-white px-4 rounded-xl font-bold hover:bg-[#4a4a35] whitespace-nowrap">新增</button>
             </div>
             <p className="text-sm text-gray-500 -mt-2">外包要請款；內部是自己的員工，不請款。</p>
+            {canManage && (
+              <p className="text-sm text-gray-500 -mt-3">LINE 群組：剪輯師交片送審、審片提醒會發到選的群組；選「不通知」就關掉。群組要先把聚浪機器人邀進去、在群裡講一句話才會出現在選單。</p>
+            )}
 
             {(['external', 'internal'] as const).map(k => (
               <section key={k} className="space-y-2">

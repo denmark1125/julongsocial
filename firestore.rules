@@ -565,7 +565,8 @@ service cloud.firestore {
       //（要先改派片與 IP、停用登入），前端一律不能直接寫。2026-10-21
       allow update: if isAuthenticated() && !isEditorRole() &&
         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['leftAt']) &&
-        (isManager() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['kind']));
+        // lineGroupId＝這位剪輯師送審通知發到哪個 LINE 群組（2026-10-22），也只有主管能改
+        (isManager() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['kind', 'lineGroupId']));
       allow delete: if isManager();
     }
 
@@ -669,6 +670,12 @@ service cloud.firestore {
       allow create: if isManager() && isValidLineUser(request.resource.data);
       allow update: if isManager() && isValidLineUser(request.resource.data);
       allow delete: if isAdmin();
+    }
+
+    // 機器人所在的 LINE 群組：只有後端 webhook 寫（admin SDK），主管讀來選剪輯師的通知群組（2026-10-22）
+    match /line_groups/{id} {
+      allow read: if isManager();
+      allow write: if false;
     }
 
     match /line_connections/{id} {

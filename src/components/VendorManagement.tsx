@@ -1791,7 +1791,7 @@ export default function VendorManagement() {
         </div>
       )}
       {/* 剪輯師管理：外包／內部、離職改派（2026-10-21） */}
-      {isEditorModalOpen && <EditorRosterModal editors={editors} onClose={() => setIsEditorModalOpen(false)} />}
+      {isEditorModalOpen && <EditorRosterModal editors={editors} canManage={isManagerRole} onClose={() => setIsEditorModalOpen(false)} />}
     </div>
   );
 }

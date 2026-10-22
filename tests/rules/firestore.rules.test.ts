@@ -293,6 +293,16 @@ describe('editors 名冊：外包／內部、離職', () => {
   it('一般員工不能改外包／內部（會影響請款）', async () => {
     await assertFails(updateDoc(doc(as('staff'), 'editors', 'E1'), { kind: 'internal' }));
   });
+  it('主管可以設通知群組，一般員工不行', async () => {
+    await assertSucceeds(updateDoc(doc(as('mgr'), 'editors', 'E1'), { lineGroupId: 'C1' }));
+    await assertFails(updateDoc(doc(as('staff'), 'editors', 'E1'), { lineGroupId: 'C2' }));
+  });
+  it('LINE 群組清單：主管讀得到、一般員工讀不到、誰都不能寫', async () => {
+    await env.withSecurityRulesDisabled(async ctx => { await setDoc(doc(ctx.firestore(), 'line_groups', 'C1'), { groupName: 'g' }); });
+    await assertSucceeds(getDoc(doc(as('mgr'), 'line_groups', 'C1')));
+    await assertFails(getDoc(doc(as('staff'), 'line_groups', 'C1')));
+    await assertFails(setDoc(doc(as('mgr'), 'line_groups', 'C9'), { groupName: 'x' }));
+  });
   it('一般員工改名字照樣可以（對照組）', async () => {
     await assertSucceeds(updateDoc(doc(as('staff'), 'editors', 'E1'), { name: '謝謝2' }));
   });
