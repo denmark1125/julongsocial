@@ -6,7 +6,7 @@ import {
 import { addDoc, collection, deleteField, doc, writeBatch } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { buildAutoPost, buildTitledPost, isUntouchedAutoPost, movedSchedule } from '../lib/boardPosts';
-import { Asset, DismissedHabit, ExtraSlot, PlannedSlotMove, Post, Vendor } from '../types';
+import { Asset, DismissedHabit, ExtraSlot, PlannedSlotMove, Post, Vendor, deriveFlowStage } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import { buildCompanyQueue } from '../lib/companyQueue';
 import { slotVendors } from '../lib/vendorStatus';
@@ -320,7 +320,11 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
           <span className="text-[13px] font-bold truncate">{a.title}</span>
         </div>
         <div className="flex items-center gap-1.5 text-[12px] whitespace-nowrap">
-          {isStock && <span className="text-sky-700 font-bold">成片</span>}
+          {/* 用字使用者 10-22 定：素材 → 成片待審核 → 成片已審核（業主通過、剪輯師還沒按完成也算已審核） */}
+          {isStock ? (['to_upload', 'ready'].includes(deriveFlowStage(a))
+            ? <span className="text-green-700 font-bold">成片已審核</span>
+            : <span className="text-amber-700 font-bold">成片待審核</span>)
+            : <span className="text-gray-500">素材</span>}
           {!airDate && rank.has(a.id!) && <span className="text-gray-400">順序 {rank.get(a.id!)}</span>}
           {autoAt && <span className="text-gray-400">系統先補在 {format(autoAt, 'M/d')}</span>}
           {deadline && (
