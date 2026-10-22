@@ -648,6 +648,11 @@ export interface Asset {
    */
   plannedAirDate?: string;
   /**
+   * 上片日最後一次被排／被改的時間（ISO）。2026-10-22 起，見 editorQueue.ts 的 deadlineSince。
+   * 排的時候交片期限就已經過了＝剪輯師那邊顯示「盡快」，不顯示「已超過 N 天」。
+   */
+  plannedAirSetAt?: string;
+  /**
    * 這支毛片要給哪一篇小編貼文用（posts 的 id）。2026-10-20 起。
    *
    * 小編先排好一個月的標題＋日期（素材＝待補上），藏鏡人上架時選「這支是拍哪一篇」，

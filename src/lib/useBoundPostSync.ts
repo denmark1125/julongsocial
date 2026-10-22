@@ -35,9 +35,10 @@ export function useBoundPostSync(posts: Post[], assets: Asset[], enabled: boolea
         batch.update(doc(db, 'posts', f.postId), f.toDraft ? { assetId: f.assetId, status: 'draft' } : { assetId: f.assetId });
         batch.update(assetRef, { status: 'used', usedInPostId: f.postId });
       } else if (f.kind === 'sync') {
-        batch.update(assetRef, { plannedAirDate: f.date });
+        // 小編改了貼文日期＝上片日重排，交片期限從現在起算（見 editorQueue.ts 的 deadlineSince）
+        batch.update(assetRef, { plannedAirDate: f.date, plannedAirSetAt: new Date().toISOString() });
       } else {
-        batch.update(assetRef, { plannedPostId: deleteField(), plannedAirDate: deleteField() });
+        batch.update(assetRef, { plannedPostId: deleteField(), plannedAirDate: deleteField(), plannedAirSetAt: deleteField() });
       }
     }
     batch.commit()

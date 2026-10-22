@@ -26,6 +26,26 @@ export function shootBaseDate(asset: Pick<Asset, 'filmingDate' | 'createdAt'>): 
   return startOfDay(new Date(Math.max(...dates.map(d => d.getTime()))));
 }
 
+/** 「上片日前 9 天交片」開始的那天。在這之前就過了的期限是規則改了，不是剪輯師拖 */
+export const LEAD_RULE_SINCE = '2026-10-20T00:00:00+08:00';
+
+/**
+ * 判斷「盡快／已超過」用的起算時間：期限在這之前就已經過了＝不是剪輯師拖（顯示「盡快」）。
+ * 取最晚的：毛片進系統、上片日被排的時間、9 天規則上路那天。
+ *
+ * ⚠️ 2026-10-22 使用者：藏鏡人把 10/15 才拍回來的片排到 10/25 上，期限 10/16，剪輯師卻看到「已超過 6 天」。
+ *    同事指定的交片日（editDueDate）是特別交代的日子，不吃上片日／規則的寬限，只看建檔時間。
+ */
+export function deadlineSince(
+  asset: Pick<Asset, 'createdAt' | 'plannedAirSetAt' | 'editDueDate'> | undefined
+): string | undefined {
+  if (!asset) return undefined;
+  if (customDeadline(asset)) return asset.createdAt;
+  return [asset.createdAt, asset.plannedAirSetAt, LEAD_RULE_SINCE]
+    .filter((v): v is string => !!v && !Number.isNaN(parseISO(v).getTime()))
+    .reduce((a, b) => (parseISO(a) > parseISO(b) ? a : b));
+}
+
 /** 上片日往前推 EDIT_LEAD_DAYS 天＝交片期限 */
 export function deliveryDeadline(airDate: Date): Date {
   return subDays(startOfDay(airDate), EDIT_LEAD_DAYS);
@@ -43,8 +63,8 @@ export type DeadlineTone = 'calm' | 'soon' | 'late';
 /**
  * 交片期限的倒數文字與顏色。倒數用日曆天（「剩 3 天」＝3 天後），比工作天直觀。
  *
- * 「盡快」：毛片建檔時期限就已經過了（例如 10/06 要上、10/02 才進毛片）。
- * 這時寫「已超過 N 天」對剪輯師不公平——不是他拖，是料晚到。
+ * 「盡快」：起算時（毛片進系統／上片日排定，見 deadlineSince）期限就已經過了（例如 10/06 要上、10/02 才進毛片）。
+ * 這時寫「已超過 N 天」對剪輯師不公平——不是他拖，是料晚到或排得晚。
  */
 export function deadlineStatus(
   deadline: Date,

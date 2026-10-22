@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { customDeadline, deadlineStatus, deliveryDeadline, formatDeadline } from '../editorQueue';
+import { customDeadline, deadlineSince, deadlineStatus, deliveryDeadline, formatDeadline } from '../editorQueue';
 import { day } from './fixtures';
 
 // 交片期限＝上片日往前推 9 個日曆天（7 天剪＋2 天審稿，2026-10-20 主管定案；取代原本的 7 個工作天）
@@ -53,5 +53,28 @@ describe('customDeadline 同事指定交片日', () => {
     expect(customDeadline({})).toBeNull();
     expect(customDeadline({ editDueDate: '下週一' })).toBeNull();
     expect(customDeadline(undefined)).toBeNull();
+  });
+});
+
+describe('deadlineSince 起算時間（2026-10-22）', () => {
+  it('上片日排得晚：期限在排的時候就過了 → 盡快，不是已超過', () => {
+    const since = deadlineSince({ createdAt: '2026-10-15T09:00:00+08:00', plannedAirSetAt: '2026-10-21T10:00:00+08:00' });
+    expect(deadlineStatus(day(10, 16), since, new Date(2026, 9, 22, 10))).toEqual({ text: '盡快', tone: 'soon' });
+  });
+
+  it('排的時候還來得及、後來才過期 → 已超過', () => {
+    const since = deadlineSince({ createdAt: '2026-10-15T09:00:00+08:00', plannedAirSetAt: '2026-10-21T10:00:00+08:00' });
+    expect(deadlineStatus(day(10, 25), since, new Date(2026, 9, 27, 10))).toEqual({ text: '已超過 2 天', tone: 'late' });
+  });
+
+  it('9 天規則 10/20 上路前就過了的期限 → 盡快（例：祥濱系統補 10/24 那格，期限 10/15）', () => {
+    const since = deadlineSince({ createdAt: '2026-10-02T09:00:00+08:00' });
+    expect(deadlineStatus(day(10, 15), since, new Date(2026, 9, 22, 10))).toEqual({ text: '盡快', tone: 'soon' });
+  });
+
+  it('同事指定的交片日不吃寬限，只看建檔時間', () => {
+    const asset = { createdAt: '2026-10-02T09:00:00+08:00', plannedAirSetAt: '2026-10-21T10:00:00+08:00', editDueDate: '2026-10-15' };
+    expect(deadlineSince(asset)).toBe('2026-10-02T09:00:00+08:00');
+    expect(deadlineStatus(day(10, 15), deadlineSince(asset), new Date(2026, 9, 22, 10)).tone).toBe('late');
   });
 });

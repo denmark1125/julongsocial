@@ -203,9 +203,11 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
       batch.update(doc(db, 'assets', assetId), {
         plannedAirDate: nextDay ?? deleteField(),
         plannedPostId: nextPost ?? deleteField(),
+        // 排的當下期限已過＝剪輯師看到「盡快」不是「已超過」（editorQueue.ts 的 deadlineSince）
+        plannedAirSetAt: nextDay ? new Date().toISOString() : deleteField(),
       });
       const bumped = nextPost ? pending.find(x => x.id !== assetId && x.plannedPostId === nextPost) : undefined;
-      if (bumped) batch.update(doc(db, 'assets', bumped.id!), { plannedAirDate: deleteField(), plannedPostId: deleteField() });
+      if (bumped) batch.update(doc(db, 'assets', bumped.id!), { plannedAirDate: deleteField(), plannedPostId: deleteField(), plannedAirSetAt: deleteField() });
       // 擠掉別支、而那篇是系統建的：標題換成新這支的片名，不然貼文管理上的標題跟片對不起來
       const targetAuto = nextPost && !createdPost ? posts.find(p => p.id === nextPost) : undefined;
       if (bumped && targetAuto && isUntouchedAutoPost(targetAuto)) batch.update(doc(db, 'posts', targetAuto.id!), { title: a.title, autoTitle: a.title });

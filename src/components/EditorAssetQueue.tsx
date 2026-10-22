@@ -20,7 +20,7 @@ import {
 import { visibleVendors } from '../lib/vendorStatus';
 import EditingBrief from './EditingBrief';
 import {
-  buildEditorQueue, customDeadline, deadlineStatus, deliveryDeadline, EditorQueueRow, formatDeadline, shootBaseDate,
+  buildEditorQueue, customDeadline, deadlineSince, deadlineStatus, deliveryDeadline, EditorQueueRow, formatDeadline, shootBaseDate,
 } from '../lib/editorQueue';
 import { isBillable } from '../lib/editorBilling';
 import { canUploadFinishedInApp, uploadFinishedFiles, requestClientCopy, fetchFinishedUploadVendors, uploadReviewFile, finalizeReviewFile } from '../lib/finishedUpload';
@@ -414,9 +414,12 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
   //    這一列是讓人知道哪天要上、去催料。
   const showAirDate = row.kind === 'no_material' && !!row.date;
   const raw = showAirDate ? deadlineStatus(row.date!, undefined)
-    : row.deadline ? deadlineStatus(row.deadline, row.asset?.createdAt) : null;
+    : row.deadline ? deadlineStatus(row.deadline, deadlineSince(row.asset)) : null;
   // 「沒片」那一列逾期不標紅：剪輯師手上沒料可剪，紅字等於怪錯人。改成橘色「盡快」，提醒同事去催料。
-  const status = raw && row.kind === 'no_material' && raw.tone === 'late' ? { text: '盡快', tone: 'soon' as const } : raw;
+  const status = raw && row.kind === 'no_material' && raw.tone === 'late' ? { text: '盡快', tone: 'soon' as const }
+    // 排得晚、期限一開始就過了：補上上片日，剪輯師才知道「盡快」是多快（使用者 10-22 同意）
+    : raw && row.kind === 'to_edit' && raw.text === '盡快' && row.date ? { ...raw, text: `盡快・${format(row.date, 'M/d')} 上片` }
+      : raw;
   const toneClass = status?.tone === 'late' ? 'text-red-600' : status?.tone === 'soon' ? 'text-amber-600' : 'text-[#5A5A40]';
 
   return (
@@ -543,7 +546,7 @@ export function AssetCard({
   const cardDeadline = flowStage === 'to_edit' || flowStage === 'revising'
     ? customDeadline(asset) ?? (due ? deliveryDeadline(parseISO(due.scheduledAt)) : null)
     : null;
-  const cardDeadlineStatus = cardDeadline ? deadlineStatus(cardDeadline, asset.createdAt) : null;
+  const cardDeadlineStatus = cardDeadline ? deadlineStatus(cardDeadline, deadlineSince(asset)) : null;
   const days = getFlowDaysStuck(asset);
   const stale = isFlowStale(asset);
   // 已經被小編排程／發布、還沒標記完成：上傳那一步改成只有「標記完成」（見 FlowSteps 的 scheduledNote）
