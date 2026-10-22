@@ -1915,6 +1915,38 @@ app.post("/api/webhook/line", async (req: any, res) => {
   // 導致後面的fetch/Firestore寫入直接斷線(EPIPE)。改成處理完再回應，events數量少、動作快，不會逾時
   const events = req.body?.events || [];
   for (const event of events) {
+    // 機器人所在的群組（2026-10-22）：要推播到群組得先知道群組 ID，而它只會出現在 webhook 事件裡。
+    // 被邀進群組、或群組裡有人講話時記下 ID＋群名（不存聊天內容）；同一群一天最多查一次群名。
+    if (event?.source?.type === "group" && event.source.groupId && adminDb) {
+      const groupId = String(event.source.groupId);
+      try {
+        const ref = adminDb.collection("line_groups").doc(groupId);
+        if (event.type === "leave") {
+          await ref.set({ groupId, leftAt: new Date().toISOString() }, { merge: true });
+        } else if (event.type === "join" || event.type === "message") {
+          const snap = await ref.get();
+          const last = snap.exists ? Date.parse(snap.data()?.lastSeenAt || "") : NaN;
+          if (!snap.exists || snap.data()?.leftAt || !(Date.now() - last < 86400000)) {
+            const sumRes = await fetch(`https://api.line.me/v2/bot/group/${encodeURIComponent(groupId)}/summary`, {
+              headers: { Authorization: `Bearer ${accessToken}` }
+            });
+            const summary: any = sumRes.ok ? await sumRes.json() : {};
+            const now = new Date().toISOString();
+            await ref.set({
+              groupId,
+              groupName: summary.groupName || snap.data()?.groupName || "",
+              joinedAt: snap.data()?.joinedAt || now,
+              lastSeenAt: now,
+              leftAt: null,
+            }, { merge: true });
+            console.log("LINE group recorded", groupId, summary.groupName || "");
+          }
+        }
+      } catch (e) {
+        console.error("LINE group event handling failed", e);
+      }
+      continue;
+    }
     if (event?.type !== "follow" || event?.source?.type !== "user") continue;
     const lineUserId = event.source.userId;
     try {
