@@ -1377,6 +1377,9 @@ app.post("/api/drive/review-to-finished", async (req, res) => {
  * ⚠️ 2026-10-21 改成**自己的播放器**（<video> 讀 /v/<代碼>/video）：原本內嵌 Google 雲端播放器，
  *    手機上常卡在「播放中」轉圈、剛上傳的片還要等 Google 轉檔。自己播的話不用等轉檔、看不到雲端痕跡，
  *    日後換存放位置連結也不變。播不了（例如手機不支援的 .mov 編碼）才退回雲端播放器。
+ * ⚠️ 2026-10-27 暫時改回 Google 雲端播放器（止血）：自己的播放器每段影片都經 Vercel 主機轉送，
+ *    30 天 Fast Origin Transfer 用到 26.6 GB（免費方案上限 10 GB，超過會被停用 30 天，整個系統一起停）。
+ *    根治方案＝預覽檔另放 Firebase Storage 台灣機房、瀏覽器直讀，請款通過後再做；/video 路由先關掉。
  * ⚠️ 業主可以直接按「審核通過」：效果跟內部按「業主通過」一樣，並記下時間（日後算審片要多久）。
  * ⚠️ 畫面只放片名、播放器、兩顆按鈕，不放內部資訊。業主通過後剪輯師按上傳雲端、片搬走，這頁就失效。
  */
@@ -1418,11 +1421,10 @@ app.get("/v/:token", async (req, res) => {
     const t = encodeURIComponent(token);
     return send(
       `<h1>${escapeHtml(d.title || '影片預覽')}${d.version > 1 ? `<span style="font-size:14px;color:#9ad;font-weight:500">（第 ${Number(d.version)} 版）</span>` : ''}</h1>` +
-      `<div class="v" id="v"><video id="vid" controls playsinline preload="auto" src="/v/${t}/video"></video></div>` +
+      `<div class="v" id="v"><iframe src="https://drive.google.com/file/d/${encodeURIComponent(d.fileId)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe></div>` +
+      `<p style="text-align:center;font-size:13px">剛上傳的片要等雲端處理幾分鐘，看不到請重新整理</p>` +
       actions +
       `<script>` +
-      // 播不了（例如手機不支援的編碼）才退回雲端播放器
-      `document.getElementById('vid').addEventListener('error',function(){document.getElementById('v').innerHTML='<iframe src="https://drive.google.com/file/d/${encodeURIComponent(d.fileId)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe>'});` +
       `var lb=document.getElementById('line');if(lb)lb.addEventListener('click',function(){try{window.close()}catch(e){}setTimeout(function(){if(history.length>1)history.back();document.getElementById('lineTip').style.display='block'},300)});` +
       `var ok=document.getElementById('ok');if(ok)ok.addEventListener('click',function(){` +
       `if(!confirm('確定這支影片審核通過嗎？'))return;ok.disabled=true;ok.textContent='送出中…';` +
@@ -1444,6 +1446,8 @@ const previewSizeCache = new Map<string, { size: number; mime: string }>();
  */
 const PREVIEW_STREAM_MAX = 64 * 1024 * 1024;
 app.get("/v/:token/video", async (req, res) => {
+  // 10-27 止血：關掉轉送（理由見上方預覽頁註解）。還開著舊頁面的人會收到 410，不再吃 Vercel 流量。
+  if (req.params.token) return res.status(410).end();
   const ac = new AbortController();
   req.on('close', () => ac.abort());
   try {
