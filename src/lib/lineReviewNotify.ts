@@ -142,6 +142,9 @@ export function twWorkdaysSince(since: string, now: Date): number {
   return n;
 }
 
+/** LINE carousel 一則最多 12 張，超過整則會被回 400 */
+const CAROUSEL_MAX = 12;
+
 const lastLogAt = (a: ReminderAsset, to: string) =>
   [...(a.flowLog || [])].reverse().find(l => l.to === to)?.at;
 
@@ -169,8 +172,48 @@ export function pickReviewReminders(assets: ReminderAsset[], now: Date = new Dat
   return { clientSlow, notCompleted };
 }
 
-/** LINE carousel 一則最多 12 張，超過整則會被回 400 */
-const CAROUSEL_MAX = 12;
+/* ───────────── 群組裡打「待審」→ 機器人回清單（2026-10-28 使用者要求） ─────────────
+ * 10-28 LINE 免費額度 200 則用完，送審通知整批發不出去（群組推播按人數計費，7 人群一則算 7 則）。
+ * 回覆（reply）不算額度，所以給一個不靠推播的備案：群組裡有人打「待審」，就回目前所有還沒結束的片。
+ * 跟提醒不同：不看「滿 2 個上班日」，只要還在客戶審片／業主已通過未完成就列。
+ */
+export function isPendingQuery(text: string): boolean {
+  return /^(待審|待審片|審片清單|送審清單)$/.test(String(text || '').replace(/\s/g, ''));
+}
+
+export function listPendingReviews(assets: ReminderAsset[], now: Date = new Date()) {
+  const clientSlow: ReminderItem[] = [];
+  const notCompleted: ReminderItem[] = [];
+  for (const a of assets) {
+    if (a.voidedAt || a.cloudUploadedAt || !a.reviewFiles?.length) continue;
+    if (a.stage !== 'client_review' && a.stage !== 'to_upload') continue;
+    const latest = a.reviewFiles[a.reviewFiles.length - 1];
+    const since = a.stage === 'client_review' ? latest.uploadedAt : (a.clientApprovedAt || lastLogAt(a, 'to_upload'));
+    const days = since && !Number.isNaN(Date.parse(since)) ? Math.max(0, twDayDiff(since, now)) : 0;
+    const item: ReminderItem = {
+      assetId: a.id, title: a.title || '(未命名)', vendorName: a.vendorName || '', days,
+      previewToken: latest.previewToken, version: latest.version,
+    };
+    (a.stage === 'client_review' ? clientSlow : notCompleted).push(item);
+  }
+  // 等最久的排前面
+  clientSlow.sort((x, y) => y.days - x.days);
+  notCompleted.sort((x, y) => y.days - x.days);
+  return { clientSlow, notCompleted };
+}
+
+/** 「待審」的回覆：有片就用提醒同一套卡片，沒片回一句文字 */
+export function buildPendingListMessage(
+  r: { clientSlow: ReminderItem[]; notCompleted: ReminderItem[] },
+  baseUrl: string,
+) {
+  const n = r.clientSlow.length + r.notCompleted.length;
+  if (!n) return { type: 'text', text: '目前沒有送審中的片' };
+  const msg = buildReminderMessage(r, baseUrl)!;
+  msg.altText = `送審中 ${n} 支：客戶還沒審 ${r.clientSlow.length}、業主已通過 ${r.notCompleted.length}`
+    + (n > CAROUSEL_MAX ? `（卡片先列 ${CAROUSEL_MAX} 支）` : '');
+  return msg;
+}
 
 /**
  * 一支片一張卡、左右滑（使用者 10-22：跟聚浪拍攝提醒一樣，訊息才不會爆一堆）。

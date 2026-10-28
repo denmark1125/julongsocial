@@ -18,7 +18,7 @@ import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVide
 import { deriveFlowStage, FLOW_STAGE_LABEL } from "./src/types.js";
 import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeFolderName, ensureFileParent, getFile, getAccessToken, deleteFilePermanently, renameFile, copyFile, listFolderFiles, createResumableSession, getFileFull, moveFileFull, fetchFileRange, setAnyoneReader, removePermission, isFullDriveConfigured, DriveNotConfiguredError } from "./src/lib/googleDrive.js";
 import { summarizeFolder } from "./src/lib/rawFolder.js";
-import { buildReminderMessage, buildReviewNotifyMessage, pickReviewReminders } from "./src/lib/lineReviewNotify.js";
+import { buildPendingListMessage, buildReminderMessage, buildReviewNotifyMessage, isPendingQuery, listPendingReviews, pickReviewReminders } from "./src/lib/lineReviewNotify.js";
 import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
 
 dotenv.config();
@@ -1966,6 +1966,14 @@ app.post("/api/webhook/line", async (req: any, res) => {
       } catch (e) {
         console.error("LINE group event handling failed", e);
       }
+      // 「待審」→ 回清單（2026-10-28：推播額度用完時的備案，回覆不算額度）
+      if (event.type === "message" && event.message?.type === "text" && event.replyToken && isPendingQuery(event.message.text)) {
+        try {
+          await sendLineReplyMessage(event.replyToken, await buildGroupPendingList(groupId, `https://${req.get('host')}`));
+        } catch (e: any) {
+          console.error("LINE pending list reply failed", e?.message);
+        }
+      }
       continue;
     }
     if (event?.type !== "follow" || event?.source?.type !== "user") continue;
@@ -2017,6 +2025,32 @@ async function sendLinePushMessage(to: string, message: any) {
   if (!res.ok) {
     throw new Error(`LINE push failed (${res.status}): ${await res.text()}`);
   }
+}
+
+// 回覆（reply）不算每月訊息額度，推播（push）才算；replyToken 只能用一次、要在收到事件後盡快用
+async function sendLineReplyMessage(replyToken: string, message: any) {
+  const accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!accessToken) throw new Error("LINE_CHANNEL_ACCESS_TOKEN not configured");
+  const res = await fetch("https://api.line.me/v2/bot/message/reply", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ replyToken, messages: [message] }),
+  });
+  if (!res.ok) throw new Error(`LINE reply failed (${res.status}): ${await res.text()}`);
+}
+
+/** 群組裡打「待審」：列出這個群組的剪輯師所有還沒結束的送審片（見 src/lib/lineReviewNotify.ts listPendingReviews） */
+async function buildGroupPendingList(groupId: string, baseUrl: string) {
+  const editorIds = new Set((await adminDb.collection("editors").where("lineGroupId", "==", groupId).get()).docs
+    .filter((d: any) => !d.data()?.leftAt).map((d: any) => d.id));
+  if (!editorIds.size) return { type: "text", text: "這個群組還沒有設定給哪位剪輯師，請主管到「剪輯師管理」設定通知群組" };
+  const vendorEditor = new Map<string, string>((await adminDb.collection("vendors").get()).docs
+    .map((d: any) => [d.id, String(d.data()?.editorId || '')]));
+  const assets = (await adminDb.collection("assets").where("flowStage", "in", ["client_review", "to_upload"]).get()).docs
+    .map((d: any) => ({ id: d.id, ...d.data() }))
+    .filter((a: any) => editorIds.has(a.editorId || vendorEditor.get(a.vendorId) || ''))
+    .map((a: any) => ({ ...a, stage: deriveFlowStage(a) }));
+  return buildPendingListMessage(listPendingReviews(assets), baseUrl);
 }
 
 const SEVERITY_COLOR = "#B95755"; // 使用者覺得原本#DC2626太飽和，改用磚紅色調，同樣目前只有shoot一種嚴重度會用到
