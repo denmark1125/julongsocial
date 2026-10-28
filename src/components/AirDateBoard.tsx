@@ -348,7 +348,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
               <CalendarDays size={18} /> 排上片日
             </h3>
             <p className="text-[13px] text-gray-500 truncate">
-              把左邊的片拖到那一天或小編的貼文上＝預計那天上，拖回左邊＝取消。剪輯師交片期限＝上片日前 {EDIT_LEAD_DAYS} 天。
+              把左邊的片拖到那一天或小編的貼文上＝預計那天上，拖回左邊＝取消。剪輯師送審日＝上片日前 {EDIT_LEAD_DAYS} 天。
             </p>
           </div>
           {onClose && (
@@ -379,7 +379,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
           {embedded && (
             <span
               className="ml-auto shrink-0 flex items-center gap-1 text-[12px] text-gray-400 whitespace-nowrap cursor-help"
-              title={`把左邊的片拖到那一天或小編的貼文上＝預計那天上，拖回左邊＝取消。剪輯師交片期限＝上片日前 ${EDIT_LEAD_DAYS} 天。`}
+              title={`把左邊的片拖到那一天或小編的貼文上＝預計那天上，拖回左邊＝取消。剪輯師送審日＝上片日前 ${EDIT_LEAD_DAYS} 天。`}
             >
               <Info size={13} /> 怎麼用
             </span>

@@ -146,9 +146,9 @@ describe('buildEditorQueue', () => {
     expectConservation(demands, q);
   });
 
-  it('交片期限＝上片日往前 9 個日曆天，含週末（2026-10-20 主管定案）', () => {
-    expect(deliveryDeadline(day(10, 25))).toEqual(day(10, 16));
-    expect(deliveryDeadline(day(11, 3))).toEqual(day(10, 25));
+  it('送審日＝上片日往前 2 個日曆天，含週末（2026-10-28 定案）', () => {
+    expect(deliveryDeadline(day(10, 25))).toEqual(day(10, 23));
+    expect(deliveryDeadline(day(11, 3))).toEqual(day(11, 1));
   });
 
   it('同事排的上片日優先佔格，其餘空格才由剪輯順序第 1 支遞補', () => {
@@ -190,7 +190,7 @@ describe('buildEditorQueue', () => {
 
     const p = q.rows.find(r => r.asset?.id === placed.id)!;
     expect(p.date).toEqual(day(10, 29));
-    expect(p.deadline).toEqual(day(10, 20));
+    expect(p.deadline).toEqual(day(10, 27));
     expect(q.rows.find(r => r.date?.getDate() === 24)?.asset?.id).toBe(other.id);
     expectConservation(demands, q);
   });
@@ -210,12 +210,12 @@ describe('buildEditorQueue', () => {
     const q = buildEditorQueue({ demands: [], pendingAssets: [late] });
 
     expect(q.rows).toHaveLength(1);
-    expect(q.rows[0].deadline).toEqual(day(9, 22));
+    expect(q.rows[0].deadline).toEqual(day(9, 29));
   });
 });
 
 describe('buildEditorQueue：綁定小編貼文（plannedPostId）', () => {
-  it('上片日跟著貼文走：小編把貼文改到 11/01，期限跟著變成 10/23', () => {
+  it('上片日跟著貼文走：小編把貼文改到 11/01，送審日跟著變成 10/30', () => {
     const post = demand('hz', day(11, 1), { id: 'post_p1' });
     const raw = asset({ vendorId: 'hz', plannedPostId: 'p1', plannedAirDate: '2026-10-25' });
 
@@ -224,7 +224,7 @@ describe('buildEditorQueue：綁定小編貼文（plannedPostId）', () => {
     expect(q.rows).toHaveLength(1);
     expect(q.rows[0].key).toBe('post_p1');
     expect(q.rows[0].date).toEqual(day(11, 1));
-    expect(q.rows[0].deadline).toEqual(day(10, 23));
+    expect(q.rows[0].deadline).toEqual(day(10, 30));
   });
 
   it('綁定的貼文已經掛了別支片：當作沒綁，退回遞補', () => {
