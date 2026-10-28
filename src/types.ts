@@ -696,7 +696,7 @@ export interface Asset {
    */
   editOrder?: number;
   /**
-   * 同事指定的「預計交片日」（YYYY-MM-DD）。有值時取代「上片日往前推 9 天」，
+   * 同事指定的「預計交片日」（YYYY-MM-DD）。有值時取代「上片日往前推 EDIT_LEAD_DAYS 天」（10-28 起 2 天），
    * 並參與剪輯師清單的排序（急件仍最優先）。剪輯師改不了（不在 isEditorAssetUpdate 白名單）。
    */
   editDueDate?: string;

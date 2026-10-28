@@ -20,7 +20,7 @@ import {
 import { visibleVendors } from '../lib/vendorStatus';
 import EditingBrief from './EditingBrief';
 import {
-  buildEditorQueue, customDeadline, deadlineSince, deadlineStatus, deliveryDeadline, EditorQueueRow, formatDeadline, shootBaseDate,
+  buildEditorQueue, customDeadline, deadlineSince, deadlineStatus, DeadlineTone, deliveryDeadline, EDIT_LEAD_DAYS, EditorQueueRow, formatDeadline, shootBaseDate,
 } from '../lib/editorQueue';
 import { isBillable } from '../lib/editorBilling';
 import { canUploadFinishedInApp, uploadFinishedFiles, requestClientCopy, fetchFinishedUploadVendors, uploadReviewFile, finalizeReviewFile } from '../lib/finishedUpload';
@@ -304,10 +304,21 @@ function ClientBadge({ asset }: { asset: Asset }) {
   return null;
 }
 
-/** 「09/28（一）」：日期欄的大字，不帶「前交片」（電腦版上方另有「交片期限」小標） */
+/** 「09/28（一）」：日期欄的大字，不帶「送審」（電腦版上方另有「送審」小標） */
 function dayLabel(d: Date): string {
   return `${format(d, 'MM/dd')}（${'日一二三四五六'[d.getDay()]}）`;
 }
+
+/**
+ * 送審日的顏色（2026-10-28）：還遠＝灰、前 5 天內含當天＝藍、排得晚＝橘、真的超過＝紅。
+ * ⚠️ 不要把「快到了」做成橘紅：之前每支都在警告，剪輯師看不出先剪哪支。
+ */
+const DEADLINE_TONE_CLASS: Record<DeadlineTone, string> = {
+  later: 'text-gray-500',
+  window: 'text-sky-700',
+  asap: 'text-amber-600',
+  late: 'text-red-600',
+};
 
 /** 清單預設攤開幾筆。剩下的收在「後面還有 N 筆」底下 */
 const QUEUE_PREVIEW = 8;
@@ -416,11 +427,11 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
   const raw = showAirDate ? deadlineStatus(row.date!, undefined)
     : row.deadline ? deadlineStatus(row.deadline, deadlineSince(row.asset)) : null;
   // 「沒片」那一列逾期不標紅：剪輯師手上沒料可剪，紅字等於怪錯人。改成橘色「盡快」，提醒同事去催料。
-  const status = raw && row.kind === 'no_material' && raw.tone === 'late' ? { text: '盡快', tone: 'soon' as const }
+  const status = raw && row.kind === 'no_material' && raw.tone === 'late' ? { text: '盡快', tone: 'asap' as const }
     // 排得晚、期限一開始就過了：補上上片日，剪輯師才知道「盡快」是多快（使用者 10-22 同意）
     : raw && row.kind === 'to_edit' && raw.text === '盡快' && row.date ? { ...raw, text: `盡快・${format(row.date, 'M/d')} 上片` }
       : raw;
-  const toneClass = status?.tone === 'late' ? 'text-red-600' : status?.tone === 'soon' ? 'text-amber-600' : 'text-[#5A5A40]';
+  const toneClass = status ? DEADLINE_TONE_CLASS[status.tone] : 'text-[#5A5A40]';
 
   return (
     // 電腦版：左邊一欄放「哪天要上」，右邊放素材卡，一支片一橫列。
@@ -434,11 +445,10 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
       <div className={row.kind === 'to_edit'
         ? 'flex items-baseline gap-2 flex-wrap px-4 pt-3 lg:flex-col lg:items-start lg:justify-center lg:gap-0.5 lg:w-40 lg:shrink-0 lg:py-3 lg:border-r lg:border-black/5'
         : 'flex items-baseline gap-2 flex-wrap lg:w-40 lg:shrink-0 lg:flex-col lg:items-start lg:gap-0.5'}>
-        {/* 急件一律只寫橘色火焰「急件」，不寫推算出來的期限。
-            ⚠️ 2026-10-03 老闆：急件底下列一個早就過去的推算日期（「09/24 前交片／盡快」）看不懂，
-               同一件事講兩次。急件之間的先後仍照期限排（見 buildEditorQueue），只是不印出來。
-               例外：同事親手指定的交片日要印，那是特別交代的日子。 */}
-        {/* 電腦版日期欄排成三層：小標「交片期限」→ 大字日期 → 倒數。「同事指定」獨立成一個小標籤。
+        {/* 急件：橘色火焰「急件」＋送審日（2026-10-28 使用者：按了急件也要看到日期）。
+            10-03 拿掉日期是因為當時 9 天規則推出來的日期常常早就過了、看不懂；改成前 2 天送審後不再有這問題。
+            急件不另印倒數，日期本身照送審日的顏色上色。 */}
+        {/* 電腦版日期欄排成三層：小標「送審」→ 大字日期 → 倒數。「同事指定」獨立成一個小標籤。
             ⚠️ 2026-10-03 老闆：「10/15（四）前交片・同事指定」一整串 nowrap 塞進 160px 欄位，
                整段超出欄位壓到右邊卡片上。所以每一段各自一行，不再把整串鎖成一行。
             手機版仍是同一行「09/28（一）前交片 已超過 5 天」：小標只在 lg 顯示，「前交片」只在手機顯示。 */}
@@ -447,9 +457,9 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
             <span className="inline-flex items-center gap-1 text-[13px] lg:text-[15px] font-bold text-orange-600 whitespace-nowrap">
               <Flame size={14} /> 急件
             </span>
-            {row.deadline && row.deadlineSource === 'custom' && (
-              <span className="text-[13px] lg:text-sm text-gray-500 whitespace-nowrap">
-                {dayLabel(row.deadline)} 前交片
+            {row.deadline && (
+              <span className={`text-[13px] lg:text-sm font-bold whitespace-nowrap ${toneClass}`}>
+                {dayLabel(row.deadline)} 送審
               </span>
             )}
           </>
@@ -462,14 +472,14 @@ function QueueRow({ row, vendorName, card, onOpenLibrary }: {
           </>
         ) : row.deadline ? (
           <>
-            <span className="hidden lg:block text-[13px] text-gray-500">交片期限</span>
-            <span className={`text-[13px] lg:text-[17px] lg:leading-tight font-bold whitespace-nowrap ${status?.tone === 'late' ? 'text-red-600' : 'text-[#5A5A40]'}`}>
-              {dayLabel(row.deadline)}<span className="lg:hidden">前交片</span>
+            <span className="hidden lg:block text-[13px] text-gray-500">送審</span>
+            <span className={`text-[13px] lg:text-[17px] lg:leading-tight font-bold whitespace-nowrap ${toneClass}`}>
+              {dayLabel(row.deadline)}<span className="lg:hidden">送審</span>
             </span>
           </>
         ) : null}
         {status && !row.urgent && (
-          <span className={`text-[13px] lg:text-sm whitespace-nowrap ${status.tone === 'calm' ? 'text-gray-500' : `font-bold ${toneClass}`}`}>
+          <span className={`text-[13px] lg:text-sm whitespace-nowrap ${status.tone === 'later' ? toneClass : `font-bold ${toneClass}`}`}>
             {status.text}
           </span>
         )}
@@ -635,13 +645,7 @@ export function AssetCard({
               交出去之後期限就沒意義了，只在待剪／業主要改時顯示。 */}
           {cardDeadline && cardDeadlineStatus && (
             <span
-              className={
-                cardDeadlineStatus.tone === 'late'
-                  ? 'inline-flex items-center gap-1 text-[13px] font-bold text-red-600 whitespace-nowrap'
-                  : cardDeadlineStatus.tone === 'soon'
-                    ? 'inline-flex items-center gap-1 text-[13px] font-bold text-amber-600 whitespace-nowrap'
-                    : 'inline-flex items-center gap-1 text-[13px] text-gray-500 whitespace-nowrap'
-              }
+              className={`inline-flex items-center gap-1 text-[13px] whitespace-nowrap ${DEADLINE_TONE_CLASS[cardDeadlineStatus.tone]} ${cardDeadlineStatus.tone === 'later' ? '' : 'font-bold'}`}
             >
               <CalendarClock size={10} />
               {formatDeadline(cardDeadline)}（{cardDeadlineStatus.text}）
@@ -1531,7 +1535,7 @@ export default function EditorAssetQueue({
               <FoldHeader
                 open={showUnscheduled}
                 title="還沒排上片日"
-                hint="同事排好上片日後會移到上面，交片期限＝上片日前 9 天。"
+                hint={`同事排好上片日後會移到上面，送審日＝上片日前 ${EDIT_LEAD_DAYS} 天。`}
                 count={queue.unassigned.length}
                 onToggle={() => setShowUnscheduled(v => !v)}
               />
@@ -1593,7 +1597,7 @@ export default function EditorAssetQueue({
               // ⚠️ 陳述句，不要祈使句。「從上面開始剪」等於系統在派工，
               //    而派工是同事在做的事（見 feedback_editor_facing_wording）。
               // ⚠️ 不加編號：使用者 10-20 要的是「排序本身是對的、由上往下照著剪」，圓圈數字反而醜
-              ? '由上往下照交片期限排好，最近的在最上面；沒片的排在最後。'
+              ? '由上往下照送審日排好，最近的在最上面；沒片的排在最後。'
               : '手上全部的片。剪完按「交片送審」；業主要改就「上傳修改版」，業主 OK 後按「完成這支」。'}
           </p>
         </div>

@@ -4,13 +4,22 @@ import { DemandItem, postDemandId } from './materialSupply';
 import { compareRawEditOrder } from './editOrder';
 
 /**
- * 交片期限＝上片日往前推這麼多個日曆天：7 天剪輯＋2 天業主審稿／修改／上傳雲端。含週末。
+ * 送審日＝上片日往前推這麼多個日曆天，含週末。
  *
- * ⚠️ 2026-10-20 主管定案，取代原本的「往前推 7 個工作天」。
- *    同時拿掉「沒上片日的毛片＝拍回來＋7 天」：每支片都被塞一個很近的期限，
- *    剪輯師畫面變成「全部都要剪」。現在只有排了上片日（同事拖進行事曆，或系統遞補空格）的片才有期限。
+ * 2026-10-28 使用者定案的時程：上片日 T；T−1（24 小時前）客戶審完；T−2（48 小時前）剪輯師最後送審。
+ * 剪輯師畫面只看 T−2 這一天，叫「送審」（「交片截止日」聽起來像小朋友交作業）。
+ *
+ * ⚠️ 取代 10-20 的「上片日前 9 天交片」：期限拉太前面，畫面上每支都在倒數、都像急件，
+ *    剪輯師反而看不出先剪哪支。
+ * ⚠️ 只有排了上片日（同事拖進行事曆，或系統遞補空格）的片才有送審日，沒排的不塞期限（10-20 起）。
  */
-export const EDIT_LEAD_DAYS = 9;
+export const EDIT_LEAD_DAYS = 2;
+
+/**
+ * 送審日前幾天開始算「該剪了」（畫面轉藍）。只是提醒，不限制提早剪（使用者 10-28：想提早剪也行，
+ * 這 5 天只是防止週期亂掉）。所以更早的片照順序列著、用灰色，也**不寫「幾號起可以剪」**。
+ */
+export const EDIT_WINDOW_DAYS = 5;
 
 /**
  * 毛片「拍回來」的那天＝拍攝日與建檔日取較晚的。「還沒排上片日」區照這天排、印「拍回來 N 天」。
@@ -26,7 +35,7 @@ export function shootBaseDate(asset: Pick<Asset, 'filmingDate' | 'createdAt'>): 
   return startOfDay(new Date(Math.max(...dates.map(d => d.getTime()))));
 }
 
-/** 「上片日前 9 天交片」開始的那天。在這之前就過了的期限是規則改了，不是剪輯師拖 */
+/** 期限規則上路那天（10-20 起，10-28 改成前 2 天送審）。在這之前就過了的期限是規則改了，不是剪輯師拖 */
 export const LEAD_RULE_SINCE = '2026-10-20T00:00:00+08:00';
 
 /**
@@ -58,10 +67,15 @@ export function plannedAirDay(asset: Pick<Asset, 'plannedAirDate'> | undefined):
   return Number.isNaN(d.getTime()) ? null : startOfDay(d);
 }
 
-export type DeadlineTone = 'calm' | 'soon' | 'late';
+/**
+ * later＝送審日還遠（灰）；window＝送審日前 EDIT_WINDOW_DAYS 天內、含當天（藍）；
+ * asap＝排的時候就已經過了，不是剪輯師拖（橘）；late＝真的超過（紅）。
+ * ⚠️ 當天仍是藍色，過了才紅（使用者 10-28）：不要讓整排都是警告色。
+ */
+export type DeadlineTone = 'later' | 'window' | 'asap' | 'late';
 
 /**
- * 交片期限的倒數文字與顏色。倒數用日曆天（「剩 3 天」＝3 天後），比工作天直觀。
+ * 送審日的倒數文字與顏色。倒數用日曆天（「還有 3 天」＝3 天後），比工作天直觀。
  *
  * 「盡快」：起算時（毛片進系統／上片日排定，見 deadlineSince）期限就已經過了（例如 10/06 要上、10/02 才進毛片）。
  * 這時寫「已超過 N 天」對剪輯師不公平——不是他拖，是料晚到或排得晚。
@@ -75,17 +89,17 @@ export function deadlineStatus(
   if (left < 0) {
     const created = createdAt ? parseISO(createdAt) : null;
     if (created && !Number.isNaN(created.getTime()) && differenceInCalendarDays(deadline, created) < 0) {
-      return { text: '盡快', tone: 'soon' };
+      return { text: '盡快', tone: 'asap' };
     }
     return { text: `已超過 ${Math.abs(left)} 天`, tone: 'late' };
   }
-  if (left === 0) return { text: '今天', tone: 'soon' };
-  return { text: `剩 ${left} 天`, tone: left <= 3 ? 'soon' : 'calm' };
+  if (left === 0) return { text: '今天', tone: 'window' };
+  return { text: `還有 ${left} 天`, tone: left <= EDIT_WINDOW_DAYS ? 'window' : 'later' };
 }
 
-/** 「10/01（四）前交片」 */
+/** 「10/01（四）送審」 */
 export function formatDeadline(deadline: Date): string {
-  return `${format(deadline, 'MM/dd')}（${'日一二三四五六'[deadline.getDay()]}）前交片`;
+  return `${format(deadline, 'MM/dd')}（${'日一二三四五六'[deadline.getDay()]}）送審`;
 }
 
 /** 同事指定的交片日（YYYY-MM-DD）。格式不對就當沒填，不要讓一筆壞資料把整份清單弄壞 */
