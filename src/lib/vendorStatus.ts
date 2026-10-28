@@ -384,7 +384,9 @@ export interface PostIndex {
 
 export function buildPostIndex(posts: Pick<Post, 'id' | 'status'>[]): PostIndex {
   return {
-    draftPostIds: new Set(posts.filter(p => p.status === 'draft').map(p => p.id)),
+    // 待補中跟草稿一樣是「還沒排程」：10-22 起排上片日會自動建待補中貼文並綁素材，
+    // 只認草稿的話那支片既不算已交、也不算庫存，欠片憑空多出來（10-28 紅茶造咖欠 1 支）
+    draftPostIds: new Set(posts.filter(p => p.status === 'draft' || p.status === 'pending').map(p => p.id)),
     allPostIds: new Set(posts.map(p => p.id)),
   };
 }

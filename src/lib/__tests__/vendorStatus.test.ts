@@ -91,6 +91,7 @@ describe('庫存', () => {
   const posts = [
     post({ id: 'draft', vendorId: 'v1', status: 'draft' }),
     post({ id: 'sched', vendorId: 'v1', status: 'scheduled' }),
+    post({ id: 'pend', vendorId: 'v1', status: 'pending' }),
   ];
   const index = buildPostIndex(posts);
 
@@ -100,6 +101,11 @@ describe('庫存', () => {
     expect(isAssetFree({ status: 'used', usedInPostId: 'deleted' }, index)).toBe(true);
     expect(isAssetFree({ status: 'used', usedInPostId: 'sched' }, index)).toBe(false);
     expect(isAssetFree({ status: 'available', voidedAt: 'x' }, index)).toBe(false);
+  });
+
+  it('isAssetFree：掛在待補中（排上片日自動建的）也還沒排程，跟草稿一樣算庫存', () => {
+    expect(isAssetFree({ status: 'used', usedInPostId: 'pend' }, index)).toBe(true);
+    expect(isAssetSelectable({ status: 'used', usedInPostId: 'pend' }, index)).toBe(false);
   });
 
   it('isAssetSelectable：掛在草稿上的已被佔走，不能再挑（跟庫存答案相反）', () => {
