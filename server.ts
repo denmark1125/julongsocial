@@ -2223,7 +2223,14 @@ async function buildStockAlertMessage(): Promise<any | null> {
 // 注意：users.lineUserId 存的其實是 line_connections 的文件ID(UserManagement.tsx綁定時寫入的是
 // connection.id，不是真正的LINE user ID)，要推播必須再查一次 line_connections 文件本身的
 // lineUserId 欄位(U開頭)才是LINE Messaging API push要的真正對象。
+// 同事個人 LINE 通知總開關（2026-10-30 使用者決定先全部關掉，省 LINE 則數）。
+// 所有發給「個人」的推播（庫存警示、製作進度彙總、交棒通知、TimeTree 同步失敗警報）都經過這裡拿收件人，
+// 關掉＝一律回空清單、一則都不發。群組通知（剪輯群組送審／提醒）不經過這裡，照常發。
+// 要重新打開：Vercel 環境變數 LINE_PERSONAL_PUSH=on。
+const personalPushEnabled = () => process.env.LINE_PERSONAL_PUSH === "on";
+
 async function getRecipientsByRoles(roles: string[]): Promise<string[]> {
+  if (!personalPushEnabled()) return [];
   const snaps = await Promise.all(
     roles.map((role) => adminDb.collection("users").where("role", "==", role).get())
   );
@@ -2581,6 +2588,7 @@ app.post("/api/admin/line-status", async (req, res) => {
       quotaType: quota?.type || null, // none＝沒有上限（付費加購）、limited＝有上限
       quota: quota?.value ?? null,
       used: used?.totalUsage ?? null,
+      personalPush: personalPushEnabled(),
     });
   } catch (e: any) {
     if (e?.httpStatus) return sendAuthError(res, e);

@@ -23,7 +23,7 @@ function cn(...inputs: ClassValue[]) {
 type LineGroup = { id: string; groupName?: string; leftAt?: string | null; lastSeenAt?: string };
 type Status = {
   configured: boolean; botName?: string | null; basicId?: string | null; webhookUrl?: string | null;
-  webhookActive?: boolean; webhookPointsHere?: boolean; quotaType?: string | null; quota?: number | null; used?: number | null;
+  webhookActive?: boolean; webhookPointsHere?: boolean; quotaType?: string | null; quota?: number | null; used?: number | null; personalPush?: boolean;
 };
 type Tab = 'clients' | 'editors' | 'people';
 
@@ -241,7 +241,16 @@ export default function LineIntegration({ currentUserRole }: { currentUserRole: 
         </div>
       )}
 
-      {tab === 'people' && <UserManagement currentUserRole={currentUserRole} mode="lineOnly" />}
+      {tab === 'people' && (
+        <div className="space-y-3">
+          {status?.configured && !status.personalPush && (
+            <p className="text-[13px] text-amber-700 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-2.5">
+              個人通知目前<b>全部關閉</b>（庫存警示、製作進度、同步失敗警報都不發私訊），省 LINE 則數；綁定照樣可以先做好，之後打開就會生效
+            </p>
+          )}
+          <UserManagement currentUserRole={currentUserRole} mode="lineOnly" />
+        </div>
+      )}
     </div>
   );
 }
