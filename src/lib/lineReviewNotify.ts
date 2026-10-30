@@ -14,8 +14,8 @@ export interface ReviewNotifyInfo {
   editorName?: string;
   /** 給客戶的預覽頁完整網址 */
   previewUrl: string;
-  /** 審核區裡這支片的雲端檔案 id */
-  fileId: string;
+  /** 審核區裡這支片的雲端檔案 id；2026-10-30 起審片檔放 R2，沒有雲端檔案，就不放「到雲端看檔案」 */
+  fileId?: string;
 }
 
 const BRAND = '#5A5A40';
@@ -29,7 +29,7 @@ export function buildReviewNotifyMessage(info: ReviewNotifyInfo) {
       { type: 'text', text: value, size: 'sm', color: '#333333', flex: 6, wrap: true },
     ],
   });
-  const driveUrl = `https://drive.google.com/file/d/${encodeURIComponent(info.fileId)}/view`;
+  const driveUrl = info.fileId ? `https://drive.google.com/file/d/${encodeURIComponent(info.fileId)}/view` : '';
   return {
     type: 'flex',
     altText: `成片送審：${info.vendorName}｜${info.title}（${versionText}）`,
@@ -67,7 +67,7 @@ export function buildReviewNotifyMessage(info: ReviewNotifyInfo) {
             action: { type: 'clipboard', label: '複製客戶連結', clipboardText: info.previewUrl } },
           { type: 'box', layout: 'horizontal', spacing: 'sm', contents: [
             { type: 'button', style: 'secondary', height: 'sm', action: { type: 'uri', label: '開啟預覽頁', uri: info.previewUrl } },
-            { type: 'button', style: 'secondary', height: 'sm', action: { type: 'uri', label: '到雲端看檔案', uri: driveUrl } },
+            ...(driveUrl ? [{ type: 'button', style: 'secondary', height: 'sm', action: { type: 'uri', label: '到雲端看檔案', uri: driveUrl } }] : []),
           ] },
         ],
       },

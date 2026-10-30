@@ -681,6 +681,8 @@ export interface Asset {
    * 只有後端寫。最新一版是 reviewFiles[reviewFiles.length - 1]；業主通過後這支會被搬進 IP 成片夾當成片。
    */
   reviewFiles?: ReviewFile[];
+  /** 審片檔在 R2 時，「上傳雲端」由 Cloudflare Worker 搬進成片夾，這裡記搬運狀態（只有後端寫） */
+  finishCopy?: { status: 'copying' | 'done' | 'failed'; startedAt?: string; at?: string; error?: string };
   /** 送審歷程（每按一次交片送審附加一筆）。submittedAt 仍是最近一次。剪輯師只能附加 */
   submissions?: { version: number; submittedAt: string; byName?: string }[];
   /** 業主在預覽頁（/v/代碼）按「審核通過」的時間。後端寫；日後算送審→業主審完要多久 */
@@ -854,7 +856,11 @@ export interface ExtraSlot {
 
 export interface ReviewFile {
   version: number;
-  fileId: string;
+  /** Google 雲端檔案 id。2026-10-30 起新上傳的審片放 R2（r2Key），搬進成片夾後才有 fileId */
+  fileId?: string;
+  /** R2 物件位置（review/<assetId>/v<版本>-<亂數>.<副檔名>）；搬進成片夾後檔案刪掉、這欄清空 */
+  r2Key?: string;
+  size?: number;
   name: string;
   uploadedAt: string;
   /** 影片秒數（Google 處理完才有，晚幾分鐘補上） */

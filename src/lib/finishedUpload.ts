@@ -149,13 +149,83 @@ export async function uploadFinishedFiles(
 export async function uploadReviewFile(
   asset: Asset, file: File, onProgress?: (percent: number) => void,
 ): Promise<{ previewUrl: string | null }> {
-  const { uploadUrl } = await callApi('/api/drive/review-upload-session', {
+  const session = await callApi('/api/drive/review-upload-session', {
     assetId: asset.id, fileName: file.name, size: file.size, mimeType: file.type || 'video/mp4',
   });
   onProgress?.(0);
-  const result = await putResumable(uploadUrl, file, sent => onProgress?.(Math.floor((sent / (file.size || 1)) * 100)));
-  const done = await callApi('/api/drive/review-upload-done', { assetId: asset.id, fileId: result.id });
+  const percent = (sent: number) => onProgress?.(Math.floor((sent / (file.size || 1)) * 100));
+  let done;
+  if (session.mode === 'r2') {
+    const durationSec = await readDuration(file);
+    const parts = await putR2Parts(session, file, asset.id!, percent);
+    done = await callApi('/api/drive/review-upload-done', {
+      assetId: asset.id, key: session.key, uploadId: session.uploadId, parts, name: session.name, durationSec,
+    });
+  } else {
+    const result = await putResumable(session.uploadUrl, file, percent);
+    done = await callApi('/api/drive/review-upload-done', { assetId: asset.id, fileId: result.id });
+  }
   return { previewUrl: done.previewUrl ? `${window.location.origin}${done.previewUrl}` : null };
+}
+
+/**
+ * 審片檔直傳 R2（2026-10-30）：切成 16MB 一段、同時傳 3 段，每段失敗重試 4 次。
+ * 傳完收集每段的 ETag 交給後端合併。ETag 要靠 bucket 的 CORS 設定「露出 ETag」才讀得到。
+ */
+async function putR2Parts(
+  session: { key: string; uploadId: string; partSize: number; partCount: number; partUrls: Record<number, string> },
+  file: File, assetId: string, onBytes: (sent: number) => void,
+): Promise<{ n: number; etag: string }[]> {
+  const urls: Record<number, string> = { ...session.partUrls };
+  const etags: { n: number; etag: string }[] = [];
+  let sent = 0;
+  let next = 1;
+  const urlFor = async (n: number) => {
+    if (!urls[n]) {
+      const want = Array.from({ length: Math.min(100, session.partCount - n + 1) }, (_, i) => n + i);
+      const r = await callApi('/api/drive/review-upload-part-urls', { assetId, key: session.key, uploadId: session.uploadId, parts: want });
+      Object.assign(urls, r.partUrls);
+    }
+    return urls[n];
+  };
+  const lane = async () => {
+    while (next <= session.partCount) {
+      const n = next++;
+      const start = (n - 1) * session.partSize;
+      const blob = file.slice(start, Math.min(start + session.partSize, file.size));
+      for (let attempt = 1; ; attempt++) {
+        try {
+          const res = await fetch(await urlFor(n), { method: 'PUT', body: blob });
+          if (!res.ok) throw new Error(`上傳被拒絕（${res.status}）`);
+          const etag = res.headers.get('ETag');
+          if (!etag) throw new Error('上傳設定有問題（讀不到檔案驗證碼），請通知主管');
+          etags.push({ n, etag });
+          sent += blob.size;
+          onBytes(sent);
+          break;
+        } catch (e) {
+          if (attempt >= 4) throw e instanceof Error ? e : new Error('網路中斷太多次，請檢查網路後重新上傳');
+          await new Promise(r => setTimeout(r, 1500 * attempt));
+        }
+      }
+    }
+  };
+  await Promise.all([lane(), lane(), lane()]);
+  return etags;
+}
+
+/** 影片秒數：以前靠 Google 處理完才知道，現在檔案不經過 Google，上傳前在瀏覽器讀。讀不到就算了，不擋上傳 */
+function readDuration(file: File): Promise<number | undefined> {
+  return new Promise(resolve => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    const finish = (sec?: number) => { URL.revokeObjectURL(url); resolve(sec); };
+    const timer = setTimeout(() => finish(undefined), 8000);
+    v.preload = 'metadata';
+    v.onloadedmetadata = () => { clearTimeout(timer); finish(Number.isFinite(v.duration) && v.duration > 0 ? Math.round(v.duration) : undefined); };
+    v.onerror = () => { clearTimeout(timer); finish(undefined); };
+    v.src = url;
+  });
 }
 
 /** 業主通過後「上傳雲端」：審核區已經有這支片，請後端搬進 IP 成片夾（不重傳） */

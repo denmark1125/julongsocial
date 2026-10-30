@@ -21,6 +21,7 @@ import { summarizeFolder } from "./src/lib/rawFolder.js";
 import { buildPendingListMessage, buildReminderMessage, buildReviewNotifyMessage, isPendingQuery, listPendingReviews, pickReviewReminders } from "./src/lib/lineReviewNotify.js";
 import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
 import { isBookingChange, planShootSync, toCalendarEvent, type TimetreeShootChange } from "./src/lib/shootSync.js";
+import { isR2Configured, R2_PART_SIZE, createMultipartUpload, presignParts, completeMultipartUpload, headObject, presignGet, deleteObject, reviewObjectKey } from "./src/lib/r2.js";
 
 dotenv.config();
 
@@ -1257,9 +1258,17 @@ app.post("/api/drive/review-upload-session", async (req, res) => {
     // 檔名＝IP_片名_v版本。10-21 曾加上剪輯師名字，10-30 使用者要求拿掉：
     // 這個檔案通過後會原封不動搬進成片資料夾、複製給客戶，客戶不該看到剪輯師是誰。
     const name = sanitizeFolderName(`${asset.vendorName || ''}_${(asset.title || '').trim()}_v${version}`).slice(0, 180) + ext;
+    // 2026-10-30：審片檔改傳 R2（瀏覽器直傳、客戶手機直接播，不經過 Vercel）。沒設 R2 就照舊傳 Google 雲端。
+    if (isR2Configured()) {
+      const key = reviewObjectKey(asset.id, version, ext, crypto.randomBytes(6).toString('base64url'));
+      const uploadId = await createMultipartUpload(key, mimeType);
+      const partCount = Math.max(1, Math.ceil(size / R2_PART_SIZE));
+      const first = Array.from({ length: Math.min(partCount, 100) }, (_, i) => i + 1);
+      return res.json({ mode: 'r2', key, uploadId, name, version, partSize: R2_PART_SIZE, partCount, partUrls: await presignParts(key, uploadId, first) });
+    }
     const parentId = await ensureReviewFolder(asset.vendorName);
     const uploadUrl = await createResumableSession({ name, parentId, mimeType, size, origin, full: true });
-    return res.json({ uploadUrl, version });
+    return res.json({ mode: 'drive', uploadUrl, version });
   } catch (e: any) {
     if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
     if (e?.httpStatus) return sendAuthError(res, e);
@@ -1268,14 +1277,79 @@ app.post("/api/drive/review-upload-session", async (req, res) => {
   }
 });
 
+// 大檔一次只給 100 段的上傳網址（簽名要時間、回應也不要太大），傳到後面再來要
+app.post("/api/drive/review-upload-part-urls", async (req, res) => {
+  try {
+    const me = await requireUser(req);
+    const asset = await loadReviewTarget(me, req.body?.assetId);
+    const key = String(req.body?.key || '');
+    const uploadId = String(req.body?.uploadId || '');
+    if (!key.startsWith(`review/${asset.id}/`) || !uploadId) return res.status(400).json({ error: "上傳資訊不對" });
+    const parts = (Array.isArray(req.body?.parts) ? req.body.parts : []).map(Number).filter((n: number) => Number.isInteger(n) && n >= 1 && n <= 10000).slice(0, 100);
+    return res.json({ partUrls: await presignParts(key, uploadId, parts) });
+  } catch (e: any) {
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("review-upload-part-urls failed:", e?.message);
+    return res.status(502).json({ error: e?.message || "拿不到上傳網址" });
+  }
+});
+
+// 送審通知剪輯群組（藏鏡人在裡面）拿去給客戶審。2026-10-22 起，見 src/lib/lineReviewNotify.ts。
+// ⚠️ 要 await 完才回應（Vercel 回應後會凍結）；失敗只記 log，不能讓送審失敗。
+async function notifyReviewGroup(me: AuthedUser, asset: any, version: number, previewToken: string, host: string, fileId?: string) {
+  try {
+    // 跟 getWorkingEditorId 一樣：逐支指派優先，沒有就是 IP 的預設剪輯師
+    const editorDocId = me.linkedEditorId || asset.editorId
+      || String((await adminDb.collection("vendors").doc(asset.vendorId).get()).data()?.editorId || '');
+    const editor: any = editorDocId ? (await adminDb.collection("editors").doc(editorDocId).get()).data() : null;
+    if (editor?.lineGroupId) {
+      await sendLinePushMessage(editor.lineGroupId, buildReviewNotifyMessage({
+        vendorName: asset.vendorName || '', title: asset.title || '', version, editorName: editor.name || '',
+        previewUrl: `https://${host}/v/${previewToken}`, fileId,
+      }));
+    }
+  } catch (e: any) {
+    console.error("review notify failed:", e?.message);
+  }
+}
+
 app.post("/api/drive/review-upload-done", async (req, res) => {
   if (!requireDriveConfigured(res)) return;
   try {
     const me = await requireUser(req);
     const asset = await loadReviewTarget(me, req.body?.assetId);
+    const existing: any[] = asset.reviewFiles || [];
+    // R2 版（2026-10-30）：瀏覽器傳完每一段，這裡合併成一個檔、登記、給預覽連結
+    if (req.body?.key) {
+      if (asset.cloudUploadedAt) return res.status(409).json({ error: "這支已經完成，修改版沒有登記。要換片請找聚浪窗口" });
+      const key = String(req.body.key);
+      if (!key.startsWith(`review/${asset.id}/`)) return res.status(400).json({ error: "上傳資訊不對" });
+      const dup = existing.find(r => r.r2Key === key);
+      if (dup) return res.json({ previewUrl: dup.previewToken ? `/v/${dup.previewToken}` : null });
+      const parts = (Array.isArray(req.body.parts) ? req.body.parts : [])
+        .map((p: any) => ({ n: Number(p?.n), etag: String(p?.etag || '') }))
+        .filter((p: any) => Number.isInteger(p.n) && p.n >= 1 && p.etag);
+      if (parts.length === 0) return res.status(400).json({ error: "沒有上傳任何片段" });
+      await completeMultipartUpload(key, String(req.body.uploadId || ''), parts);
+      const head = await headObject(key);
+      if (!head) return res.status(502).json({ error: "檔案沒有合併成功，請重新上傳" });
+      // ⚠️ 一支片只有一個預覽連結、固定不變（使用者 10-21）：重送時同一個連結改播新版
+      const previewToken = existing.find(r => r.previewToken)?.previewToken || crypto.randomBytes(9).toString('base64url');
+      const version = existing.length + 1;
+      const now = new Date().toISOString();
+      await adminDb.collection("previewLinks").doc(previewToken).set({
+        assetId: asset.id, r2Key: key, fileId: FieldValue.delete(), version, title: asset.title || '', vendorName: asset.vendorName || '',
+        updatedAt: now, clientApprovedAt: FieldValue.delete(),
+      }, { merge: true });
+      const entry: any = { version, r2Key: key, name: String(req.body.name || key.split('/').pop()).slice(0, 200), size: head.size, uploadedAt: now, previewToken };
+      const durationSec = Math.round(Number(req.body.durationSec));
+      if (durationSec > 0 && durationSec < 86400) entry.durationSec = durationSec;
+      await adminDb.collection("assets").doc(asset.id).update({ reviewFiles: [...existing, entry] });
+      await notifyReviewGroup(me, asset, version, previewToken, String(req.get('host')));
+      return res.json({ previewUrl: `/v/${previewToken}` });
+    }
     const fileId = String(req.body?.fileId || '');
     if (!fileId) return res.status(400).json({ error: "沒有檔案" });
-    const existing: any[] = asset.reviewFiles || [];
     // 已經完成的片（剪輯師按了完成、檔案已搬進成片夾）又傳完一個版本：不登記，免得預覽連結復活、
     // 成片夾裡卻是舊版。前端也擋了「傳到一半不能按完成」，這裡是最後一道。
     if (asset.cloudUploadedAt) return res.status(409).json({ error: "這支已經完成，修改版沒有登記。要換片請找聚浪窗口" });
@@ -1305,22 +1379,7 @@ app.post("/api/drive/review-upload-done", async (req, res) => {
     if (f.durationSec) entry.durationSec = f.durationSec;
     // ⚠️ 舊版本（v1、v2…）的檔案保留，不覆蓋：使用者 10-21 決定留著，前後版本才能對照。
     await adminDb.collection("assets").doc(asset.id).update({ reviewFiles: [...existing, entry] });
-    // 通知這位剪輯師的群組（藏鏡人在裡面）拿去給客戶審。2026-10-22 起，見 src/lib/lineReviewNotify.ts。
-    // ⚠️ 要 await 完才回應（Vercel 回應後會凍結）；失敗只記 log，不能讓送審失敗。
-    try {
-      // 跟 getWorkingEditorId 一樣：逐支指派優先，沒有就是 IP 的預設剪輯師
-      const editorDocId = me.linkedEditorId || asset.editorId
-        || String((await adminDb.collection("vendors").doc(asset.vendorId).get()).data()?.editorId || '');
-      const editor: any = editorDocId ? (await adminDb.collection("editors").doc(editorDocId).get()).data() : null;
-      if (editor?.lineGroupId) {
-        await sendLinePushMessage(editor.lineGroupId, buildReviewNotifyMessage({
-          vendorName: asset.vendorName || '', title: asset.title || '', version, editorName: editor.name || '',
-          previewUrl: `https://${req.get('host')}/v/${previewToken}`, fileId,
-        }));
-      }
-    } catch (e: any) {
-      console.error("review notify failed:", e?.message);
-    }
+    await notifyReviewGroup(me, asset, version, previewToken, String(req.get('host')), fileId);
     return res.json({ previewUrl: `/v/${previewToken}` });
   } catch (e: any) {
     if (e instanceof DriveNotConfiguredError) return res.status(503).json({ error: e.message });
@@ -1343,6 +1402,12 @@ app.post("/api/drive/review-to-finished", async (req, res) => {
     const latest = files[files.length - 1];
     if (!latest) return res.status(404).json({ error: "這支沒有審核區的檔案" });
     const v = (await adminDb.collection("vendors").doc(String(asset.vendorId)).get()).data();
+    // R2 版：交給 Cloudflare Worker 把檔案搬進成片夾（大檔、不經過 Vercel），搬完它會打 /api/review-media/copied 接回下面同樣的收尾
+    if (latest.r2Key) {
+      if (asset.finishCopy?.status === 'copying') return res.json({ copying: true });
+      await startR2FinishCopy(asset, latest, v);
+      return res.json({ copying: true });
+    }
     if (v?.finishedFolderId) await moveFileFull(latest.fileId, v.finishedFolderId);
     if (latest.publicPermissionId) await removePermission(latest.fileId, latest.publicPermissionId).catch(() => {});
     // 定案了：舊版本（v1…）刪掉，只留搬進成片夾的最終版（使用者 10-21：審核期間留著對照，通過後刪）。
@@ -1368,6 +1433,95 @@ app.post("/api/drive/review-to-finished", async (req, res) => {
     if (e?.httpStatus) return sendAuthError(res, e);
     console.error("drive/review-to-finished failed:", e?.message);
     return res.status(502).json({ error: e?.message || "搬成片失敗" });
+  }
+});
+
+// ─── 審片檔在 R2：「上傳雲端」由 Cloudflare Worker（review-media-worker）搬進 Google 成片夾 ───────────
+// ERP 只開 Google 續傳通道（這一個檔的上傳網址），放進 finishCopyJobs 排隊；Worker 每分鐘來拿工作，
+// 從 R2 串流讀檔整支 PUT 給 Google，影片位元組不經過 Vercel。
+// ⚠️ 不能由 ERP 直接叫 Worker 背景跑：Cloudflare 回應後的背景工作只給約 30 秒，大檔搬不完；排程觸發才有 15 分鐘。
+// ⚠️ 上傳網址本身就是憑證，放在前端讀不到的 finishCopyJobs（規則沒開＝一律拒絕），不放 assets。
+async function startR2FinishCopy(asset: any, latest: any, vendor: any) {
+  // 沒設成片夾的 IP：跟舊版一樣留在審核區（只是換成從 R2 搬過去）
+  const parentId = vendor?.finishedFolderId || await ensureReviewFolder(asset.vendorName);
+  const head = await headObject(latest.r2Key);
+  if (!head) throw new Error("R2 上找不到這支片，請重新上傳");
+  const uploadUrl = await createResumableSession({
+    name: latest.name, parentId, mimeType: head.contentType || 'video/mp4', size: head.size,
+    origin: 'https://julongsocial.vercel.app', full: true,
+  });
+  const now = new Date().toISOString();
+  await adminDb.collection("finishCopyJobs").doc(asset.id).set({ assetId: asset.id, key: latest.r2Key, uploadUrl, size: head.size, createdAt: now });
+  await adminDb.collection("assets").doc(asset.id).update({ finishCopy: { status: 'copying', startedAt: now } });
+}
+
+// Worker 每分鐘來拿排隊中的搬運工作（一次最多 3 支）
+app.get("/api/review-media/jobs", async (req, res) => {
+  const secret = process.env.REVIEW_MEDIA_SECRET;
+  if (!secret || req.headers.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: "unauthorized" });
+  try {
+    // 每分鐘都會來拿，一支大檔可能搬好幾分鐘：拿走的先記 claimedAt，20 分鐘內不再發給下一輪，免得同一支傳兩份
+    const snap = await adminDb.collection("finishCopyJobs").orderBy("createdAt").limit(20).get();
+    const cutoff = Date.now() - 20 * 60_000;
+    const free = snap.docs.filter((d: any) => !(Date.parse(d.data().claimedAt || '') > cutoff)).slice(0, 3);
+    const now = new Date().toISOString();
+    await Promise.all(free.map((d: any) => d.ref.update({ claimedAt: now })));
+    return res.json({ jobs: free.map((d: any) => { const j = d.data(); return { assetId: j.assetId, key: j.key, uploadUrl: j.uploadUrl, size: j.size }; }) });
+  } catch (e: any) {
+    console.error("review-media/jobs failed:", e?.message);
+    return res.status(500).json({ error: e?.message || "失敗" });
+  }
+});
+
+// Worker 搬完回報：做跟舊版 review-to-finished 一樣的收尾（成片登記、送客戶、收預覽連結），再刪 R2 檔
+app.post("/api/review-media/copied", async (req, res) => {
+  const secret = process.env.REVIEW_MEDIA_SECRET;
+  if (!secret || req.headers.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: "unauthorized" });
+  try {
+    const assetId = String(req.body?.assetId || '');
+    const ref = adminDb.collection("assets").doc(assetId);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ error: "找不到素材" });
+    const asset: any = { id: snap.id, ...snap.data() };
+    const now = new Date().toISOString();
+    await adminDb.collection("finishCopyJobs").doc(assetId).delete().catch(() => {});
+    if (req.body?.error || !req.body?.fileId) {
+      await ref.update({ finishCopy: { status: 'failed', at: now, error: String(req.body?.error || '沒拿到檔案').slice(0, 300) } });
+      return res.json({ ok: true });
+    }
+    if (asset.finishCopy?.status === 'done') return res.json({ ok: true, already: true });
+    const fileId = String(req.body.fileId);
+    const files: any[] = asset.reviewFiles || [];
+    const latest = files[files.length - 1];
+    // 舊版本（R2 或雲端）一起刪，只留搬進成片夾的最終版；刪不掉不擋流程
+    const cleaned = await Promise.all(files.map(async r => {
+      if (r === latest) return r;
+      if (r.deletedAt) return r;
+      try {
+        if (r.r2Key) await deleteObject(r.r2Key);
+        else if (r.fileId) await deleteFilePermanently(r.fileId);
+        return { ...r, deletedAt: now };
+      } catch (err: any) { console.warn("delete old review version failed:", r.r2Key || r.fileId, err?.message); return r; }
+    }));
+    const latestKey = latest?.r2Key;
+    const finalLatest: any = { ...latest, fileId, movedAt: now };
+    delete finalLatest.r2Key;
+    cleaned[cleaned.length - 1] = finalLatest;
+    await Promise.all(files.filter(r => r.previewToken).map(r =>
+      adminDb.collection("previewLinks").doc(r.previewToken).delete().catch(() => {})));
+    await ref.set({
+      finishedFiles: [{ id: fileId, name: latest?.name || '', uploadedAt: now }],
+      clientCopyPending: true,
+      reviewFiles: cleaned,
+      finishCopy: { status: 'done', at: now },
+    }, { merge: true });
+    if (latestKey) await deleteObject(latestKey).catch((err: any) => console.warn("delete R2 after copy failed:", latestKey, err?.message));
+    // 原本是前端按完成後叫 copy-to-client；R2 版搬完才有成片，所以這裡直接接著送客戶
+    try { await copyAssetToClient(assetId); } catch (err: any) { console.error("copy-to-client after R2 copy failed:", err?.message); }
+    return res.json({ ok: true });
+  } catch (e: any) {
+    console.error("review-media/copied failed:", e?.message);
+    return res.status(500).json({ error: e?.message || "失敗" });
   }
 });
 
@@ -1421,7 +1575,10 @@ app.get("/v/:token", async (req, res) => {
     const t = encodeURIComponent(token);
     return send(
       `<h1>${escapeHtml(d.title || '影片預覽')}${d.version > 1 ? `<span style="font-size:14px;color:#9ad;font-weight:500">（第 ${Number(d.version)} 版）</span>` : ''}</h1>` +
-      `<div class="v" id="v"><iframe src="https://drive.google.com/file/d/${encodeURIComponent(d.fileId)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe></div>` +
+      // R2 版：手機內建播放器直接向 R2 拿（簽名網址 6 小時有效、不經過 Vercel）；舊片照舊用 Google 雲端播放器
+      (d.r2Key
+        ? `<div class="v" id="v"><video controls playsinline preload="metadata" src="${escapeHtml(await presignGet(String(d.r2Key)))}"></video></div>`
+        : `<div class="v" id="v"><iframe src="https://drive.google.com/file/d/${encodeURIComponent(d.fileId)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe></div>`) +
       `<p style="text-align:center;font-size:13px">剛上傳的片要等雲端處理幾分鐘，看不到請重新整理</p>` +
       actions +
       `<script>` +
@@ -1633,6 +1790,21 @@ app.get("/api/cron/client-copy-sweep", async (req, res) => {
   try {
     const snap = await adminDb.collection("assets").where("clientCopyPending", "==", true).limit(100).get();
     const tally: Record<string, number> = {};
+    // R2 搬運卡住（Worker 沒回報）或失敗：每天重送一次
+    const stuck = await adminDb.collection("assets").where("finishCopy.status", "in", ["copying", "failed"]).limit(20).get();
+    for (const d of stuck.docs) {
+      const a: any = { id: d.id, ...d.data() };
+      const since = Date.parse(a.finishCopy?.startedAt || a.finishCopy?.at || '');
+      if (a.finishCopy?.status === 'copying' && Date.now() - since < 3600_000) continue;
+      const latest = (a.reviewFiles || []).at(-1);
+      if (!latest?.r2Key) continue;
+      try {
+        await startR2FinishCopy(a, latest, (await adminDb.collection("vendors").doc(String(a.vendorId)).get()).data());
+        tally.r2Retried = (tally.r2Retried || 0) + 1;
+      } catch (e: any) {
+        console.error("r2 finish copy retry failed", d.id, e?.message);
+      }
+    }
     for (const d of snap.docs) {
       try {
         const r = await copyAssetToClient(d.id);
