@@ -297,6 +297,11 @@ describe('editors 名冊：外包／內部、離職', () => {
     await assertSucceeds(updateDoc(doc(as('mgr'), 'editors', 'E1'), { lineGroupId: 'C1' }));
     await assertFails(updateDoc(doc(as('staff'), 'editors', 'E1'), { lineGroupId: 'C2' }));
   });
+  it('審片資料夾只能走後端：連主管都不能從前端直接改（對照：主管改名字可以）', async () => {
+    await assertSucceeds(updateDoc(doc(as('mgr'), 'editors', 'E1'), { name: '謝謝2' }));
+    await assertFails(updateDoc(doc(as('mgr'), 'editors', 'E1'), { reviewFolderId: 'F1' }));
+    await assertFails(setDoc(doc(as('mgr'), 'editors', 'E2'), { name: 'x', kind: 'external', createdAt: NOW, reviewFolderId: 'F1' }));
+  });
   it('LINE 群組清單：主管讀得到、一般員工讀不到、誰都不能寫', async () => {
     await env.withSecurityRulesDisabled(async ctx => { await setDoc(doc(ctx.firestore(), 'line_groups', 'C1'), { groupName: 'g' }); });
     await assertSucceeds(getDoc(doc(as('mgr'), 'line_groups', 'C1')));

@@ -12,10 +12,10 @@ import toast from 'react-hot-toast';
  * - 離職不刪除：先把他手上沒做完的片、他負責的 IP 改派，再標離職、停用登入（後端 /api/editors/:id/leave）。
  * - 新增外包後，到「員工管理」幫他開登入帳號，再到 IP 卡片指定剪輯師。
  */
-async function callLeave(id: string, body: Record<string, unknown>) {
+async function callEditorApi(id: string, action: 'leave' | 'review-folder', body: Record<string, unknown>) {
   const idToken = await auth.currentUser?.getIdToken();
   if (!idToken) throw new Error('認證已過期，請重新登入');
-  const res = await fetch(`/api/editors/${encodeURIComponent(id)}/leave`, {
+  const res = await fetch(`/api/editors/${encodeURIComponent(id)}/${action}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken, ...body }),
   });
   const data = await res.json().catch(() => ({}));
@@ -39,6 +39,7 @@ export default function EditorRosterModal({ editors, onClose, canManage = false 
   const [toId, setToId] = useState('');
   const [busy, setBusy] = useState(false);
   const [groups, setGroups] = useState<LineGroup[]>([]);
+  const [folderEdit, setFolderEdit] = useState<{ id: string; link: string } | null>(null);
 
   useEffect(() => {
     if (!canManage) return;
@@ -75,7 +76,7 @@ export default function EditorRosterModal({ editors, onClose, canManage = false 
   const openLeave = async (e: Editor) => {
     setLeaving(e); setPreview(null); setToId('');
     try {
-      setPreview(await callLeave(e.id!, { dryRun: true }));
+      setPreview(await callEditorApi(e.id!, 'leave', { dryRun: true }));
     } catch (err: any) {
       toast.error(err.message || '讀取失敗');
       setLeaving(null);
@@ -86,7 +87,7 @@ export default function EditorRosterModal({ editors, onClose, canManage = false 
     if (!leaving) return;
     setBusy(true);
     try {
-      const r = await callLeave(leaving.id!, { toEditorId: toId });
+      const r = await callEditorApi(leaving.id!, 'leave', { toEditorId: toId });
       toast.success(`${leaving.name} 已設為離職，改派 ${r.movedAssets} 支片、${r.movedVendors} 個 IP`);
       setLeaving(null);
     } catch (err: any) {
@@ -112,6 +113,39 @@ export default function EditorRosterModal({ editors, onClose, canManage = false 
       </div>
     );
   };
+
+  // 審片資料夾（2026-10-30）：剪輯師送審的片放哪個「OO剪輯影片審核區」。沒設＝謝謝剪輯影片審核區
+  const saveFolder = async () => {
+    if (!folderEdit) return;
+    setBusy(true);
+    try {
+      const r = await callEditorApi(folderEdit.id, 'review-folder', { link: folderEdit.link });
+      toast.success(r.cleared ? '已改回預設的謝謝剪輯影片審核區' : `已設定：${r.name}`);
+      setFolderEdit(null);
+    } catch (err: any) {
+      toast.error(err.message || '設定失敗');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const folderRow = (e: Editor) => folderEdit?.id === e.id ? (
+    <div className="flex items-center gap-2 mt-2">
+      <input
+        type="text" autoFocus placeholder="貼上 Google 雲端資料夾連結（留空＝用預設）" value={folderEdit.link}
+        onChange={ev => setFolderEdit({ id: e.id!, link: ev.target.value })}
+        className="flex-1 min-w-0 px-2 py-1 text-sm bg-white rounded-lg border border-black/10"
+      />
+      <button type="button" onClick={saveFolder} disabled={busy} className="shrink-0 text-sm font-bold text-white bg-[#5A5A40] px-3 py-1 rounded-lg disabled:opacity-40 whitespace-nowrap">儲存</button>
+      <button type="button" onClick={() => setFolderEdit(null)} disabled={busy} className="shrink-0 text-sm font-bold text-gray-500 px-2 py-1 whitespace-nowrap">取消</button>
+    </div>
+  ) : (
+    <div className="flex items-center gap-2 mt-1 text-[13px] text-gray-500">
+      <span className="shrink-0 font-bold whitespace-nowrap">審片資料夾</span>
+      <span className="truncate">{e.reviewFolderName || '謝謝剪輯影片審核區（預設）'}</span>
+      <button type="button" onClick={() => setFolderEdit({ id: e.id!, link: '' })} className="shrink-0 font-bold text-[#5A5A40] hover:underline whitespace-nowrap">設定</button>
+    </div>
+  );
 
   const row = (e: Editor) => (
     <div key={e.id} className="p-3 bg-[#F5F5F0] rounded-xl">
@@ -145,6 +179,7 @@ export default function EditorRosterModal({ editors, onClose, canManage = false 
       )}
     </div>
     {canManage && !e.leftAt && groupRow(e)}
+    {canManage && !e.leftAt && folderRow(e)}
     </div>
   );
 
@@ -205,7 +240,7 @@ export default function EditorRosterModal({ editors, onClose, canManage = false 
             </div>
             <p className="text-sm text-gray-500 -mt-2">外包要請款；內部是自己的員工，不請款。</p>
             {canManage && (
-              <p className="text-sm text-gray-500 -mt-3">LINE 群組：剪輯師交片送審、審片提醒會發到選的群組；選「不通知」就關掉。群組要先把聚浪機器人邀進去、在群裡講一句話才會出現在選單。</p>
+              <p className="text-sm text-gray-500 -mt-3">LINE 群組：剪輯師交片送審、審片提醒會發到選的群組；選「不通知」就關掉。群組要先把聚浪機器人邀進去、在群裡講一句話才會出現在選單。審片資料夾：他送審的片會存進這個資料夾（底下自動分 年/月/IP），要用公司 Google 帳號建立或共用給公司帳號。</p>
             )}
 
             {(['external', 'internal'] as const).map(k => (

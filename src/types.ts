@@ -297,6 +297,9 @@ export interface Editor {
   name: string;
   /** 這位剪輯師的 LINE 群組 ID（藏鏡人在裡面）：交片送審時機器人發通知到這裡。見 src/lib/lineReviewNotify.ts */
   lineGroupId?: string;
+  /** 這位剪輯師送審的片存進哪個 Google 雲端資料夾（「OO剪輯影片審核區（內部）」）。沒設＝謝謝剪輯影片審核區。只有後端寫（/api/editors/:id/review-folder） */
+  reviewFolderId?: string;
+  reviewFolderName?: string;
   linkedUserUid?: string; // 若此剪輯師有登入帳號，指向 users/{uid}；用來讓廠商管理的指派變動自動同步登入帳號的權限範圍
   createdAt: string;
   /**
@@ -681,8 +684,6 @@ export interface Asset {
    * 只有後端寫。最新一版是 reviewFiles[reviewFiles.length - 1]；業主通過後這支會被搬進 IP 成片夾當成片。
    */
   reviewFiles?: ReviewFile[];
-  /** 審片檔在 R2 時，「上傳雲端」由 Cloudflare Worker 搬進成片夾，這裡記搬運狀態（只有後端寫） */
-  finishCopy?: { status: 'copying' | 'done' | 'failed'; startedAt?: string; at?: string; error?: string };
   /** 送審歷程（每按一次交片送審附加一筆）。submittedAt 仍是最近一次。剪輯師只能附加 */
   submissions?: { version: number; submittedAt: string; byName?: string }[];
   /** 業主在預覽頁（/v/代碼）按「審核通過」的時間。後端寫；日後算送審→業主審完要多久 */
@@ -856,9 +857,9 @@ export interface ExtraSlot {
 
 export interface ReviewFile {
   version: number;
-  /** Google 雲端檔案 id。2026-10-30 起新上傳的審片放 R2（r2Key），搬進成片夾後才有 fileId */
+  /** 審核區（Google 雲端）的檔案 id。2026-10-30 起先傳 R2，Worker 1～2 分鐘內存一份進審核區後補上 */
   fileId?: string;
-  /** R2 物件位置（review/<assetId>/v<版本>-<亂數>.<副檔名>）；搬進成片夾後檔案刪掉、這欄清空 */
+  /** R2 物件位置（review/<assetId>/v<版本>-<亂數>.<副檔名>）：給客戶手機播的那份。片定案（上傳雲端）就刪，另有 30 天自動刪 */
   r2Key?: string;
   size?: number;
   name: string;
