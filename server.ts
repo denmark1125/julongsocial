@@ -1311,7 +1311,9 @@ app.post("/api/drive/review-upload-session", async (req, res) => {
     // 這個檔案通過後會原封不動搬進成片資料夾、複製給客戶，客戶不該看到剪輯師是誰。
     const name = sanitizeFolderName(`${asset.vendorName || ''}_${(asset.title || '').trim()}_v${version}`).slice(0, 180) + ext;
     // 2026-10-30：審片檔改傳 R2（瀏覽器直傳、客戶手機直接播，不經過 Vercel）。沒設 R2 就照舊傳 Google 雲端。
-    if (isR2Configured()) {
+    // ⚠️ 只有新版畫面（帶 r2: true）才給 R2：剪輯師分頁常開一整天，上線前的舊畫面看不懂 R2 回應，
+    //    會把檔案 PUT 到 /undefined 被 Vercel 擋 413（10-30 廣信實測）。舊畫面照舊走 Google 雲端。
+    if (isR2Configured() && req.body?.r2 === true) {
       const key = reviewObjectKey(asset.id, version, ext, crypto.randomBytes(6).toString('base64url'));
       const uploadId = await createMultipartUpload(key, mimeType);
       const partCount = Math.max(1, Math.ceil(size / R2_PART_SIZE));

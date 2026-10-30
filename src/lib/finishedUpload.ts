@@ -150,7 +150,7 @@ export async function uploadReviewFile(
   asset: Asset, file: File, onProgress?: (percent: number) => void,
 ): Promise<{ previewUrl: string | null }> {
   const session = await callApi('/api/drive/review-upload-session', {
-    assetId: asset.id, fileName: file.name, size: file.size, mimeType: file.type || 'video/mp4',
+    assetId: asset.id, fileName: file.name, size: file.size, mimeType: file.type || 'video/mp4', r2: true,
   });
   onProgress?.(0);
   const percent = (sent: number) => onProgress?.(Math.floor((sent / (file.size || 1)) * 100));
