@@ -1254,10 +1254,9 @@ app.post("/api/drive/review-upload-session", async (req, res) => {
     }
     const version = (asset.reviewFiles?.length || 0) + 1;
     const ext = (String(req.body?.fileName || '').match(/\.[A-Za-z0-9]{2,5}$/) || ['.mp4'])[0];
-    // 檔名帶剪輯師名字（使用者 10-21：審核區大家共用，依 年/月/IP 分，看檔名知道誰剪的）
-    const editorDocId = me.linkedEditorId || asset.editorId || '';
-    const editorName = editorDocId ? String((await adminDb.collection("editors").doc(editorDocId).get()).data()?.name || '') : '';
-    const name = sanitizeFolderName(`${asset.vendorName || ''}_${(asset.title || '').trim()}_v${version}${editorName ? `_${editorName}` : ''}`).slice(0, 180) + ext;
+    // 檔名＝IP_片名_v版本。10-21 曾加上剪輯師名字，10-30 使用者要求拿掉：
+    // 這個檔案通過後會原封不動搬進成片資料夾、複製給客戶，客戶不該看到剪輯師是誰。
+    const name = sanitizeFolderName(`${asset.vendorName || ''}_${(asset.title || '').trim()}_v${version}`).slice(0, 180) + ext;
     const parentId = await ensureReviewFolder(asset.vendorName);
     const uploadUrl = await createResumableSession({ name, parentId, mimeType, size, origin, full: true });
     return res.json({ uploadUrl, version });
