@@ -1239,7 +1239,8 @@ async function loadReviewTarget(me: AuthedUser, assetId: string) {
 app.post("/api/drive/review-upload-session", async (req, res) => {
   if (!requireDriveConfigured(res)) return;
   try {
-    if (!isFullDriveConfigured()) return res.status(503).json({ error: "審核區上傳還沒設定好，請通知主管" });
+    // 只有傳 Google 雲端審核區才要完整權限；R2 版上傳不碰 Google（搬進成片夾那步才用到）
+    if (!isR2Configured() && !isFullDriveConfigured()) return res.status(503).json({ error: "審核區上傳還沒設定好，請通知主管" });
     const me = await requireUser(req);
     const asset = await loadReviewTarget(me, req.body?.assetId);
     if (asset.cloudUploadedAt) return res.status(409).json({ error: "這支片已經完成，不用再送審" });
