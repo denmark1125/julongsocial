@@ -20,6 +20,7 @@ import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeF
 import { summarizeFolder } from "./src/lib/rawFolder.js";
 import { buildPendingListMessage, buildReminderMessage, buildReviewNotifyMessage, isPendingQuery, listPendingReviews, pickReviewReminders } from "./src/lib/lineReviewNotify.js";
 import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
+import { isBookingChange, planShootSync, toCalendarEvent, type TimetreeShootChange } from "./src/lib/shootSync.js";
 
 dotenv.config();
 
@@ -2627,6 +2628,77 @@ app.post("/api/admin/test-stock-alert-push", async (req, res) => {
   } catch (error: any) {
     console.error("test-stock-alert-push failed", error);
     res.status(500).json({ error: error.message || "Unknown error occurred" });
+  }
+});
+
+// TimeTree → 預約拍攝（2026-10-29）。Cloudflare Worker 每幾分鐘讀一次 TimeTree「聚浪行銷」日曆，
+// 送來「拍攝／諮詢／簽約／會議／數據分析」的變動：系統內 IP 的拍攝進 shootBookings（新建／合併／改期／取消的規則在
+// src/lib/shootSync.ts），其他進 calendarEvents 給拍攝行事曆看。
+// Worker 讀不到 TimeTree 時也走這支送 alert，由這邊推 LINE 給工程師（Worker 手上沒有 LINE 金鑰）。
+app.post("/api/shoot-sync", async (req, res) => {
+  const secret = process.env.SHOOT_SYNC_SECRET;
+  if (!secret || req.headers.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: "unauthorized" });
+  if (!adminDb) return res.status(500).json({ error: "Firebase Admin not initialized" });
+
+  try {
+    if (req.body?.alert) {
+      const recipients = await getRecipientsByRoles(["engineer"]);
+      await Promise.all(recipients.map((to) => sendLinePushMessage(to, { type: "text", text: `⚠ TimeTree 同步：${String(req.body.alert).slice(0, 500)}` })));
+      return res.json({ alerted: recipients.length });
+    }
+
+    const changes: TimetreeShootChange[] = Array.isArray(req.body?.changes) ? req.body.changes : [];
+    const vendorIdByName = new Map<string, string>(
+      (await adminDb.collection("vendors").get()).docs.map((d: any) => [String(d.data().name || ""), d.id])
+    );
+    const bookings: any[] = (await adminDb.collection("shootBookings").get()).docs.map((d: any) => ({ id: d.id, ...d.data() }));
+    const now = new Date();
+    const today = new Date(now.getTime() + 8 * 3600_000).toISOString().slice(0, 10);
+    const results: any[] = [];
+
+    // 行事曆用的其他行程一次可能好幾百筆（第一次匯入），用 batch 寫，一批最多 500
+    let batch = adminDb.batch();
+    let batchOps = 0;
+    const queue = async (fn: (b: any) => void) => {
+      fn(batch);
+      if (++batchOps >= 450) { await batch.commit(); batch = adminDb.batch(); batchOps = 0; }
+    };
+    const calendarIds = new Set<string>(
+      (await adminDb.collection("calendarEvents").select().get()).docs.map((d: any) => d.id)
+    );
+
+    for (const change of changes) {
+      if (!change?.uuid || (change.action !== "upsert" && change.action !== "delete")) {
+        results.push({ uuid: change?.uuid, op: "none", reason: "格式不對" });
+        continue;
+      }
+      const toBooking = change.action === "upsert" && isBookingChange(change);
+      // 行事曆那份：不是預約的照寫，其他（刪除、或改成系統內拍攝）就把舊的拿掉
+      const ev = toCalendarEvent(change);
+      if (ev) { await queue((b) => b.set(adminDb.collection("calendarEvents").doc(change.uuid), ev)); calendarIds.add(change.uuid); }
+      else if (calendarIds.has(change.uuid)) { await queue((b) => b.delete(adminDb.collection("calendarEvents").doc(change.uuid))); calendarIds.delete(change.uuid); }
+
+      // 預約那份：不再是系統內拍攝（刪除、或標題改掉了）就當成 TimeTree 刪除
+      const bookingChange: TimetreeShootChange = toBooking ? change : { uuid: change.uuid, action: "delete" };
+      const vendorId = toBooking && change.vendorName ? vendorIdByName.get(change.vendorName) || null : null;
+      const plan = planShootSync(bookingChange, vendorId, bookings, today, now.toISOString());
+      if (plan.op === "create") {
+        const ref = await adminDb.collection("shootBookings").add(plan.data);
+        bookings.push({ id: ref.id, ...plan.data });
+        results.push({ uuid: change.uuid, op: "create", id: ref.id });
+      } else if (plan.op === "update") {
+        await adminDb.collection("shootBookings").doc(plan.id).update(plan.data);
+        Object.assign(bookings.find((b) => b.id === plan.id), plan.data);
+        results.push({ uuid: change.uuid, op: "update", id: plan.id });
+      } else {
+        results.push({ uuid: change.uuid, op: ev ? "calendar" : "none", reason: plan.reason });
+      }
+    }
+    if (batchOps) await batch.commit();
+    res.json({ results });
+  } catch (e: any) {
+    console.error("shoot-sync failed", e);
+    res.status(500).json({ error: e?.message || "unknown error" });
   }
 });
 

@@ -51,6 +51,7 @@ export default function ShootBookings({ onOpenTool }: { onOpenTool?: (tab: 'airD
   const [openPanel, setOpenPanel] = useState<{ vendorId: string; type: PanelType } | null>(null);
   const [pendingReason, setPendingReason] = useState<BookingReason | null>(null);
   const [dateInput, setDateInput] = useState(new Date().toISOString().split('T')[0]);
+  const [timeInput, setTimeInput] = useState('');
   const [countInput, setCountInput] = useState(1);
   const [deficitModalVendor, setDeficitModalVendor] = useState<Vendor | null>(null);
   // 哪一張卡片正在展開欠片算式（一次只開一張，卡片才不會整排被撐長）
@@ -86,9 +87,12 @@ export default function ShootBookings({ onOpenTool }: { onOpenTool?: (tab: 'airD
       const breakdown = getDeficitBreakdown(v, posts, assets, currentMonth);
       // 用共用的getOwedVideoCount(內部已無條件進位)，不要自己重算，避免跟Dashboard/LINE推播的欠片數字對不起來
       const owed = getOwedVideoCount(v, posts, assets, stock, currentMonth);
-      const active = bookings
+      const booked = bookings
         .filter(b => b.vendorId === v.id && b.status === 'booked')
-        .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate))[0] || null;
+        .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate) || (a.startTime || '').localeCompare(b.startTime || ''));
+      const active = booked[0] || null;
+      // TimeTree 匯入後同一個 IP 常同時有好幾場約好的拍攝，卡片只顯示最近一場，其他給個數量
+      const laterCount = Math.max(0, booked.length - 1);
       const overdue = !!active && active.scheduledDate < today;
       // 這個廠商本來就在追蹤範圍內(hasVideoTrackingScope)，但這個月本身可能因為冷凍期/已終止而不計入新短缺——
       // 用來讓畫面清楚標示，不要讓人誤會本月的target/delivered是真的有在要求
@@ -98,7 +102,7 @@ export default function ShootBookings({ onOpenTool }: { onOpenTool?: (tab: 'airD
       if (overdue) sev = 'crit';
       else if (owed > 0 && !active) sev = owed >= 4 ? 'crit' : 'warn';
       else if (owed > 0) sev = 'warn';
-      return { vendor: v, target, delivered, stock, baseline: breakdown.baseline, breakdown, owed, active, overdue, frozenThisMonth, isEnded, sev };
+      return { vendor: v, target, delivered, stock, baseline: breakdown.baseline, breakdown, owed, active, laterCount, overdue, frozenThisMonth, isEnded, sev };
     })
     // 冷凍中/已終止且完全沒欠片的廠商不用一直顯示佔版面（沒東西要管）；還有欠片的留著提醒去清完
     .filter(row => !(row.frozenThisMonth && row.owed === 0))
@@ -165,6 +169,7 @@ export default function ShootBookings({ onOpenTool }: { onOpenTool?: (tab: 'airD
     setOpenPanel(null);
     setPendingReason(null);
     setDateInput(new Date().toISOString().split('T')[0]);
+    setTimeInput('');
     setCountInput(1);
   }
 
@@ -174,12 +179,14 @@ export default function ShootBookings({ onOpenTool }: { onOpenTool?: (tab: 'airD
       await addDoc(collection(db, 'shootBookings'), {
         vendorId,
         scheduledDate: dateInput,
+        ...(timeInput ? { startTime: timeInput } : {}),
         status: 'booked',
+        source: 'system',
         bookedByUid: auth.currentUser!.uid,
         bookedByName: me.displayName,
         createdAt: new Date().toISOString()
       });
-      toast.success(`已預約 ${dateInput.slice(5).replace('-', '/')}`);
+      toast.success(`已預約 ${dateInput.slice(5).replace('-', '/')}${timeInput ? ' ' + timeInput : ''}`);
       closePanel();
     } catch (e) {
       toast.error('登記失敗');
@@ -401,8 +408,12 @@ export default function ShootBookings({ onOpenTool }: { onOpenTool?: (tab: 'airD
                     <>
                       <span>
                         {row.overdue ? '⚠ 逾期未回報　' : '已預約　'}
-                        <span className="font-mono font-bold">{row.active.scheduledDate.slice(5).replace('-', '/')}</span>
+                        <span className="font-mono font-bold">
+                          {row.active.scheduledDate.slice(5).replace('-', '/')}{row.active.startTime ? ` ${row.active.startTime}` : ''}
+                        </span>
                         　由 {row.active.bookedByName}
+                        {row.active.timetreeUuid && row.active.source !== 'timetree' && <span className="text-gray-400">・已對上 TimeTree</span>}
+                        {row.laterCount > 0 && <span className="text-gray-400 whitespace-nowrap">・之後還有 {row.laterCount} 場</span>}
                       </span>
                       <button
                         onClick={() => quickCancelBooking(row.active!.id!)}
@@ -441,8 +452,13 @@ export default function ShootBookings({ onOpenTool }: { onOpenTool?: (tab: 'airD
 
                 {isOpen && openPanel!.type === 'book' && (
                   <div className="bg-[#F5F5F0] rounded-xl p-3 space-y-2 border border-dashed border-black/10">
-                    <input type="date" value={dateInput} onChange={e => setDateInput(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border border-black/10 text-sm font-mono" />
+                    <div className="flex gap-2">
+                      <input type="date" value={dateInput} onChange={e => setDateInput(e.target.value)}
+                        className="flex-[3] min-w-0 px-3 py-2 rounded-lg border border-black/10 text-sm font-mono" />
+                      <input type="time" value={timeInput} onChange={e => setTimeInput(e.target.value)} title="時間可不填"
+                        className="flex-[2] min-w-0 px-3 py-2 rounded-lg border border-black/10 text-sm font-mono" />
+                    </div>
+                    <p className="text-[13px] text-gray-400">在 TimeTree 登記的拍攝會自動出現在這裡，不用重複約</p>
                     <div className="flex gap-2">
                       <button onClick={closePanel} className="flex-1 py-2 text-xs font-bold text-gray-400">取消</button>
                       <button onClick={() => confirmBook(row.vendor.id)} className="flex-[2] py-2 text-xs font-bold bg-[#5A5A40] text-white rounded-lg">確認約定</button>
@@ -469,6 +485,9 @@ export default function ShootBookings({ onOpenTool }: { onOpenTool?: (tab: 'airD
 
                 {isOpen && openPanel!.type === 'delay' && (
                   <div className="bg-[#F5F5F0] rounded-xl p-3 space-y-2 border border-dashed border-black/10">
+                    {row.active?.timetreeUuid && (
+                      <p className="text-[13px] text-amber-700">這場來自 TimeTree：直接在 TimeTree 改期或刪除，這裡會自動跟著改</p>
+                    )}
                     <p className="text-xs text-gray-500">原因？</p>
                     <div className="flex gap-2">
                       <button onClick={() => chooseReason('client')} className="flex-1 py-2 text-xs font-bold border border-black/10 rounded-lg hover:border-[#5A5A40]">客戶因素</button>

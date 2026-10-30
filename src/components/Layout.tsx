@@ -214,6 +214,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
   // 主選單底下的子項（側欄縮排顯示）。素材資料庫的兩個子功能，見 AssetWorkspace.tsx
   const subItems: Record<string, { id: string; label: string }[]> = {
     videos: [{ id: 'airDate', label: '排上片日' }, { id: 'editOrder', label: '排剪輯順序' }],
+    shootBookings: [{ id: 'shootCalendar', label: '拍攝行事曆' }],
   };
   /**
    * 子項目要點了主項目才展開（使用者 10-20：「按下後再展開，不是直接出現在欄位底下」）。

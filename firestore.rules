@@ -610,6 +610,13 @@ service cloud.firestore {
       allow delete: if isManager();
     }
 
+    // TimeTree 的諮詢／簽約／會議／數據行程（拍攝行事曆用）。只由 /api/shoot-sync（Admin SDK）寫入；
+    // 裡面有客戶與學員姓名，外包剪輯師不需要看
+    match /calendarEvents/{id} {
+      allow read: if isAuthenticated() && !isEditorRole();
+      allow write: if false;
+    }
+
     match /dismissedHabits/{id} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidDismissedHabit(request.resource.data);

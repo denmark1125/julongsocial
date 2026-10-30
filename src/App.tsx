@@ -15,6 +15,7 @@ import PostManagement from './components/PostManagement';
 import CalendarView, { PostPrefill } from './components/CalendarView';
 import AssetWorkspace, { AssetWorkspaceTab } from './components/AssetWorkspace';
 import ShootBookings from './components/ShootBookings';
+import ShootCalendar from './components/ShootCalendar';
 import UserManagement from './components/UserManagement';
 import BillingManagement from './components/BillingManagement';
 import VersionLogView from './components/VersionLog';
@@ -223,6 +224,8 @@ export default function App() {
     airDate: ['engineer', 'manager', 'employee'],
     editOrder: ['engineer', 'manager', 'employee'],
     shootBookings: ['engineer', 'manager', 'employee'],
+    // 製作進度的子分頁
+    shootCalendar: ['engineer', 'manager', 'employee'],
     // 已併入 shootBookings（製作進度），保留是為了讓舊的 ?tab=editPriority 連結仍受角色控管
     editPriority: ['engineer', 'manager', 'employee'],
     calendar: ['engineer', 'manager', 'employee'],
@@ -286,6 +289,7 @@ export default function App() {
       case 'editOrder':
         return <AssetWorkspace tab={activeTab as AssetWorkspaceTab} setTab={setActiveTab} />;
       case 'shootBookings': return <ShootBookings onOpenTool={setActiveTab} />;
+      case 'shootCalendar': return <ShootCalendar />;
       // 舊的 ?tab=editPriority 連結（LINE 推播/書籤）導回合併後的製作進度，不要掉到 dashboard
       case 'editPriority': return <ShootBookings />;
       case 'billing': return <BillingManagement />;

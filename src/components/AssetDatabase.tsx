@@ -27,6 +27,7 @@ import { getWorkingEditorId, canReassignEditor, getAssetEditorOwner } from '../l
 import { isPickerConfigured } from '../lib/drivePicker';
 import { ASSET_CATEGORIES, ASSET_CATEGORY_DATALIST_ID } from '../lib/assetCategories';
 import { driveFolderIdFromUrl } from '../lib/driveNaming';
+import { pickBookingToResolve } from '../lib/shootSync';
 import EditingBrief from './EditingBrief';
 import RawStatus from './RawStatus';
 import PreviewLinkButton from './PreviewLinkButton';
@@ -252,8 +253,13 @@ export default function AssetDatabase() {
         where('vendorId', '==', vendorId),
         where('status', '==', 'booked')
       ));
-      if (!bookedSnap.empty) {
-        await updateDoc(doc(db, 'shootBookings', bookedSnap.docs[0].id), {
+      // TimeTree 匯入後同一個 IP 常有好幾筆未來的預約；docs[0] 沒有順序，可能把下個月那筆核銷掉
+      const target = pickBookingToResolve(
+        bookedSnap.docs.map(d => ({ id: d.id, scheduledDate: (d.data() as ShootBooking).scheduledDate })),
+        format(new Date(), 'yyyy-MM-dd')
+      );
+      if (target) {
+        await updateDoc(doc(db, 'shootBookings', target.id), {
           status: 'completed',
           deliveredCount: 1,
           resolvedAt: new Date().toISOString()

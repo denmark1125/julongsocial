@@ -907,6 +907,30 @@ export interface ShootBooking {
   previousBookingId?: string; // links to the booking this one rescheduled from
   createdAt: string;
   resolvedAt?: string;
+  // 2026-10-29 起：同事主要在 TimeTree 登記拍攝，由 Cloudflare Worker 同步進來（見 src/lib/shootSync.ts）
+  startTime?: string; // HH:mm，整天的行程沒有
+  title?: string; // TimeTree 行程標題原文，例「大發超哥拍攝-Kai」
+  source?: 'system' | 'timetree'; // 沒有＝舊資料，視同 system
+  timetreeUuid?: string;
+  changeLog?: { at: string; by: string; note: string }[];
+  location?: string;
+  crew?: string; // 拍攝人員，例「Kai、Irene」；TimeTree 標題「-」後面是人名時自動帶入
+  note?: string; // 拍攝內容／備註
+  expectedCount?: number; // 預計拍幾支
+}
+
+// TimeTree 上「拍攝」以外、要顯示在拍攝行事曆的行程（諮詢／簽約／會議／數據分析，
+// 以及不在系統 IP 名單內的拍攝）。只由 /api/shoot-sync 寫入，系統內唯讀。
+export type CalendarEventCategory = '拍攝' | '諮詢' | '簽約' | '會議' | '數據分析';
+export interface CalendarEvent {
+  id?: string; // ＝ TimeTree uuid
+  title: string;
+  category: CalendarEventCategory;
+  ip?: string;
+  date: string; // YYYY-MM-DD（台北）
+  startTime?: string;
+  allDay: boolean;
+  updatedAt: number;
 }
 
 export enum OperationType {
