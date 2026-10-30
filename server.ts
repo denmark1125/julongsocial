@@ -2635,6 +2635,24 @@ app.post("/api/admin/test-stock-alert-push", async (req, res) => {
 // 送來「拍攝／諮詢／簽約／會議／數據分析」的變動：系統內 IP 的拍攝進 shootBookings（新建／合併／改期／取消的規則在
 // src/lib/shootSync.ts），其他進 calendarEvents 給拍攝行事曆看。
 // Worker 讀不到 TimeTree 時也走這支送 alert，由這邊推 LINE 給工程師（Worker 手上沒有 LINE 金鑰）。
+// NAS 同步程式每輪先拿這份 IP 名單（含 TimeTree 簡稱）判斷「這是不是我們的 IP」：
+// 在 ERP 新增 IP 或填簡稱，下一輪（5 分鐘內）就認得，不用改 NAS 上的程式。
+app.get("/api/shoot-sync/vendors", async (req, res) => {
+  const secret = process.env.SHOOT_SYNC_SECRET;
+  if (!secret || req.headers.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: "unauthorized" });
+  if (!adminDb) return res.status(500).json({ error: "Firebase Admin not initialized" });
+  try {
+    const vendors = (await adminDb.collection("vendors").get()).docs
+      .map((d: any) => d.data())
+      .filter((v: any) => v.name)
+      .map((v: any) => ({ name: String(v.name), aliases: Array.isArray(v.timetreeAliases) ? v.timetreeAliases.map(String).filter(Boolean) : [] }));
+    res.json({ vendors });
+  } catch (e: any) {
+    console.error("shoot-sync vendors failed", e);
+    res.status(500).json({ error: e?.message || "unknown error" });
+  }
+});
+
 app.post("/api/shoot-sync", async (req, res) => {
   const secret = process.env.SHOOT_SYNC_SECRET;
   if (!secret || req.headers.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: "unauthorized" });

@@ -58,6 +58,8 @@ const BASELINE_FROM_MONTH = '1970-01';
 function emptyVendorForm() {
   return {
     name: '',
+    // TimeTree 標題裡同事對這個 IP 的叫法，逗號分開；拍攝同步（NAS）靠它認出是哪個 IP
+    timetreeAliasesText: '',
     socialAccounts: [{ platform: 'IG', username: '', password: '' }],
     postingHabits: [] as any[],
     cooperationItems: [] as string[],
@@ -395,8 +397,10 @@ export default function VendorManagement() {
         if (acc.password) passwordMap[socialAccountKey(acc)] = acc.password;
       });
 
+      const { timetreeAliasesText, ...formFields } = formData;
       const data = {
-        ...formData,
+        ...formFields,
+        timetreeAliases: [...new Set((timetreeAliasesText || "").split(/[,，、\s]+/).map(a => a.trim()).filter(a => a && a !== formData.name))],
         socialAccounts: accountsForVendor,
         targetHistory,
         ...(latestTargets ? { monthlyTargetVideos: latestTargets.videos, monthlyTargetPosts: latestTargets.posts } : {}),
@@ -663,6 +667,7 @@ export default function VendorManagement() {
                     setEditingVendor(vendor);
                     setFormData({
                       name: vendor.name,
+                      timetreeAliasesText: (vendor.timetreeAliases || []).join('、'),
                       socialAccounts: vendor.socialAccounts.map(a => ({ ...a, password: resolvePassword(vendor.id, a) })),
                       postingHabits: vendor.postingHabits || [],
                       cooperationItems: vendor.cooperationItems || [],
@@ -935,6 +940,18 @@ export default function VendorManagement() {
                     className="w-full p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-[#5A5A40]"
                     placeholder="請輸入廠商名稱"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">TimeTree 簡稱（選填）</label>
+                  <input
+                    type="text"
+                    value={formData.timetreeAliasesText}
+                    onChange={(e) => setFormData({ ...formData, timetreeAliasesText: e.target.value })}
+                    className="w-full p-3 bg-[#F5F5F0] rounded-xl border-none focus:ring-2 focus:ring-[#5A5A40]"
+                    placeholder="同事在 TimeTree 對這個 IP 的叫法，例：中醫、漢源（用頓號分開）"
+                  />
+                  <p className="text-[13px] text-gray-400 mt-1">TimeTree 的拍攝標題寫廠商名稱或這裡的簡稱，就會自動進拍攝預約</p>
                 </div>
 
                 <div>

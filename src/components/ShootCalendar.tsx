@@ -56,6 +56,8 @@ export default function ShootCalendar() {
   const [me, setMe] = useState<UserProfile | null>(null);
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const [hidden, setHidden] = useState<Set<Filter>>(new Set());
+  // 預設只看 IP 的行程；新客戶簽約、學員諮詢、內部會議收起來（資料都在，打開就看得到）
+  const [showOthers, setShowOthers] = useState(false);
   const [selectedDate, setSelectedDate] = useState(() => format(new Date(), 'yyyy-MM-dd'));
   const [draft, setDraft] = useState<Draft | null>(null);
   const [action, setAction] = useState<null | 'done' | 'delay' | 'cancel'>(null);
@@ -103,13 +105,15 @@ export default function ShootCalendar() {
         push({ kind: 'booking', date: b.scheduledDate, time: b.startTime, label: bookingLabel(b), booking: b });
       }
     }
+    const ipNames = new Set(vendors.map(v => v.name));
     for (const e of events) {
       if (hidden.has(e.category as Filter)) continue;
+      if (!showOthers && !(e.ip && ipNames.has(e.ip))) continue;
       push({ kind: 'event', date: e.date, time: e.startTime, label: e.title, event: e });
     }
     for (const list of map.values()) list.sort((a, b) => (a.time || '').localeCompare(b.time || ''));
     return map;
-  }, [bookings, events, hidden, from, to, vendors]);
+  }, [bookings, events, hidden, showOthers, from, to, vendors]);
 
   const upcoming = bookings
     .filter(b => b.status === 'booked' && b.scheduledDate >= today)
@@ -241,7 +245,11 @@ export default function ShootCalendar() {
             <button onClick={() => { setMonth(startOfMonth(new Date())); setSelectedDate(today); }}
               className="ml-1 px-3 py-1.5 rounded-lg border border-black/10 text-[13px] font-bold whitespace-nowrap">今天</button>
           </div>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1.5 items-center">
+            <label className="flex items-center gap-1 text-[13px] text-gray-500 mr-1 whitespace-nowrap cursor-pointer">
+              <input type="checkbox" checked={showOthers} onChange={e => setShowOthers(e.target.checked)} />
+              顯示非 IP 行程
+            </label>
             {FILTERS.map(f => (
               <button key={f} onClick={() => setHidden(h => { const n = new Set(h); n.has(f) ? n.delete(f) : n.add(f); return n; })}
                 className={cn('px-2.5 py-1 rounded-full text-[13px] font-bold whitespace-nowrap border',

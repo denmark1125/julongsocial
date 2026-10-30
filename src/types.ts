@@ -344,6 +344,7 @@ export interface DeficitEntry {
 export interface Vendor {
   id?: string;
   name: string;
+  timetreeAliases?: string[]; // TimeTree 標題裡對這個 IP 的簡稱（例：漢源中醫＝「中醫」），拍攝同步靠它認 IP
   socialAccounts: SocialAccount[];
   postingHabits?: PostingHabit[];
   cooperationItems: CooperationItem[];

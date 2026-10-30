@@ -225,7 +225,9 @@ service cloud.firestore {
              (!('finishedFolderId' in data) || data.finishedFolderId is string) &&
              (!('finishedFolderName' in data) || data.finishedFolderName is string) &&
              (!('clientFolderId' in data) || data.clientFolderId is string) &&
-             (!('clientFolderName' in data) || data.clientFolderName is string);
+             (!('clientFolderName' in data) || data.clientFolderName is string) &&
+             // TimeTree 簡稱（拍攝同步用來認 IP）
+             (!('timetreeAliases' in data) || data.timetreeAliases is list);
     }
 
     function isValidPost(data) {
