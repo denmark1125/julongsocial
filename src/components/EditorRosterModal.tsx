@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { addDoc, collection, deleteField, doc, getDocs, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, getDocs, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { Editor, EditorKind, EDITOR_KIND_LABEL } from '../types';
 import { assignableEditors, editorKind } from '../lib/editorRoster';
-import { X, UserMinus, Send } from 'lucide-react';
+import { X, UserMinus } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 /**
@@ -39,7 +39,6 @@ export default function EditorRosterModal({ editors, onClose, canManage = false 
   const [toId, setToId] = useState('');
   const [busy, setBusy] = useState(false);
   const [groups, setGroups] = useState<LineGroup[]>([]);
-  const [testing, setTesting] = useState<string | null>(null);
 
   useEffect(() => {
     if (!canManage) return;
@@ -47,33 +46,6 @@ export default function EditorRosterModal({ editors, onClose, canManage = false 
       .then(snap => setGroups(snap.docs.map(d => ({ id: d.id, ...d.data() } as LineGroup)).filter(g => !g.leftAt)))
       .catch(() => setGroups([]));
   }, [canManage]);
-
-  const changeGroup = async (e: Editor, groupId: string) => {
-    try {
-      await updateDoc(doc(db, 'editors', e.id!), { lineGroupId: groupId || deleteField() });
-      toast.success(groupId ? `${e.name} 的送審通知會發到這個群組` : `已關閉 ${e.name} 的群組通知`);
-    } catch {
-      toast.error('更新失敗');
-    }
-  };
-
-  const sendTest = async (groupId: string) => {
-    if (!window.confirm('往這個群組發兩則【測試】訊息（送審通知＋審片提醒）？群組裡的人都看得到。')) return;
-    setTesting(groupId);
-    try {
-      const idToken = await auth.currentUser?.getIdToken();
-      const res = await fetch('/api/admin/test-review-notify', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken, groupId }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || `伺服器回 ${res.status}`);
-      toast.success('已發出測試訊息');
-    } catch (err: any) {
-      toast.error(err.message || '發送失敗');
-    } finally {
-      setTesting(null);
-    }
-  };
 
   const add = async () => {
     if (!name.trim()) return;
@@ -128,31 +100,15 @@ export default function EditorRosterModal({ editors, onClose, canManage = false 
   const left = editors.filter(e => e.leftAt).sort((a, b) => (b.leftAt || '').localeCompare(a.leftAt || ''));
   const targets = assignableEditors(editors.filter(e => e.id !== leaving?.id));
 
+  // 群組改到「LINE 串接管理」統一設定（2026-10-30），這裡只顯示目前綁哪個，免得兩個地方各改各的
   const groupRow = (e: Editor) => {
     const current = e.lineGroupId || '';
-    const known = groups.some(g => g.id === current);
+    const name = groups.find(g => g.id === current)?.groupName;
     return (
-      <div className="flex items-center gap-2 mt-2">
-        <span className="shrink-0 text-[13px] font-bold text-gray-500 whitespace-nowrap">LINE 群組</span>
-        <select
-          value={current}
-          onChange={ev => changeGroup(e, ev.target.value)}
-          className="flex-1 min-w-0 text-sm bg-white rounded-lg border border-black/10 px-2 py-1 truncate"
-        >
-          <option value="">不通知</option>
-          {current && !known && <option value={current}>（機器人已不在這群）</option>}
-          {groups.map(g => <option key={g.id} value={g.id}>{g.groupName || g.id}</option>)}
-        </select>
-        {current && known && (
-          <button
-            type="button"
-            onClick={() => sendTest(current)}
-            disabled={testing === current}
-            className="shrink-0 flex items-center gap-1 text-sm font-bold text-gray-500 hover:text-[#5A5A40] px-2 py-1 rounded-lg hover:bg-white whitespace-nowrap disabled:opacity-40"
-          >
-            <Send size={13} /> {testing === current ? '發送中…' : '發測試'}
-          </button>
-        )}
+      <div className="flex items-center gap-2 mt-2 text-[13px] text-gray-500">
+        <span className="shrink-0 font-bold whitespace-nowrap">LINE 群組</span>
+        <span className="truncate">{current ? (name || '（機器人已不在這群）') : '不通知'}</span>
+        <span className="shrink-0 text-gray-400 whitespace-nowrap">・到「LINE 串接管理」修改</span>
       </div>
     );
   };

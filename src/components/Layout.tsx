@@ -23,7 +23,8 @@ import {
   Scissors,
   Receipt,
   CalendarDays,
-  ChevronDown
+  ChevronDown,
+  MessageCircle
 } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
@@ -204,6 +205,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     { id: 'calendar', label: '社群日曆', icon: CalendarIcon, roles: ['engineer', 'manager', 'employee'] },
     { id: 'billing', label: '帳務管理', icon: CreditCard, roles: ['engineer', 'manager'] },
     { id: 'users', label: '員工管理', icon: ShieldCheck, roles: ['engineer', 'manager'] },
+    { id: 'lineIntegration', label: 'LINE 串接管理', icon: MessageCircle, roles: ['engineer', 'manager'] },
     { id: 'version', label: '版本日誌', icon: History, roles: ['engineer'] },
     { id: 'editorQueue', label: '我的剪輯任務', icon: Scissors, roles: ['editor'] },
     { id: 'editorAssets', label: '我的所有片', icon: Film, roles: ['editor'] },

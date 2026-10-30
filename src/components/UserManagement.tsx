@@ -26,8 +26,12 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export default function UserManagement({ currentUserRole }: { currentUserRole: UserRole }) {
-  const [activeSubTab, setActiveSubTab] = useState<'users' | 'line'>('users');
+/**
+ * mode='lineOnly'：只顯示「同事個人 LINE 綁定」，給 LINE 串接管理頁嵌進去用（2026-10-30 LINE 設定統一到那一頁）。
+ * 員工管理本身不再有 LINE 分頁，改放連結過去，免得兩個地方各改各的。
+ */
+export default function UserManagement({ currentUserRole, mode = 'users', onOpenLine }: { currentUserRole: UserRole; mode?: 'users' | 'lineOnly'; onOpenLine?: () => void }) {
+  const [activeSubTab, setActiveSubTab] = useState<'users' | 'line'>(mode === 'lineOnly' ? 'line' : 'users');
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [editors, setEditors] = useState<Editor[]>([]);
@@ -341,6 +345,7 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
 
   return (
     <div className="space-y-6">
+      {mode !== 'lineOnly' && (
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="flex bg-white p-1 rounded-2xl border border-black/5 shadow-sm">
           <button
@@ -353,16 +358,16 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
             <User size={18} />
             <span>成員管理</span>
           </button>
-          <button
-            onClick={() => setActiveSubTab('line')}
-            className={cn(
-              "px-6 py-2 rounded-xl text-sm font-bold transition-all flex items-center space-x-2",
-              activeSubTab === 'line' ? "bg-[#5A5A40] text-white shadow-md" : "text-gray-400 hover:bg-gray-50"
-            )}
-          >
-            <MessageCircle size={18} />
-            <span>LINE 串接管理</span>
-          </button>
+          {onOpenLine && (
+            <button
+              onClick={onOpenLine}
+              className="px-6 py-2 rounded-xl text-sm font-bold transition-all flex items-center space-x-2 text-gray-400 hover:bg-gray-50"
+              title="LINE 綁定已移到左側選單「LINE 串接管理」"
+            >
+              <MessageCircle size={18} />
+              <span>LINE 綁定 →</span>
+            </button>
+          )}
         </div>
 
         {activeSubTab === 'users' && (currentUserRole === 'engineer' || currentUserRole === 'manager') && (
@@ -375,6 +380,7 @@ export default function UserManagement({ currentUserRole }: { currentUserRole: U
           </button>
         )}
       </div>
+      )}
 
       {activeSubTab === 'users' ? (
         <div className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">

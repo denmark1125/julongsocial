@@ -16,6 +16,7 @@ import CalendarView, { PostPrefill } from './components/CalendarView';
 import AssetWorkspace, { AssetWorkspaceTab } from './components/AssetWorkspace';
 import ShootBookings from './components/ShootBookings';
 import ShootCalendar from './components/ShootCalendar';
+import LineIntegration from './components/LineIntegration';
 import UserManagement from './components/UserManagement';
 import BillingManagement from './components/BillingManagement';
 import VersionLogView from './components/VersionLog';
@@ -231,6 +232,7 @@ export default function App() {
     calendar: ['engineer', 'manager', 'employee'],
     billing: ['engineer', 'manager'],
     users: ['engineer', 'manager'],
+    lineIntegration: ['engineer', 'manager'],
     version: ['engineer'],
     editorQueue: ['editor'],
     editorAssets: ['editor'],
@@ -293,7 +295,8 @@ export default function App() {
       // 舊的 ?tab=editPriority 連結（LINE 推播/書籤）導回合併後的製作進度，不要掉到 dashboard
       case 'editPriority': return <ShootBookings />;
       case 'billing': return <BillingManagement />;
-      case 'users': return <UserManagement currentUserRole={userProfile?.role || 'employee'} />;
+      case 'users': return <UserManagement currentUserRole={userProfile?.role || 'employee'} onOpenLine={() => setActiveTab('lineIntegration')} />;
+      case 'lineIntegration': return <LineIntegration currentUserRole={userProfile?.role || 'employee'} />;
       case 'version': return <VersionLogView />;
       default: return <Dashboard setActiveTab={setActiveTab} />;
     }

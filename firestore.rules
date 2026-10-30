@@ -227,7 +227,9 @@ service cloud.firestore {
              (!('clientFolderId' in data) || data.clientFolderId is string) &&
              (!('clientFolderName' in data) || data.clientFolderName is string) &&
              // TimeTree 簡稱（拍攝同步用來認 IP）
-             (!('timetreeAliases' in data) || data.timetreeAliases is list);
+             (!('timetreeAliases' in data) || data.timetreeAliases is list) &&
+             // 客戶 LINE 群組（LINE 串接管理頁綁定）
+             (!('clientLineGroupId' in data) || data.clientLineGroupId is string);
     }
 
     function isValidPost(data) {

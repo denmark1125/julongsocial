@@ -2553,6 +2553,42 @@ app.post("/api/admin/test-review-notify", async (req, res) => {
   }
 });
 
+// LINE 串接管理頁的「帳號狀態」（2026-10-30）：現在連的是哪個官方帳號、Webhook 有沒有指到這裡、本月用了幾則。
+// 金鑰只在伺服器，前端只拿結果。只有主管／工程師。
+app.post("/api/admin/line-status", async (req, res) => {
+  try {
+    const me = await requireUser(req);
+    if (me.role !== 'engineer' && me.role !== 'manager') return res.status(403).json({ error: "只有主管可以看" });
+    const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+    if (!token) return res.json({ configured: false });
+    const H = { Authorization: `Bearer ${token}` };
+    const get = async (url: string) => { const r = await fetch(url, { headers: H }); return r.ok ? r.json() : null; };
+    const [info, webhook, quota, used]: any[] = await Promise.all([
+      get("https://api.line.me/v2/bot/info"),
+      get("https://api.line.me/v2/bot/channel/webhook/endpoint"),
+      get("https://api.line.me/v2/bot/message/quota"),
+      get("https://api.line.me/v2/bot/message/quota/consumption"),
+    ]);
+    return res.json({
+      configured: true,
+      botName: info?.displayName || null,
+      basicId: info?.basicId || null,
+      pictureUrl: info?.pictureUrl || null,
+      webhookUrl: webhook?.endpoint || null,
+      webhookActive: !!webhook?.active,
+      // 只比路徑：本機預覽時 host 是 localhost，比整串網址會誤報「指到別的網址」
+      webhookPointsHere: !!webhook?.endpoint && String(webhook.endpoint).replace(/\/$/, '').endsWith('/api/webhook/line'),
+      quotaType: quota?.type || null, // none＝沒有上限（付費加購）、limited＝有上限
+      quota: quota?.value ?? null,
+      used: used?.totalUsage ?? null,
+    });
+  } catch (e: any) {
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("line-status failed", e);
+    return res.status(500).json({ error: e?.message || "失敗" });
+  }
+});
+
 // 後台「測試製作進度推播」用，方便驗證不用等隔天排程
 app.post("/api/admin/test-flow-digest-push", async (req, res) => {
   const { idToken } = req.body;

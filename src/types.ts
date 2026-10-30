@@ -344,6 +344,7 @@ export interface DeficitEntry {
 export interface Vendor {
   id?: string;
   name: string;
+  clientLineGroupId?: string; // 這個 IP 的客戶 LINE 群組（LINE 串接管理頁綁定；之後拍攝提醒發這裡）
   timetreeAliases?: string[]; // TimeTree 標題裡對這個 IP 的簡稱（例：漢源中醫＝「中醫」），拍攝同步靠它認 IP
   socialAccounts: SocialAccount[];
   postingHabits?: PostingHabit[];
