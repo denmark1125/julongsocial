@@ -8,6 +8,7 @@
  */
 import { auth } from '../firebase';
 import type { Asset, Vendor } from '../types';
+import { faststartMp4 } from './mp4Faststart';
 
 async function callApi(path: string, body: Record<string, unknown>) {
   const idToken = await auth.currentUser?.getIdToken();
@@ -157,7 +158,8 @@ export async function uploadReviewFile(
   let done;
   if (session.mode === 'r2') {
     const durationSec = await readDuration(file);
-    const parts = await putR2Parts(session, file, asset.id!, percent);
+    // 目錄（moov）搬到檔頭：客戶手機按播放不用先跳到檔尾讀目錄（大小不變、畫面不重壓；看不懂就傳原檔）
+    const parts = await putR2Parts(session, await faststartMp4(file), asset.id!, percent);
     done = await callApi('/api/drive/review-upload-done', {
       assetId: asset.id, key: session.key, uploadId: session.uploadId, parts, name: session.name, durationSec,
     });

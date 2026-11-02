@@ -1640,9 +1640,11 @@ app.get("/v/:token", async (req, res) => {
       `<h1>${escapeHtml(d.title || '影片預覽')}${d.version > 1 ? `<span style="font-size:14px;color:#9ad;font-weight:500">（第 ${Number(d.version)} 版）</span>` : ''}</h1>` +
       // R2 版：手機內建播放器直接向 R2 拿（簽名網址 6 小時有效、不經過 Vercel）；舊片照舊用 Google 雲端播放器
       (d.r2Key
-        ? `<div class="v" id="v"><video controls playsinline preload="metadata" src="${escapeHtml(await presignGet(String(d.r2Key)))}"></video></div>`
+        // preload="auto"：頁面一開就先下載，客戶按播放幾乎立刻有畫面（R2 下載不收費，11-02）
+        ? `<div class="v" id="v"><video controls playsinline preload="auto" src="${escapeHtml(await presignGet(String(d.r2Key)))}"></video></div>`
         : `<div class="v" id="v"><iframe src="https://drive.google.com/file/d/${encodeURIComponent(d.fileId)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe></div>`) +
-      `<p style="text-align:center;font-size:13px">剛上傳的片要等雲端處理幾分鐘，看不到請重新整理</p>` +
+      // R2 版不用等轉檔，這句只給舊的雲端播放器
+      (d.r2Key ? '' : `<p style="text-align:center;font-size:13px">剛上傳的片要等雲端處理幾分鐘，看不到請重新整理</p>`) +
       actions +
       `<script>` +
       `var lb=document.getElementById('line');if(lb)lb.addEventListener('click',function(){try{window.close()}catch(e){}setTimeout(function(){if(history.length>1)history.back();document.getElementById('lineTip').style.display='block'},300)});` +
