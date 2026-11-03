@@ -690,7 +690,7 @@ export default function EditorPayables({ chairman = false }: { chairman?: boolea
         </div>
       )}
 
-      <BillingProgress month={month} summaries={summaries} />
+      <BillingProgress month={month} summaries={summaries} invoices={monthInvoices} />
 
       <div className="bg-white rounded-2xl border border-black/5 shadow-sm">
         <div className="px-5 py-4 border-b border-black/5 flex items-center justify-between gap-3 flex-wrap">

@@ -326,7 +326,7 @@ function BillingTab() {
     <div className="space-y-4">
       <Switcher label={format(parseISO(`${month}-01`), 'yyyy 年 M 月')} onShift={n => { setMonth(format(addMonths(parseISO(`${month}-01`), n), 'yyyy-MM')); setOpenEditor(null); }} />
 
-      <BillingProgress month={month} summaries={summaries} />
+      <BillingProgress month={month} summaries={summaries} invoices={monthInvoices} />
 
       {toPay.length > 0 && (
         <Card className="px-5 py-5 border-2 border-green-200">
