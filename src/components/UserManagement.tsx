@@ -340,7 +340,8 @@ export default function UserManagement({ currentUserRole, mode = 'users', onOpen
     engineer: '工程師',
     manager: '主管',
     employee: '員工',
-    editor: '剪輯師'
+    editor: '剪輯師',
+    chairman: '董事',
   };
 
   return (
@@ -439,12 +440,13 @@ export default function UserManagement({ currentUserRole, mode = 'users', onOpen
                         className="bg-[#F5F5F0] border-none rounded-lg text-xs font-bold px-3 py-1 outline-none focus:ring-2 focus:ring-[#5A5A40]"
                         // 經理不能動工程師、也不能把人升成工程師（firestore.rules 同一條線）
                         disabled={(currentUserRole !== 'engineer' && currentUserRole !== 'manager')
-                          || (currentUserRole !== 'engineer' && user.role === 'engineer')}
+                          || (currentUserRole !== 'engineer' && (user.role === 'engineer' || user.role === 'chairman'))}
                       >
                         <option value="employee">員工</option>
                         <option value="manager">主管</option>
                         <option value="engineer" disabled={currentUserRole !== 'engineer'}>工程師</option>
                         <option value="editor">剪輯師</option>
+                        <option value="chairman" disabled={currentUserRole !== 'engineer'}>董事</option>
                       </select>
                     </td>
                     <td className="p-4">
@@ -747,6 +749,7 @@ export default function UserManagement({ currentUserRole, mode = 'users', onOpen
                   <option value="manager">主管</option>
                   <option value="engineer" disabled={currentUserRole !== 'engineer'}>工程師</option>
                   <option value="editor">剪輯師(外包)</option>
+                  <option value="chairman" disabled={currentUserRole !== 'engineer'}>董事（只看欠片／剪輯費核發／行事曆）</option>
                 </select>
               </div>
 

@@ -31,7 +31,7 @@ import { signOut } from 'firebase/auth';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { UserProfile, Post, Vendor, Asset, DismissedHabit, Editor } from '../types';
+import { UserProfile, Post, Vendor, Asset, DismissedHabit, Editor, EditorInvoice } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import { useBoundPostSync } from '../lib/useBoundPostSync';
 import { trackedVendors, getVideoStockAlert, getOwedVideoCount, getAvailableVideoAssets, hasVideoTrackingScope } from '../lib/vendorStatus';
@@ -62,20 +62,48 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
   // 剪輯師(role='editor')權限被收斂到只能看自己指派的廠商，這裡的公司全域監聽/鈴鐺對他們完全不適用，
   // 且一旦規則生效，未範圍限定的 collection() 查詢對 editor 角色會直接 permission-denied 把整個殼弄壞——完全跳過。
   const isEditor = userProfile?.role === 'editor';
+  // 會長（2026-11）：只看精簡畫面。鈴鐺、缺漏排程計算、毛片自動綁貼文都不跑——他不操作，也不該替公司寫資料。
+  const isChairman = userProfile?.role === 'chairman'
+    || (!!(import.meta as any).env?.DEV && new URLSearchParams(window.location.search).get('preview') === 'chairman');
 
   // 共用即時資料層：整個 session 只訂閱一次，切分頁不再重讀
+  // 會長的提醒（2026-11）：主管送審了要放行／剪輯師送了主管還沒送審。只讀這兩種狀態的單，量很小
+  const [chairInvoices, setChairInvoices] = useState<EditorInvoice[]>([]);
+  useEffect(() => {
+    if (!isChairman) return;
+    return onSnapshot(
+      query(collection(db, 'editorInvoices'), where('status', 'in', ['submitted', 'approved', 'released', 'payment_processing'])),
+      s => setChairInvoices(s.docs.map(d => ({ id: d.id, ...d.data() } as EditorInvoice))),
+      () => setChairInvoices([]),
+    );
+  }, [isChairman]);
+  // 董事要處理的：等放行（approved）＋已放行等付款完成（released／舊流程的 payment_processing）
+  const toRelease = chairInvoices.filter(i => i.status === 'approved');
+  const toPay = chairInvoices.filter(i => i.status === 'released' || i.status === 'payment_processing');
+  const chairTodo = [...toRelease, ...toPay];
+  const stuckAtManager = chairInvoices.filter(i => i.status === 'submitted');
+  const sumOf = (l: EditorInvoice[]) => l.reduce((n, i) => n + i.totalAmount, 0);
+  // 董事登入時有單等放行就跳視窗（使用者 11-03）。按「稍後」這次登入期間不再跳；sessionStorage 可能被擋，擋了就只在記憶體記
+  const [releasePopupDismissed, setReleasePopupDismissed] = useState(() => {
+    try { return sessionStorage.getItem('releasePopupDismissed') === '1'; } catch { return false; }
+  });
+  const dismissReleasePopup = () => {
+    setReleasePopupDismissed(true);
+    try { sessionStorage.setItem('releasePopupDismissed', '1'); } catch { /* ignore */ }
+  };
+
   const posts = useLiveCollection<Post>('posts', !isEditor);
   // 內部剪輯師不請款（使用者 10-21：只有外包要請款）→ 不給「我的請款」分頁
   const editorRoster = useLiveCollection<Editor>('editors', isEditor);
   const isInternalEditor = isEditor && editorRoster.find(e => e.id === userProfile?.linkedEditorId)?.kind === 'internal';
   const vendors = useLiveCollection<Vendor>('vendors', !isEditor);
   const assets = useLiveCollection<Asset>('assets', !isEditor);
-  const dismissedHabits = useLiveCollection<DismissedHabit>('dismissedHabits', !isEditor);
+  const dismissedHabits = useLiveCollection<DismissedHabit>('dismissedHabits', !isEditor && !isChairman);
   // 毛片綁小編貼文：通過就自動掛上、貼文改日期就跟著改（見 lib/boundPosts.ts）
-  useBoundPostSync(posts, assets, !isEditor && !!userProfile);
+  useBoundPostSync(posts, assets, !isEditor && !isChairman && !!userProfile);
 
   // Notification Logic（剪輯師沒有鈴鐺，直接回空清單，不跑任何公司全域計算）
-  const notifications = isEditor ? [] : (() => {
+  const notifications = (isEditor || isChairman) ? [] : (() => {
     const list: any[] = [];
     const now = new Date();
     const threeDaysFromNow = addDays(now, 3);
@@ -211,6 +239,10 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     { id: 'editorAssets', label: '我的所有片', icon: Film, roles: ['editor'] },
     { id: 'editorSchedule', label: '上片排程', icon: CalendarDays, roles: ['editor'] },
     { id: 'editorInvoice', label: '我的請款', icon: Receipt, roles: ['editor'] },
+    // 會長（2026-11）只有這三頁，見 ChairmanView.tsx；App.tsx 的 CHAIRMAN_TABS 要一起改
+    { id: 'chairmanDeficit', label: '欠片狀況', icon: Film, roles: ['chairman'] },
+    { id: 'chairmanBilling', label: '剪輯費核發', icon: Receipt, roles: ['chairman'], badge: chairTodo.length },
+    { id: 'chairmanCalendar', label: '發片行事曆', icon: CalendarDays, roles: ['chairman'] },
   ];
 
   // 主選單底下的子項（側欄縮排顯示）。素材資料庫的兩個子功能，見 AssetWorkspace.tsx
@@ -234,7 +266,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     ?? Object.values(subItems).flat().find(sub => sub.id === activeTab)?.label;
 
   const filteredMenu = menuItems.filter(item =>
-    (!userProfile || item.roles.includes(userProfile.role)) &&
+    (!userProfile || item.roles.includes(isChairman ? 'chairman' : userProfile.role)) &&
     !(item.id === 'editorInvoice' && isInternalEditor)
   );
 
@@ -270,6 +302,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
               >
                 <item.icon size={20} className={cn(isSidebarOpen ? "mr-3" : "mx-auto")} />
                 {isSidebarOpen && <span>{item.label}</span>}
+                {!!(item as { badge?: number }).badge && <span className="ml-2 min-w-[20px] h-5 px-1.5 rounded-full bg-orange-500 text-white text-[12px] font-bold flex items-center justify-center">{(item as { badge?: number }).badge}</span>}
                 {isSidebarOpen && subItems[item.id] && (
                   <ChevronDown size={16} className={cn("ml-auto transition-transform", isExpanded(item.id) ? "rotate-180" : "")} />
                 )}
@@ -297,7 +330,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
                 <div className="flex-1 min-w-0 mr-2">
                   <p className="text-sm font-medium truncate">{userProfile?.displayName || user.email}</p>
                   <p className="text-[13px] font-bold text-[#5A5A40] uppercase tracking-wider">
-                    {userProfile?.role === 'engineer' ? '工程師' : userProfile?.role === 'manager' ? '主管' : userProfile?.role === 'editor' ? '剪輯師' : '員工'}
+                    {userProfile?.role === 'chairman' ? '董事' : userProfile?.role === 'engineer' ? '工程師' : userProfile?.role === 'manager' ? '主管' : userProfile?.role === 'editor' ? '剪輯師' : '員工'}
                   </p>
                 </div>
               )}
@@ -395,7 +428,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
                   <div className="flex-1 min-w-0 mr-4">
                     <p className="font-bold truncate">{userProfile?.displayName || user.email}</p>
                     <p className="text-xs font-bold text-[#5A5A40] uppercase tracking-wider">
-                      {userProfile?.role === 'engineer' ? '工程師' : userProfile?.role === 'manager' ? '主管' : userProfile?.role === 'editor' ? '剪輯師' : '員工'}
+                      {userProfile?.role === 'chairman' ? '董事' : userProfile?.role === 'engineer' ? '工程師' : userProfile?.role === 'manager' ? '主管' : userProfile?.role === 'editor' ? '剪輯師' : '員工'}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -435,7 +468,7 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
           </div>
           
           <div className="flex items-center space-x-2 md:space-x-4">
-            {!isEditor && (
+            {!isEditor && !isChairman && (
             <div className="relative">
               <button
                 onClick={markAsRead}
@@ -518,8 +551,45 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 md:p-8 pb-24 md:pb-8">
+          {isChairman && activeTab !== 'chairmanBilling' && (chairTodo.length > 0 || stuckAtManager.length > 0) && (
+            <button
+              onClick={() => setActiveTab('chairmanBilling')}
+              className={cn('w-full max-w-5xl mx-auto mb-4 rounded-2xl border px-5 py-3.5 text-left flex items-center justify-between gap-3',
+                chairTodo.length > 0 ? 'bg-orange-50 border-orange-200' : 'bg-amber-50 border-amber-200')}
+            >
+              <span className={cn('text-[15px] md:text-base font-bold', chairTodo.length > 0 ? 'text-orange-800' : 'text-amber-800')}>
+                {chairTodo.length > 0
+                  ? [toRelease.length && `主管已送審 ${toRelease.length} 張（$${sumOf(toRelease).toLocaleString()}）等您放行`, toPay.length && `已放行 ${toPay.length} 張（$${sumOf(toPay).toLocaleString()}）待付款完成`].filter(Boolean).join('・')
+                  : `剪輯師已送出 ${stuckAtManager.length} 張請款，主管還沒送審，請提醒主管`}
+              </span>
+              <span className="text-[14px] font-bold text-[#5A5A40] whitespace-nowrap">查看 →</span>
+            </button>
+          )}
           {children}
         </div>
+
+        {isChairman && chairTodo.length > 0 && !releasePopupDismissed && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={dismissReleasePopup}>
+            <div className="bg-white w-full max-w-sm rounded-3xl p-6 text-center shadow-2xl" onClick={e => e.stopPropagation()}>
+              <div className="mx-auto w-14 h-14 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center">
+                <Receipt size={26} />
+              </div>
+              <p className="mt-4 text-[19px] font-bold">{toRelease.length > 0 ? `有 ${toRelease.length} 張請款等您放行` : `有 ${toPay.length} 張已放行，待付款完成`}</p>
+              <p className="mt-1 text-[15px] text-gray-500">
+                {Array.from(new Set(chairTodo.map(i => i.editorName))).join('、')}・合計
+                <span className="font-bold text-[#1a1a1a] tabular-nums"> ${sumOf(toRelease.length > 0 ? toRelease : toPay).toLocaleString()}</span>
+                {toRelease.length > 0 && toPay.length > 0 && <span className="block mt-1">另有 {toPay.length} 張已放行待付款完成</span>}
+              </p>
+              <button
+                onClick={() => { dismissReleasePopup(); setActiveTab('chairmanBilling'); }}
+                className="mt-5 w-full py-3.5 rounded-xl bg-[#5A5A40] text-white text-[16px] font-bold"
+              >
+                {toRelease.length > 0 ? '前往放行' : '前往付款完成'}
+              </button>
+              <button onClick={dismissReleasePopup} className="mt-2 w-full py-2.5 text-[15px] text-gray-500 font-bold">稍後再說</button>
+            </div>
+          </div>
+        )}
 
         {/* 剪輯師上傳成片的進度（可以同時傳好幾支，切分頁也還在）。見 UploadPanel */}
         {isEditor && <UploadPanel />}
@@ -536,10 +606,11 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
               )}
             >
               <div className={cn(
-                "p-1 rounded-lg transition-all",
+                "p-1 rounded-lg transition-all relative",
                 isInItem(item.id) ? "bg-[#5A5A40]/10" : ""
               )}>
                 <item.icon size={20} />
+                {!!(item as { badge?: number }).badge && <span className="absolute -top-1.5 -right-2.5 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-500 text-white text-[11px] font-bold flex items-center justify-center">{(item as { badge?: number }).badge}</span>}
               </div>
               {/* 小螢幕(≤359px)降一級並強制不換行：13px 時「素材資料庫」會斷成兩行去撞隔壁那格 */}
               <span className="text-[11px] min-[360px]:text-[13px] leading-normal font-bold mt-1 text-center whitespace-nowrap">{item.label}</span>

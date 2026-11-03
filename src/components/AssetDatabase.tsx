@@ -23,6 +23,7 @@ import { resolvePostPicks, waitingPostsFor } from '../lib/postMatch';
 import PlannedPostSelect from './PlannedPostSelect';
 import { visibleVendors, stockVisibleVendors, getPauseStatus, buildPostIndex, getDisplayAssetStatus } from '../lib/vendorStatus';
 import { buildFlowUpdate, buildSubmitUndoUpdate, getClientApprovalTarget, isClientApproved } from '../lib/assetFlow';
+import { isInternalWork } from '../lib/editorRoster';
 import { getWorkingEditorId, canReassignEditor, getAssetEditorOwner } from '../lib/editorBilling';
 import { isPickerConfigured } from '../lib/drivePicker';
 import { ASSET_CATEGORIES, ASSET_CATEGORY_DATALIST_ID } from '../lib/assetCategories';
@@ -379,7 +380,7 @@ export default function AssetDatabase() {
       // 業主審核與剪輯師上傳是兩條獨立事實：沒上傳時只能進 to_upload，
       // 不能在這裡補 cloudUploadedAt，否則同事按審核就會替剪輯師產生請款資格。
       const reviewPassed = isClientApproved(asset);
-      const to = reviewPassed ? 'client_review' : getClientApprovalTarget(asset);
+      const to = reviewPassed ? 'client_review' : getClientApprovalTarget(asset, isInternalWork(asset, vendors, editors));
       await updateDoc(
         doc(db, 'assets', asset.id!),
         buildFlowUpdate(asset, to, { byUid: auth.currentUser?.uid })

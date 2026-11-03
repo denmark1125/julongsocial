@@ -10,7 +10,7 @@ import { useLiveCollection } from '../lib/liveData';
 import { isInternalWork } from '../lib/editorRoster';
 import {
   billingMonthOptions, buildInvoiceItems, getAssetFee, getBillingMonth,
-  groupByVendor, listBillable, monthLabel, sumItems,
+  groupByVendor, listBillable, monthLabel, sumItems, defaultBillingMonth,
 } from '../lib/editorBilling';
 import {
   Receipt, Send, CheckCircle2, FileText, Ban, Wallet, CalendarDays, ShieldCheck,
@@ -38,7 +38,14 @@ function StatusBadge({ status }: { status: EditorInvoice['status'] }) {
   if (status === 'approved') {
     return (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[13px] font-bold border border-blue-200">
-        <ShieldCheck size={10} /> 公司已核准
+        <ShieldCheck size={10} /> 主管已審核，待放行
+      </span>
+    );
+  }
+  if (status === 'released') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 text-[13px] font-bold border border-teal-200">
+        <ShieldCheck size={10} /> 款項已放行，準備付款
       </span>
     );
   }
@@ -51,7 +58,7 @@ function StatusBadge({ status }: { status: EditorInvoice['status'] }) {
   }
   return (
     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[13px] font-bold border border-amber-200">
-      <Send size={10} /> 已送出，待付款
+      <Send size={10} /> 已送出，待主管審核
     </span>
   );
 }
@@ -146,6 +153,26 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
     ),
     [assets, myEditorId, vendors, roster]
   );
+
+  // 打開時停在哪個月（2026-11）：上個月還有片沒送單就停上個月（月初請的是上個月的帳），否則本月。只選一次。
+  const [autoMonthDone, setAutoMonthDone] = useState(false);
+  useEffect(() => {
+    if (autoMonthDone || myAssets.length === 0) return;
+    setMonth(defaultBillingMonth(m => listBillable(myAssets, m).length > 0));
+    setAutoMonthDone(true);
+  }, [autoMonthDone, myAssets]);
+
+  // 新付款的單跳一次視窗（2026-11）。看過的記在這台裝置（localStorage），被擋的話最多就是再跳一次
+  const [seenPaid, setSeenPaid] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('seenPaidInvoices') || '[]'); } catch { return []; }
+  });
+  const paidPopup = invoices.find(i => i.status === 'paid' && i.paidAt && Date.now() - parseISO(i.paidAt).getTime() < 30 * 864e5 && !seenPaid.includes(i.id!)) || null;
+  const closePaidPopup = () => {
+    if (!paidPopup) return;
+    const next = [...seenPaid, paidPopup.id!];
+    setSeenPaid(next);
+    try { localStorage.setItem('seenPaidInvoices', JSON.stringify(next)); } catch { /* ignore */ }
+  };
 
   const monthOptions = useMemo(() => billingMonthOptions(myAssets), [myAssets]);
   const billable = useMemo(() => listBillable(myAssets, month), [myAssets, month]);
@@ -249,6 +276,46 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
   return (
     // readability-surface：手機點擊區 44px、桌面 24px、輸入框 16px（避免 iOS 自動放大整頁）。
     <div className="readability-surface space-y-4">
+      {/* 付款通知（2026-11）：董事按付款完成／放行後，剪輯師這頁最上面要一眼看到金額 */}
+      {(() => {
+        const recentPaid = invoices.filter(i => i.status === 'paid' && i.paidAt && Date.now() - parseISO(i.paidAt).getTime() < 30 * 864e5)
+          .sort((a, b) => (b.paidAt || '').localeCompare(a.paidAt || ''));
+        const released = invoices.filter(i => i.status === 'released' || i.status === 'payment_processing');
+        if (recentPaid.length === 0 && released.length === 0) return null;
+        return (
+          <div className="space-y-2">
+            {recentPaid.map(i => (
+              <div key={i.id} className="rounded-2xl border-2 border-green-200 bg-gradient-to-r from-green-50 to-white px-5 py-4 flex items-center gap-4">
+                <span className="w-11 h-11 rounded-full bg-green-600 text-white flex items-center justify-center shrink-0"><CheckCircle2 size={22} /></span>
+                <div className="min-w-0">
+                  <p className="text-[13px] font-bold text-green-700">{format(parseISO(i.paidAt!), 'M/d')} 已付款</p>
+                  <p className="text-[17px] font-bold text-[#1a1a1a]">{monthLabel(i.billingMonth)}剪輯費 <span className="tabular-nums text-green-700">${i.totalAmount.toLocaleString()}</span>・{i.itemCount} 支</p>
+                </div>
+              </div>
+            ))}
+            {released.map(i => (
+              <div key={i.id} className="rounded-2xl border-2 border-teal-200 bg-gradient-to-r from-teal-50 to-white px-5 py-4 flex items-center gap-4">
+                <span className="w-11 h-11 rounded-full bg-teal-600 text-white flex items-center justify-center shrink-0"><Wallet size={20} /></span>
+                <div className="min-w-0">
+                  <p className="text-[13px] font-bold text-teal-700">帳務已放行，準備匯款</p>
+                  <p className="text-[17px] font-bold text-[#1a1a1a]">{monthLabel(i.billingMonth)}剪輯費 <span className="tabular-nums text-teal-700">${i.totalAmount.toLocaleString()}</span>・{i.itemCount} 支</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+      {paidPopup && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={closePaidPopup}>
+          <div className="bg-white w-full max-w-sm rounded-3xl p-6 text-center shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="mx-auto w-16 h-16 rounded-full bg-green-100 text-green-600 flex items-center justify-center"><CheckCircle2 size={34} /></div>
+            <p className="mt-4 text-[15px] font-bold text-green-700">剪輯費已付款</p>
+            <p className="mt-1 text-[32px] font-bold tabular-nums">${paidPopup.totalAmount.toLocaleString()}</p>
+            <p className="text-[15px] text-gray-500">{monthLabel(paidPopup.billingMonth)}・{paidPopup.itemCount} 支{paidPopup.paidAt ? `・${format(parseISO(paidPopup.paidAt), 'M/d')} 付款` : ''}</p>
+            <button onClick={closePaidPopup} className="mt-5 w-full py-3.5 rounded-xl bg-[#5A5A40] text-white text-[16px] font-bold">知道了</button>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold serif text-[#5A5A40] flex items-center gap-2">

@@ -23,6 +23,7 @@ import VersionLogView from './components/VersionLog';
 import EditorAssetQueue from './components/EditorAssetQueue';
 import EditorSchedule from './components/EditorSchedule';
 import EditorInvoicePage from './components/EditorInvoicePage';
+import ChairmanView, { ChairmanSection } from './components/ChairmanView';
 import Logo from './components/Logo';
 import { Toaster } from 'react-hot-toast';
 import { LogIn, Mail, Lock, User as UserIcon } from 'lucide-react';
@@ -34,6 +35,9 @@ import { PASSWORD_SUFFIX, ADMIN_USERNAME, ADMIN_EMAIL } from './constants';
 // 剪輯師（外包，權限最收斂）唯一能進的兩頁。新增剪輯師分頁時這裡跟 TAB_ROLES、
 // Layout.tsx 的 menuItems 三個地方都要一起加，少一個就會被強制導回工作台。
 const EDITOR_TABS = ['editorQueue', 'editorAssets', 'editorSchedule', 'editorInvoice'];
+// 會長只有這三頁（2026-11）。跟 Layout.tsx 的 menuItems 一起改。
+const CHAIRMAN_TABS = ['chairmanDeficit', 'chairmanBilling', 'chairmanCalendar'];
+const isChairmanPreview = () => !!(import.meta as any).env?.DEV && new URLSearchParams(window.location.search).get('preview') === 'chairman';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -103,6 +107,9 @@ export default function App() {
   useEffect(() => {
     if (userProfile?.role === 'editor' && !EDITOR_TABS.includes(activeTab)) {
       setActiveTab('editorQueue');
+    }
+    if ((userProfile?.role === 'chairman' || isChairmanPreview()) && !CHAIRMAN_TABS.includes(activeTab)) {
+      setActiveTab('chairmanDeficit');
     }
   }, [userProfile, activeTab]);
 
@@ -276,6 +283,11 @@ export default function App() {
           />
         );
       }
+    }
+    // 會長（2026-11）：同剪輯師的做法，不管 activeTab／?tab= 是什麼都只給精簡畫面，絕不落到 Dashboard 等完整後台。
+    // 本機預覽：?preview=chairman 用目前帳號看會長畫面（只在 dev 有效；核發按鈕會被規則擋，不會真的寫入）
+    if (userProfile?.role === 'chairman' || isChairmanPreview()) {
+      return <ChairmanView section={(CHAIRMAN_TABS.includes(activeTab) ? activeTab : 'chairmanDeficit') as ChairmanSection} />;
     }
     const allowedRoles = TAB_ROLES[activeTab];
     if (allowedRoles && !allowedRoles.includes(userProfile?.role || 'employee')) {

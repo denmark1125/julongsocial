@@ -112,7 +112,8 @@ export interface EditorInvoice {
   items: EditorInvoiceItem[];
   itemCount: number;       // = items.length，列表/統計不用展開陣列
   totalAmount: number;     // = sum(items.amount)，凍結
-  status: 'submitted' | 'approved' | 'payment_processing' | 'paid' | 'void';
+  // released＝會長已核發（2026-11）：主管核准後還要會長核發，主管才能開始付款
+  status: 'submitted' | 'approved' | 'released' | 'payment_processing' | 'paid' | 'void';
   submittedAt: string;
   note?: string;
   approvedAt?: string;
@@ -126,7 +127,8 @@ export interface EditorInvoice {
   createdAt: string;
 }
 
-export type UserRole = 'engineer' | 'manager' | 'employee' | 'editor';
+// chairman＝會長（老闆的老闆）：只看欠片／剪輯費核發／行事曆三頁的精簡畫面（2026-11）
+export type UserRole = 'engineer' | 'manager' | 'employee' | 'editor' | 'chairman';
 
 export interface UserProfile {
   uid: string;

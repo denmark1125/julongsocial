@@ -43,8 +43,14 @@ export interface CloudUploadOptions extends AdvanceFlowOptions {
   billableEditorId?: string;
 }
 
-export function getClientApprovalTarget(asset: Pick<Asset, 'cloudUploadedAt'>): 'to_upload' | 'ready' {
-  return asset.cloudUploadedAt ? 'ready' : 'to_upload';
+/**
+ * 業主通過後去哪：外包剪的要等剪輯師上傳雲端（＝請款依據）才算可排程；
+ * **內部剪輯**不請款、也不會出現在任何剪輯師工作台，沒有人會去按上傳雲端，
+ * 所以業主一通過就直接可排程（2026-11-03 使用者回報：內部剪的片永遠卡在「待上傳雲端」，小編排不到）。
+ * internal 由呼叫端用 isInternalWork(asset, vendors, editors) 算好傳進來。
+ */
+export function getClientApprovalTarget(asset: Pick<Asset, 'cloudUploadedAt'>, internal = false): 'to_upload' | 'ready' {
+  return asset.cloudUploadedAt || internal ? 'ready' : 'to_upload';
 }
 
 /** 業主是否已通過。不能只看 approved：to_upload 代表已通過、但尚未上傳，approved 仍為 false。 */

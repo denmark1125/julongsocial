@@ -21,6 +21,7 @@ import {
 import { useLiveCollection } from '../lib/liveData';
 import AirDateBoard from './AirDateBoard';
 import EditOrderModal from './EditOrderModal';
+import { isInternalWork } from '../lib/editorRoster';
 import { buildFlowUpdate, getClientApprovalTarget, getFlowDaysStuck, getFlowDueInfo, isClosedOutsideSystem, isFlowFinished, isFlowStale, isMarkedDoneManually, sortFlowColumn } from '../lib/assetFlow';
 import { getAssetEditorOwner } from '../lib/editorBilling';
 import { Scissors, UserCheck, PenLine, Clock, Flame, CalendarClock, ThumbsUp, CalendarDays, ListOrdered, AlertTriangle } from 'lucide-react';
@@ -382,8 +383,8 @@ export default function ProductionFlowBoard({
                             <button
                               // 剪輯師可能在業主審核期間就先上傳了（我們在 LINE 上請他傳，不等後台）。
                               // 那種情況下業主一通過就等於兩個條件都成立，直接進可排程，不要再叫他按一次。
-                              onClick={() => getClientApprovalTarget(a) === 'ready'
-                                ? advance(a, 'ready', '業主已通過，這支已上傳過雲端，直接可排程')
+                              onClick={() => getClientApprovalTarget(a, isInternalWork(a, vendors, editors)) === 'ready'
+                                ? advance(a, 'ready', a.cloudUploadedAt ? '業主已通過，這支已上傳過雲端，直接可排程' : '業主已通過，內部剪輯不用上傳雲端，直接可排程')
                                 : advance(a, 'to_upload', '已記錄業主通過，等剪輯師上傳雲端')}
                               disabled={busyId === a.id}
                               className="flex-1 flex items-center justify-center gap-1 bg-green-600 text-white px-2 py-1.5 rounded-lg text-[13px] font-bold hover:bg-green-700 transition-all disabled:opacity-50"

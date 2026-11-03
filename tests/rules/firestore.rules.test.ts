@@ -23,6 +23,7 @@ const users = {
   manager: { uid: 'mgr', role: 'manager' },
   staff: { uid: 'staff', role: 'employee' },
   editor: { uid: 'ed', role: 'editor', linkedEditorId: 'E1', assignedVendorIds: ['v1'] },
+  chairman: { uid: 'chair', role: 'chairman' },
 };
 
 const as = (uid: string) => env.authenticatedContext(uid, { email: `${uid}@forest.system` }).firestore();
@@ -133,6 +134,79 @@ describe('剪輯師', () => {
     await assertSucceeds(setDoc(doc(as('ed'), 'editorInvoices', 'i1'), invoice));
     await assertFails(setDoc(doc(as('ed'), 'editorInvoices', 'i2'), { ...invoice, editorId: 'E2' }));
     await assertFails(setDoc(doc(as('ed'), 'editorInvoices', 'i3'), { ...invoice, status: 'paid', paidAt: NOW, paidByUid: 'ed' }));
+  });
+});
+
+describe('會長核發剪輯費（2026-11）：主管核准 → 會長核發 → 主管付款', () => {
+  const base = {
+    editorId: 'E1', editorName: '謝謝', submittedByUid: 'ed', billingMonth: '2026-10',
+    items: [{ assetId: 'a1', amount: 900 }], itemCount: 1, totalAmount: 900,
+    submittedAt: NOW, createdAt: NOW,
+  };
+  const approved = { ...base, status: 'approved', approvedAt: NOW, approvedByUid: 'mgr' };
+  const released = { ...approved, status: 'released', releasedAt: NOW, releasedByUid: 'chair' };
+  const seed = (id: string, data: Record<string, unknown>) =>
+    env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'editorInvoices', id), data));
+
+  it('會長讀得到請款單，一般員工讀不到', async () => {
+    await seed('i1', approved);
+    await assertSucceeds(getDoc(doc(as('chair'), 'editorInvoices', 'i1')));
+    await assertFails(getDoc(doc(as('staff'), 'editorInvoices', 'i1')));
+  });
+
+  it('會長可以把已核准的單核發；未核准的不行', async () => {
+    await seed('i1', approved);
+    await seed('i2', { ...base, status: 'submitted' });
+    await assertSucceeds(updateDoc(doc(as('chair'), 'editorInvoices', 'i1'), { status: 'released', releasedAt: NOW, releasedByUid: 'chair' }));
+    await assertFails(updateDoc(doc(as('chair'), 'editorInvoices', 'i2'), { status: 'released', releasedAt: NOW, releasedByUid: 'chair' }));
+  });
+
+  it('會長核發只能寫自己的 uid，也不能順手改金額', async () => {
+    await seed('i1', approved);
+    await assertFails(updateDoc(doc(as('chair'), 'editorInvoices', 'i1'), { status: 'released', releasedAt: NOW, releasedByUid: 'mgr' }));
+    await assertFails(updateDoc(doc(as('chair'), 'editorInvoices', 'i1'), { status: 'released', releasedAt: NOW, releasedByUid: 'chair', totalAmount: 1 }));
+    await assertSucceeds(updateDoc(doc(as('chair'), 'editorInvoices', 'i1'), { status: 'released', releasedAt: NOW, releasedByUid: 'chair' }));
+  });
+
+  it('董事放行後可以按付款完成；還沒放行的不行；只能寫自己的 uid', async () => {
+    await seed('i1', released);
+    await seed('i2', approved);
+    await seed('i3', { ...approved, status: 'payment_processing', processingAt: NOW, processingByUid: 'mgr' });
+    await assertFails(updateDoc(doc(as('chair'), 'editorInvoices', 'i2'), { status: 'paid', paidAt: NOW, paidByUid: 'chair' }));
+    await assertFails(updateDoc(doc(as('chair'), 'editorInvoices', 'i1'), { status: 'paid', paidAt: NOW, paidByUid: 'mgr' }));
+    await assertFails(updateDoc(doc(as('chair'), 'editorInvoices', 'i1'), { status: 'paid', paidAt: NOW, paidByUid: 'chair', totalAmount: 1 }));
+    await assertSucceeds(updateDoc(doc(as('chair'), 'editorInvoices', 'i1'), { status: 'paid', paidAt: NOW, paidByUid: 'chair' }));
+    await assertSucceeds(updateDoc(doc(as('chair'), 'editorInvoices', 'i3'), { status: 'paid', paidAt: NOW, paidByUid: 'chair' }));
+  });
+
+  it('會長不能進付款中、不能作廢、不能核准', async () => {
+    await seed('i1', released);
+    await seed('i2', { ...base, status: 'submitted' });
+    await assertFails(updateDoc(doc(as('chair'), 'editorInvoices', 'i1'), { status: 'payment_processing', processingAt: NOW, processingByUid: 'chair' }));
+    await assertFails(updateDoc(doc(as('chair'), 'editorInvoices', 'i1'), { status: 'void', voidedAt: NOW, voidReason: 'x' }));
+    await assertFails(updateDoc(doc(as('chair'), 'editorInvoices', 'i2'), { status: 'approved', approvedAt: NOW, approvedByUid: 'chair' }));
+  });
+
+  it('主管（含老闆）不能自己核發，也不能跳過核發直接付款；核發後才可以付款', async () => {
+    await seed('i1', approved);
+    await seed('i2', released);
+    await assertFails(updateDoc(doc(as('mgr'), 'editorInvoices', 'i1'), { status: 'released', releasedAt: NOW, releasedByUid: 'mgr' }));
+    await assertFails(updateDoc(doc(as('boss'), 'editorInvoices', 'i1'), { status: 'released', releasedAt: NOW, releasedByUid: 'boss' }));
+    await assertFails(updateDoc(doc(as('mgr'), 'editorInvoices', 'i1'), { status: 'payment_processing', processingAt: NOW, processingByUid: 'mgr' }));
+    await assertSucceeds(updateDoc(doc(as('mgr'), 'editorInvoices', 'i2'), { status: 'payment_processing', processingAt: NOW, processingByUid: 'mgr' }));
+  });
+
+  it('主管仍可作廢已核准的單（還沒核發）', async () => {
+    await seed('i1', approved);
+    await assertSucceeds(updateDoc(doc(as('mgr'), 'editorInvoices', 'i1'), { status: 'void', voidedAt: NOW, voidReason: '後台作廢' }));
+  });
+
+  it('只有老闆能把人設成會長；經理不能建、不能升、也不能改會長', async () => {
+    await assertFails(setDoc(doc(as('mgr'), 'users', 'new1'), { role: 'chairman' }));
+    await assertSucceeds(setDoc(doc(as('mgr'), 'users', 'new2'), { role: 'employee' }));
+    await assertFails(updateDoc(doc(as('mgr'), 'users', 'staff'), { role: 'chairman' }));
+    await assertFails(updateDoc(doc(as('mgr'), 'users', 'chair'), { role: 'employee' }));
+    await assertSucceeds(setDoc(doc(as('boss'), 'users', 'new3'), { role: 'chairman' }));
   });
 });
 

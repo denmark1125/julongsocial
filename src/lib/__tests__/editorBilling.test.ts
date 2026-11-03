@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findFee950Issues, getAssetFee, getBillingMonth, isBillable, isLegacyNeverUploaded, feeForTier } from '../editorBilling';
+import { findFee950Issues, getAssetFee, getBillingMonth, isBillable, isLegacyNeverUploaded, feeForTier, summarizeByEditor, defaultBillingMonth } from '../editorBilling';
 import { EditorInvoice } from '../../types';
 import { asset } from './fixtures';
 
@@ -99,5 +99,38 @@ describe('isLegacyNeverUploaded', () => {
   it('切帳日移到 10/6 後，9 月建檔、還在剪的片不會被當成舊帳', () => {
     expect(isLegacyNeverUploaded({ ...base, createdAt: '2026-09-20T10:00:00+08:00' })).toBe(false);
     expect(isLegacyNeverUploaded({ ...base, createdAt: '2026-08-10T10:00:00+08:00' })).toBe(true);
+  });
+});
+
+describe('會長核發（2026-11）：released 狀態有自己的一欄，合計不漏算', () => {
+  it('approved／released／payment_processing 分開計，合計等於全部', () => {
+    const inv = (status: string, totalAmount: number, itemCount = 1) =>
+      ({ editorId: 'E1', billingMonth: '2026-10', status, itemCount, totalAmount });
+    const [r] = summarizeByEditor('2026-10', [], [], () => '謝謝', [
+      inv('submitted', 750), inv('approved', 900), inv('released', 1650, 2),
+      inv('payment_processing', 900), inv('paid', 750), inv('void', 99999),
+    ]);
+    expect(r.approvedAmount).toBe(900);
+    expect(r.releasedAmount).toBe(1650);
+    expect(r.releasedCount).toBe(2);
+    expect(r.processingAmount).toBe(900);
+    expect(r.totalAmount).toBe(750 + 900 + 1650 + 900 + 750);
+    expect(r.totalCount).toBe(6);
+  });
+});
+
+describe('請款頁預設月份 defaultBillingMonth（2026-11）', () => {
+  const nov3 = new Date(2026, 10, 3);
+  it('上個月還有沒處理完 → 停在上個月', () => {
+    expect(defaultBillingMonth(m => m === '2026-10', nov3)).toBe('2026-10');
+  });
+  it('上個月都處理完 → 本月', () => {
+    expect(defaultBillingMonth(() => false, nov3)).toBe('2026-11');
+  });
+  it('跨年：1 月看去年 12 月', () => {
+    expect(defaultBillingMonth(m => m === '2026-12', new Date(2027, 0, 5))).toBe('2026-12');
+  });
+  it('上個月早於計費起點 → 本月（不問 hasOpenWork）', () => {
+    expect(defaultBillingMonth(() => true, new Date(2026, 7, 2))).toBe('2026-08');
   });
 });

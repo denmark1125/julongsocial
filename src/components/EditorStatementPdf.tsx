@@ -13,12 +13,13 @@ export interface StatementRow {
   note?: string;
 }
 
-export type StatementStatus = 'unsubmitted' | 'submitted' | 'approved' | 'payment_processing' | 'paid';
+export type StatementStatus = 'unsubmitted' | 'submitted' | 'approved' | 'released' | 'payment_processing' | 'paid';
 
 export const STATEMENT_STATUS_LABEL: Record<StatementStatus, string> = {
   unsubmitted: '未送單',
-  submitted: '待核准',
-  approved: '已核准',
+  submitted: '待主管審核',
+  approved: '待董事放行',
+  released: '已放行，待付款',
   payment_processing: '付款中',
   paid: '已付款',
 };

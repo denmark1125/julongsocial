@@ -68,6 +68,15 @@ service cloud.firestore {
       return request.resource.data.get('role', '') == 'engineer' && !isAdmin();
     }
 
+    // 會長（2026-11，老闆的老闆）：精簡畫面＋核發剪輯費。有放款權，所以只有 admin 能把人設成會長（見 grantsChairman）。
+    function isChairman() {
+      return isAuthenticated() && getUserData().role == 'chairman';
+    }
+
+    function grantsChairman() {
+      return request.resource.data.get('role', '') == 'chairman' && !isAdmin();
+    }
+
     function isManager() {
       return isAuthenticated() && (getUserData().role == 'manager' || isAdmin());
     }
@@ -408,12 +417,14 @@ service cloud.firestore {
              // 規則沒有迴圈，逐筆明細驗不了。金額造假的最後防線是這個上限
              // ＋ asset 端的 editorFee <= 100000 ＋ 老闆付款前肉眼複核。
              data.totalAmount is int && data.totalAmount >= 0 && data.totalAmount <= 1000000 &&
-             data.status in ['submitted', 'approved', 'payment_processing', 'paid', 'void'] &&
+             data.status in ['submitted', 'approved', 'released', 'payment_processing', 'paid', 'void'] &&
              data.submittedAt is string &&
              data.createdAt is string &&
              (!('note' in data) || data.note is string) &&
              (!('approvedAt' in data) || data.approvedAt is string) &&
              (!('approvedByUid' in data) || data.approvedByUid is string) &&
+             (!('releasedAt' in data) || data.releasedAt is string) &&
+             (!('releasedByUid' in data) || data.releasedByUid is string) &&
              (!('processingAt' in data) || data.processingAt is string) &&
              (!('processingByUid' in data) || data.processingByUid is string) &&
              (!('paidAt' in data) || data.paidAt is string) &&
@@ -423,8 +434,13 @@ service cloud.firestore {
              (data.status != 'approved' || (
                data.approvedAt is string && data.approvedByUid is string
              )) &&
+             (data.status != 'released' || (
+               data.approvedAt is string && data.approvedByUid is string &&
+               data.releasedAt is string && data.releasedByUid is string
+             )) &&
              (data.status != 'payment_processing' || (
                data.approvedAt is string && data.approvedByUid is string &&
+               data.releasedAt is string && data.releasedByUid is string &&
                data.processingAt is string && data.processingByUid is string
              )) &&
              (data.status != 'paid' || (
@@ -437,7 +453,9 @@ service cloud.firestore {
 
     function isValidEditorInvoiceTransition() {
       return (resource.data.status == 'submitted' && request.resource.data.status in ['approved', 'void'])
-        || (resource.data.status == 'approved' && request.resource.data.status in ['payment_processing', 'void'])
+        // 2026-11 主管核准後要等會長核發（released）才能開始付款；主管不能自己核發
+        || (resource.data.status == 'approved' && request.resource.data.status == 'void')
+        || (resource.data.status == 'released' && request.resource.data.status in ['payment_processing', 'void'])
         || (resource.data.status == 'payment_processing' && request.resource.data.status in ['paid', 'void']);
     }
 
@@ -458,11 +476,12 @@ service cloud.firestore {
       // 2026-09-30 收斂：原本「登入者可以建自己的文件」＋「文件不存在就能建」，
       // 任何 Google 帳號登入後直接呼叫 API 就能寫一筆 role:'engineer' 給自己＝拿到最高權限。
       // 帳號一律由管理者在員工管理頁建立（UserManagement 是用管理者身分寫這份文件）。
-      allow create: if isManager() && !grantsEngineer();
+      allow create: if isManager() && !grantsEngineer() && !grantsChairman();
       // 經理不能碰 engineer：不能把任何人（含自己）升成 engineer，也不能改 engineer 的文件。
       // 少了這條，經理改自己的 role 就等於升級成老闆。
-      allow update: if (isManager() && !touchesDeficitPermission() && !grantsEngineer()
-                        && resource.data.get('role', '') != 'engineer') || isAdmin();
+      allow update: if (isManager() && !touchesDeficitPermission() && !grantsEngineer() && !grantsChairman()
+                        && resource.data.get('role', '') != 'engineer'
+                        && resource.data.get('role', '') != 'chairman') || isAdmin();
       allow delete: if isAdmin();
     }
 
@@ -580,7 +599,7 @@ service cloud.firestore {
       // ⚠️ 剪輯師端的 list 查詢必須自帶 where('editorId','==',自己)，
       // 否則整個查詢會 permission-denied（不是回空陣列）。
       // employee 沒有理由看得到外包薪資，所以不開 isAuthenticated 全讀。
-      allow read: if isManager()
+      allow read: if isManager() || isChairman()
         || (isEditorRole() && resource.data.editorId == myEditorId());
 
       // 只能開給自己、只能以 submitted 起始（不能自己開成已付款）
@@ -604,6 +623,22 @@ service cloud.firestore {
         && request.resource.data.itemCount == resource.data.itemCount
         && request.resource.data.totalAmount == resource.data.totalAmount
         && request.resource.data.submittedByUid == resource.data.submittedByUid;
+
+      // 董事（role chairman）兩個動作，都只能寫自己的 uid，其他欄位一個都不能動：
+      //   款項放行 approved → released
+      //   付款完成 released／payment_processing（舊流程留下的）→ paid（2026-11：董事自己匯款、自己按）
+      allow update: if isChairman()
+        && isValidEditorInvoice(request.resource.data)
+        && (
+          (resource.data.status == 'approved'
+            && request.resource.data.status == 'released'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'releasedAt', 'releasedByUid'])
+            && request.resource.data.releasedByUid == request.auth.uid)
+          || (resource.data.status in ['released', 'payment_processing']
+            && request.resource.data.status == 'paid'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'paidAt', 'paidByUid'])
+            && request.resource.data.paidByUid == request.auth.uid)
+        );
 
       allow delete: if isAdmin();
     }

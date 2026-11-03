@@ -10,16 +10,18 @@ import { useLiveCollection } from '../lib/liveData';
 import {
   billingMonthOptions, findFee950Issues, getAssetFee, getBillableEditorId, getBillingMonth,
   groupByVendor, isBillable, isLegacyNeverUploaded, monthLabel, needsLegacyReview,
-  summarizeByEditor, WRONG_OVER60_FEE,
+  summarizeByEditor, WRONG_OVER60_FEE, defaultBillingMonth,
 } from '../lib/editorBilling';
 import {
   CheckCircle2, Ban,
-  FileSpreadsheet, FileDown,
+  FileSpreadsheet, FileDown, ArrowRight,
 } from 'lucide-react';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, formatDistanceToNow } from 'date-fns';
+import { zhTW } from 'date-fns/locale';
 import toast from 'react-hot-toast';
 import { toJpeg } from 'html-to-image';
 import { jsPDF } from 'jspdf';
+import BillingProgress from './BillingProgress';
 import EditorStatementPdf, {
   STATEMENT_STATUS_LABEL, groupRowsByVendor, type StatementMeta, type StatementRow, type StatementStatus,
 } from './EditorStatementPdf';
@@ -31,11 +33,16 @@ const STATUS_BADGE: Record<StatementStatus, string> = {
   unsubmitted: 'bg-[#A67C52]/10 text-[#8B5E34] border-[#A67C52]/30',
   submitted: 'bg-amber-50 text-amber-700 border-amber-200',
   approved: 'bg-blue-50 text-blue-700 border-blue-200',
+  released: 'bg-teal-50 text-teal-700 border-teal-200',
   payment_processing: 'bg-purple-50 text-purple-700 border-purple-200',
   paid: 'bg-green-50 text-green-700 border-green-200',
 };
 
-export default function EditorPayables() {
+/**
+ * chairman＝會長的電腦版（2026-11，使用者：「設定跟主管差不多的介面」）。同一個畫面、同一套數字，
+ * 但只能看、匯出、款項放行；送審／付款／作廢／調金額／舊帳盤點一律不出現（規則層也擋）。
+ */
+export default function EditorPayables({ chairman = false }: { chairman?: boolean } = {}) {
   // 共用即時資料層：整個 session 只訂閱一次，切分頁不再重讀
   const vendors = useLiveCollection<Vendor>('vendors');
   const assets = useLiveCollection<Asset>('assets');
@@ -53,12 +60,30 @@ export default function EditorPayables() {
     const unsubs = [
       onSnapshot(
         collection(db, 'editorInvoices'),
-        s => setInvoices(s.docs.map(d => ({ id: d.id, ...d.data() } as EditorInvoice))),
+        s => { setInvoices(s.docs.map(d => ({ id: d.id, ...d.data() } as EditorInvoice))); setInvoicesLoaded(true); },
         err => console.warn('讀取請款單失敗（規則可能尚未部署）', err)
       ),
     ];
     return () => unsubs.forEach(u => u());
   }, []);
+
+  // 打開時停在哪個月（2026-11）：月初請的是上個月的帳，停在本月每次都要手動切。
+  // 會長先停在「有單等他放行」的最早月份；其他情況上個月還有沒結清（未送單～付款中）就停上個月，否則本月。
+  // 只在資料第一次到齊時選一次，之後使用者切月份不會被拉回去。
+  const [invoicesLoaded, setInvoicesLoaded] = useState(false);
+  const [autoMonthDone, setAutoMonthDone] = useState(false);
+  useEffect(() => {
+    if (autoMonthDone || !invoicesLoaded || assets.length === 0) return;
+    const waitingMonths = chairman ? invoices.filter(i => i.status === 'approved').map(i => i.billingMonth).sort() : [];
+    if (waitingMonths.length > 0) {
+      setMonth(waitingMonths[0]);
+    } else {
+      const vids = assets.filter(a => a.type === 'video');
+      setMonth(defaultBillingMonth(m => summarizeByEditor(m, vids, vendors, () => '', invoices, editors)
+        .some(r => r.totalAmount - r.paidAmount > 0)));
+    }
+    setAutoMonthDone(true);
+  }, [chairman, autoMonthDone, invoicesLoaded, invoices, assets, vendors, editors]);
 
   const editorName = (editorId: string) =>
     editorId === UNASSIGNED
@@ -84,11 +109,12 @@ export default function EditorPayables() {
       unsubmitted: acc.unsubmitted + r.unsubmittedAmount,
       submitted: acc.submitted + r.submittedAmount,
       approved: acc.approved + r.approvedAmount,
+      released: acc.released + r.releasedAmount,
       processing: acc.processing + r.processingAmount,
       paid: acc.paid + r.paidAmount,
       all: acc.all + r.totalAmount,
     }),
-    { unsubmitted: 0, submitted: 0, approved: 0, processing: 0, paid: 0, all: 0 }
+    { unsubmitted: 0, submitted: 0, approved: 0, released: 0, processing: 0, paid: 0, all: 0 }
   );
 
   const monthInvoices = invoices.filter(i => i.billingMonth === month && i.status !== 'void');
@@ -145,6 +171,10 @@ export default function EditorPayables() {
     }
   };
 
+  // 付款完成的防呆（2026-11）：攤開剪輯師、月份、支數、金額，勾「我已實際匯款」才能送；送出不能撤回
+  const [payTarget, setPayTarget] = useState<EditorInvoice | null>(null);
+  const [payAck, setPayAck] = useState(false);
+
   const markPaid = async (inv: EditorInvoice) => {
     setBusyId(inv.id!);
     try {
@@ -153,7 +183,8 @@ export default function EditorPayables() {
         paidAt: new Date().toISOString(),
         paidByUid: auth.currentUser?.uid || '',
       });
-      toast.success(`已標記 ${inv.editorName} ${monthLabel(inv.billingMonth)} 請款完成`);
+      toast.success(`已標記 ${inv.editorName} ${monthLabel(inv.billingMonth)} 付款完成，剪輯師會收到通知`);
+      setPayTarget(null);
     } catch (e) {
       console.error('Mark paid failed:', e);
       toast.error('操作失敗（可能是權限規則尚未部署）');
@@ -170,10 +201,31 @@ export default function EditorPayables() {
       await updateDoc(doc(db, 'editorInvoices', inv.id!), status === 'approved'
         ? { status, approvedAt: now, approvedByUid: uid }
         : { status, processingAt: now, processingByUid: uid });
-      toast.success(status === 'approved' ? '請款單已核准' : '已進入付款處理');
+      toast.success(status === 'approved' ? '請款單已送審，等董事放行' : '已進入付款處理');
     } catch (e) {
       console.error('Advance invoice failed:', e);
       toast.error('操作失敗（可能是權限規則尚未部署）');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  /** 會長款項放行：approved → released。可以一張，也可以整月一次 */
+  const releaseInvoices = async (list: EditorInvoice[]) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || list.length === 0) return;
+    const total = list.reduce((n, i) => n + i.totalAmount, 0);
+    if (!window.confirm(`確定放行 ${list.length} 張請款單，合計 ${money(total)}？放行後主管就會安排付款。`)) return;
+    setBusyId(list.length === 1 ? list[0].id! : 'release-all');
+    try {
+      const now = new Date().toISOString();
+      const batch = writeBatch(db);
+      for (const inv of list) batch.update(doc(db, 'editorInvoices', inv.id!), { status: 'released', releasedAt: now, releasedByUid: uid });
+      await batch.commit();
+      toast.success(`已放行 ${money(total)}`);
+    } catch (e) {
+      console.error('release failed:', e);
+      toast.error('放行失敗，請稍後再試或聯絡工程師');
     } finally {
       setBusyId(null);
     }
@@ -325,8 +377,9 @@ export default function EditorPayables() {
           金額: it.amount,
           狀態: inv.status === 'paid' ? '已付款'
             : inv.status === 'payment_processing' ? '付款處理中'
-            : inv.status === 'approved' ? '公司已核准'
-            : '已送出，待公司核准',
+            : inv.status === 'released' ? '已放行，待付款'
+            : inv.status === 'approved' ? '主管已送審，待董事放行'
+            : '剪輯師已送出，待主管審核',
           使用狀態: live ? usageLabel(live) : '素材已刪除',
           請款單號: inv.id?.slice(-8).toUpperCase() || '',
         });
@@ -336,8 +389,9 @@ export default function EditorPayables() {
     const summaryRows = summaries.map(r => ({
       剪輯師: r.editorName,
       未送單支數: r.unsubmittedCount, 未送單金額: r.unsubmittedAmount,
-      待核准支數: r.submittedCount, 待核准金額: r.submittedAmount,
-      已核准支數: r.approvedCount, 已核准金額: r.approvedAmount,
+      待主管審核支數: r.submittedCount, 待主管審核金額: r.submittedAmount,
+      待董事放行支數: r.approvedCount, 待董事放行金額: r.approvedAmount,
+      已放行待付款支數: r.releasedCount, 已放行待付款金額: r.releasedAmount,
       付款中支數: r.processingCount, 付款中金額: r.processingAmount,
       已請款支數: r.paidCount, 已請款金額: r.paidAmount,
       合計支數: r.totalCount, 合計金額: r.totalAmount,
@@ -497,18 +551,147 @@ export default function EditorPayables() {
     return () => { cancelled = true; };
   }, [pdfJob]);
 
-  const countOf = (k: 'unsubmittedCount' | 'submittedCount' | 'approvedCount' | 'processingCount' | 'paidCount') =>
+  const countOf = (k: 'unsubmittedCount' | 'submittedCount' | 'approvedCount' | 'releasedCount' | 'processingCount' | 'paidCount') =>
     summaries.reduce((n, r) => n + r[k], 0);
   const summaryCells = [
     { label: '未送單', count: countOf('unsubmittedCount'), amount: totals.unsubmitted },
-    { label: '待核准', count: countOf('submittedCount'), amount: totals.submitted },
-    { label: '已核准', count: countOf('approvedCount'), amount: totals.approved },
+    { label: '待主管審核', count: countOf('submittedCount'), amount: totals.submitted },
+    { label: '待董事放行', count: countOf('approvedCount'), amount: totals.approved },
+    { label: '已放行待付款', count: countOf('releasedCount'), amount: totals.released },
     { label: '付款中', count: countOf('processingCount'), amount: totals.processing },
     { label: '已付款', count: countOf('paidCount'), amount: totals.paid },
   ];
 
+  // ── 「輪到誰」的視覺（2026-11 使用者：剪輯師送出要跳一個待審核的提醒，不要死板板的表格）──
+  // 主管要處理的＝剪輯師剛送出的單（submitted）；會長要處理的＝主管已送審的單（approved）。
+  // 董事有兩件事：放行（approved）、匯款後按付款完成（released／舊流程留下的 payment_processing）
+  const myTurnStatuses: EditorInvoice['status'][] = chairman ? ['approved', 'released', 'payment_processing'] : ['submitted'];
+  const isMyTurn = (inv?: EditorInvoice) => !!inv && myTurnStatuses.includes(inv.status);
+  const needsPay = (inv: EditorInvoice) => inv.status === 'released' || inv.status === 'payment_processing';
+  const myTurn = invoices
+    .filter(isMyTurn)
+    .sort((a, b) => (a.approvedAt || a.submittedAt || '').localeCompare(b.approvedAt || b.submittedAt || ''));
+  const myTurnCount = (m: string) => myTurn.filter(i => i.billingMonth === m).length;
+  /** 會長看的：剪輯師送了、主管還沒送審（只能提醒，不能代按） */
+  const stuckAtManager = chairman ? invoices.filter(i => i.status === 'submitted') : [];
+  const ago = (iso?: string) => (iso ? formatDistanceToNow(parseISO(iso), { addSuffix: true, locale: zhTW }) : '');
+  const [focusId, setFocusId] = useState<string | null>(null);
+  const goToInvoice = (inv: EditorInvoice) => {
+    setMonth(inv.billingMonth);
+    setFocusId(inv.id!);
+    // 換月份會重畫整頁，等畫完再捲過去
+    setTimeout(() => document.getElementById(`inv-${inv.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
+  };
+
   return (
     <div className="space-y-6">
+      {payTarget && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => busyId !== payTarget.id && setPayTarget(null)}>
+          <div className="bg-white w-full max-w-md rounded-3xl p-6 space-y-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div>
+              <p className="text-[19px] font-bold">確認付款完成</p>
+              <p className="text-[14px] text-gray-500 mt-0.5">送出後剪輯師會收到「已付款」通知，這個動作不能撤回。</p>
+            </div>
+            <div className="rounded-2xl border border-black/5 divide-y divide-black/5 overflow-hidden">
+              <div className="px-4 py-3 flex justify-between text-[15px]"><span className="text-gray-500">剪輯師</span><b>{payTarget.editorName}</b></div>
+              <div className="px-4 py-3 flex justify-between text-[15px]"><span className="text-gray-500">月份</span><b>{monthLabel(payTarget.billingMonth)}・{payTarget.itemCount} 支</b></div>
+              <div className="px-4 py-3.5 flex justify-between items-center bg-[#F5F5F0]"><span className="font-bold">匯款金額</span><span className="text-[24px] font-bold tabular-nums">{money(payTarget.totalAmount)}</span></div>
+            </div>
+            <label className="flex items-start gap-2.5 cursor-pointer select-none">
+              <input type="checkbox" checked={payAck} onChange={e => setPayAck(e.target.checked)} className="mt-1 w-4 h-4 accent-[#5A5A40]" />
+              <span className="text-[14px] text-[#1a1a1a]">我已經實際匯款 <b>{money(payTarget.totalAmount)}</b> 給 <b>{payTarget.editorName}</b>，金額核對無誤</span>
+            </label>
+            <div className="flex gap-2">
+              <button onClick={() => setPayTarget(null)} disabled={busyId === payTarget.id} className="flex-1 py-3 rounded-xl border border-black/10 font-bold text-gray-600">取消</button>
+              <button onClick={() => markPaid(payTarget)} disabled={!payAck || busyId === payTarget.id} className="flex-[2] py-3 rounded-xl bg-green-700 text-white font-bold disabled:opacity-40 flex items-center justify-center gap-1.5">
+                <CheckCircle2 size={17} /> {busyId === payTarget.id ? '送出中…' : '付款完成'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {(myTurn.length > 0 || stuckAtManager.length > 0) ? (
+        <div className="space-y-3">
+          {myTurn.length > 0 && (
+            <div className="bg-white rounded-2xl border-2 border-orange-200 shadow-sm overflow-hidden">
+              <div className="px-5 py-4 bg-gradient-to-r from-orange-50 to-white flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <span className="relative flex h-3 w-3 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-orange-500" />
+                  </span>
+                  <div>
+                    <p className="text-base font-bold text-orange-900 whitespace-nowrap">
+                      {chairman
+                        ? [myTurn.filter(i => i.status === 'approved').length && `主管已送審 ${myTurn.filter(i => i.status === 'approved').length} 張等您放行`, myTurn.filter(needsPay).length && `已放行 ${myTurn.filter(needsPay).length} 張待付款`].filter(Boolean).join('・')
+                        : `有 ${myTurn.length} 張請款單等你審核`}
+                    </p>
+                    <p className="text-[13px] text-orange-700/80 mt-0.5">
+                      {chairman ? '放行後請匯款給剪輯師，匯完記得按「付款完成」，剪輯師那邊才會收到通知' : '確認片子與金額沒問題後，按「請款單送審」送給董事放行'}
+                    </p>
+                  </div>
+                </div>
+                {chairman && myTurn.filter(i => i.status === 'approved').length > 1 && (
+                  <button onClick={() => releaseInvoices(myTurn.filter(i => i.status === 'approved'))} disabled={busyId === 'release-all'} className="flex items-center gap-1.5 bg-[#5A5A40] text-white px-4 py-2 rounded-xl text-sm font-bold disabled:opacity-40 whitespace-nowrap">
+                    <CheckCircle2 size={16} /> 全部放行 {money(myTurn.filter(i => i.status === 'approved').reduce((n, i) => n + i.totalAmount, 0))}
+                  </button>
+                )}
+              </div>
+              <div className="divide-y divide-black/5">
+                {myTurn.map(inv => (
+                  <div key={inv.id} className="px-5 py-3.5 flex items-center gap-4">
+                    <span className="w-10 h-10 rounded-full bg-[#5A5A40] text-white flex items-center justify-center font-bold shrink-0">{inv.editorName.slice(0, 1)}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[15px] text-[#1a1a1a] truncate">
+                        {chairman && needsPay(inv)
+                          ? <>已放行 <b>{inv.editorName}</b> 的 <b>{monthLabel(inv.billingMonth)}</b>請款，<span className="text-orange-700 font-bold">待匯款</span></>
+                          : chairman
+                          ? <>主管已審核 <b>{inv.editorName}</b> 的 <b>{monthLabel(inv.billingMonth)}</b>請款</>
+                          : <><b>{inv.editorName}</b> 送出了 <b>{monthLabel(inv.billingMonth)}</b>請款</>}
+                      </p>
+                      <p className="text-[13px] text-gray-500 whitespace-nowrap">
+                        {inv.itemCount} 支・<span className="font-bold text-[#1a1a1a] tabular-nums">{money(inv.totalAmount)}</span>・{ago(chairman ? (needsPay(inv) ? (inv.releasedAt || inv.processingAt) : inv.approvedAt) : inv.submittedAt)}
+                      </p>
+                    </div>
+                    <button onClick={() => goToInvoice(inv)} className="flex items-center gap-1 px-3 py-2 rounded-xl border border-black/10 text-[13px] font-bold text-[#5A5A40] hover:bg-black/[0.03] whitespace-nowrap">
+                      {chairman ? '看明細' : '去審核'} <ArrowRight size={14} />
+                    </button>
+                    {chairman && inv.status === 'approved' && (
+                      <button onClick={() => releaseInvoices([inv])} disabled={busyId === inv.id || busyId === 'release-all'} className="flex items-center gap-1 bg-[#5A5A40] text-white px-3 py-2 rounded-xl text-[13px] font-bold disabled:opacity-40 whitespace-nowrap">
+                        <CheckCircle2 size={14} /> 放行
+                      </button>
+                    )}
+                    {chairman && needsPay(inv) && (
+                      <button onClick={() => { setPayAck(false); setPayTarget(inv); }} className="flex items-center gap-1 bg-green-700 text-white px-3 py-2 rounded-xl text-[13px] font-bold whitespace-nowrap">
+                        <CheckCircle2 size={14} /> 付款完成
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {stuckAtManager.length > 0 && (
+            <div className="bg-amber-50 rounded-2xl border border-amber-200 px-5 py-4 flex items-center gap-3">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+              <div>
+                <p className="text-[15px] font-bold text-amber-900">
+                  {stuckAtManager.map(i => i.editorName).filter((n, idx, a) => a.indexOf(n) === idx).join('、')} 已送出 {stuckAtManager.length} 張請款（{money(stuckAtManager.reduce((n, i) => n + i.totalAmount, 0))}），主管還沒送審
+                </p>
+                <p className="text-[13px] text-amber-700 mt-0.5">請提醒主管確認後按「請款單送審」，送審後會出現在上面讓您放行。</p>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-black/5 px-5 py-4 flex items-center gap-3">
+          <span className="w-8 h-8 rounded-full bg-green-50 text-green-600 flex items-center justify-center shrink-0"><CheckCircle2 size={18} /></span>
+          <p className="text-[14px] text-gray-600">{chairman ? '目前沒有等您放行的請款，主管送審後會出現在這裡。' : '請款單都處理完了，剪輯師送出新的請款會出現在這裡。'}</p>
+        </div>
+      )}
+
+      <BillingProgress month={month} summaries={summaries} />
+
       <div className="bg-white rounded-2xl border border-black/5 shadow-sm">
         <div className="px-5 py-4 border-b border-black/5 flex items-center justify-between gap-3 flex-wrap">
           <div>
@@ -516,15 +699,24 @@ export default function EditorPayables() {
             <p className="text-[13px] text-gray-400 mt-0.5">以成片上傳雲端日期認列月份</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <select
-              value={month}
-              onChange={e => setMonth(e.target.value)}
-              className="px-3 py-2 rounded-xl border border-black/10 bg-white text-[13px] font-bold text-[#1a1a1a]"
-            >
-              {monthOptions.map(m => (
-                <option key={m} value={m}>{m.slice(0, 4)} 年 {monthLabel(m)}</option>
-              ))}
-            </select>
+            {/* 月份膠囊：有輪到我處理的月份掛橘色數字，一眼看出要去哪個月 */}
+            <div className="flex items-center gap-1 bg-[#F5F5F0] p-1 rounded-xl">
+              {[...monthOptions].reverse().map(m => {
+                const on = m === month;
+                const n = myTurnCount(m);
+                return (
+                  <button
+                    key={m}
+                    onClick={() => setMonth(m)}
+                    title={`${m.slice(0, 4)} 年 ${monthLabel(m)}`}
+                    className={`relative px-3 py-1.5 rounded-lg text-[13px] font-bold whitespace-nowrap transition-all ${on ? 'bg-white text-[#1a1a1a] shadow-sm' : 'text-gray-500 hover:text-[#1a1a1a]'}`}
+                  >
+                    {monthLabel(m)}
+                    {n > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-500 text-white text-[11px] flex items-center justify-center">{n}</span>}
+                  </button>
+                );
+              })}
+            </div>
             <button
               onClick={exportExcel}
               disabled={summaries.length === 0}
@@ -534,7 +726,7 @@ export default function EditorPayables() {
             </button>
           </div>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 border-black/5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 border-black/5">
           <div className="px-5 py-4 col-span-2 sm:col-span-3 lg:col-span-1 bg-[#F5F5F0]/60">
             <p className="text-[13px] text-gray-500 whitespace-nowrap">{monthLabel(month)}應付合計</p>
             <p className="text-xl font-bold tabular-nums mt-1 whitespace-nowrap">{money(totals.all)}</p>
@@ -568,7 +760,9 @@ export default function EditorPayables() {
         )}
       </div>
 
-      {fee950Total > 0 && (
+
+
+      {!chairman && fee950Total > 0 && (
         <div className="bg-rose-50 rounded-2xl border border-rose-200 overflow-hidden">
           <div className="px-5 py-4 border-b border-rose-200">
             <h3 className="text-sm font-bold text-rose-800">剪輯費更正 · 60 秒以上應為 $900</h3>
@@ -615,7 +809,7 @@ export default function EditorPayables() {
         </div>
       )}
 
-      {legacyUploaded.length > 0 && (
+      {!chairman && legacyUploaded.length > 0 && (
         <div className="bg-amber-50 rounded-2xl border border-amber-200 overflow-hidden">
           <div className="px-5 py-4 border-b border-amber-200">
             <h3 className="text-sm font-bold text-amber-800">舊帳待盤點 · 已上傳 {legacyUploaded.length} 支</h3>
@@ -638,7 +832,7 @@ export default function EditorPayables() {
 
       {/* 從沒上傳過雲端的舊帳。這種片沒有 cloudUploadedAt，算不出請款月份，所以不提供
           「轉系統請款」——真的還沒付的話，請剪輯師照正常流程按上傳雲端，那就會進本月。 */}
-      {legacyNeverUploaded.length > 0 && (
+      {!chairman && legacyNeverUploaded.length > 0 && (
         <div className="bg-sky-50 rounded-2xl border border-sky-200 overflow-hidden">
           <div className="px-5 py-4 border-b border-sky-200">
             <h3 className="text-sm font-bold text-sky-800">舊帳待盤點 · 從沒上傳雲端 {legacyNeverUploaded.length} 支</h3>
@@ -725,9 +919,15 @@ export default function EditorPayables() {
               const subtotal = g.rows.reduce((n, x) => n + x.amount, 0);
               const inv = g.invoice;
               return (
-                <div key={g.key} className="border-b border-black/5 last:border-b-0">
-                  <div className="px-5 py-2.5 bg-[#F5F5F0]/70 flex items-center justify-between gap-2 flex-wrap">
+                <div key={g.key} id={inv ? `inv-${inv.id}` : undefined} className={`border-b border-black/5 last:border-b-0 transition-shadow ${isMyTurn(inv) ? `ring-2 ring-inset ${focusId === inv.id ? 'ring-orange-400' : 'ring-orange-200'}` : ''}`}>
+                  <div className={`px-5 py-2.5 flex items-center justify-between gap-2 flex-wrap ${isMyTurn(inv) ? 'bg-orange-50' : 'bg-[#F5F5F0]/70'}`}>
                     <div className="flex items-center gap-2 text-[13px] flex-wrap">
+                      {isMyTurn(inv) && (
+                        <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-orange-500 text-white text-[12px] font-bold whitespace-nowrap">
+                          <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75" /><span className="relative inline-flex rounded-full h-2 w-2 bg-white" /></span>
+                          {chairman ? (needsPay(inv!) ? '待您付款' : '待您放行') : '待你審核'}
+                        </span>
+                      )}
                       <span className="font-bold text-gray-700 whitespace-nowrap">
                         {inv ? `請款單 ${inv.id?.slice(-8).toUpperCase()}` : '尚未送單'}
                       </span>
@@ -737,16 +937,22 @@ export default function EditorPayables() {
                       <span className={`px-2 py-0.5 rounded-full text-[13px] font-bold border whitespace-nowrap ${STATUS_BADGE[g.status]}`}>
                         {STATEMENT_STATUS_LABEL[g.status]}
                       </span>
-                      {/* 篩選時只看到單的一部分，但核准／付款／作廢是整張單一起動，要讓人知道整張有多少 */}
+                      {/* 篩選時只看到單的一部分，但送審／付款／作廢是整張單一起動，要讓人知道整張有多少 */}
                       {inv && g.rows.length < inv.itemCount && (
                         <span className="text-gray-500 whitespace-nowrap">整張單 {inv.itemCount} 支 · {money(inv.totalAmount)}</span>
                       )}
                     </div>
-                    {inv && inv.status !== 'paid' && (
+                    {chairman && inv?.status === 'approved' && (
+                      <button onClick={() => releaseInvoices([inv])} disabled={busyId === inv.id || busyId === 'release-all'} className="flex items-center gap-1 bg-[#5A5A40] text-white px-3 py-1.5 rounded-lg text-[13px] font-bold disabled:opacity-40 whitespace-nowrap"><CheckCircle2 size={12} /> 款項放行</button>
+                    )}
+                    {chairman && inv && needsPay(inv) && (
+                      <button onClick={() => { setPayAck(false); setPayTarget(inv); }} className="flex items-center gap-1 bg-green-700 text-white px-3 py-1.5 rounded-lg text-[13px] font-bold whitespace-nowrap"><CheckCircle2 size={12} /> 付款完成</button>
+                    )}
+                    {!chairman && inv && inv.status !== 'paid' && (
                       <div className="flex items-center gap-1.5">
-                        {inv.status === 'submitted' && <button onClick={() => advanceInvoice(inv, 'approved')} disabled={busyId === inv.id} className="bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[13px] font-bold disabled:opacity-40 whitespace-nowrap">核准</button>}
-                        {inv.status === 'approved' && <button onClick={() => advanceInvoice(inv, 'payment_processing')} disabled={busyId === inv.id} className="bg-purple-700 text-white px-3 py-1.5 rounded-lg text-[13px] font-bold disabled:opacity-40 whitespace-nowrap">開始付款</button>}
-                        {inv.status === 'payment_processing' && <button onClick={() => markPaid(inv)} disabled={busyId === inv.id} className="flex items-center gap-1 bg-[#5A5A40] text-white px-3 py-1.5 rounded-lg text-[13px] font-bold disabled:opacity-40 whitespace-nowrap"><CheckCircle2 size={12} /> 確認已付款</button>}
+                        {inv.status === 'submitted' && <button onClick={() => advanceInvoice(inv, 'approved')} disabled={busyId === inv.id} className="bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[13px] font-bold disabled:opacity-40 whitespace-nowrap" title="確認審核過片子與金額，送給董事放行">請款單送審</button>}
+                        {inv.status === 'approved' && <span className="px-3 py-1.5 rounded-lg text-[13px] font-bold bg-gray-100 text-gray-500 whitespace-nowrap" title="主管送審後要等董事放行，才能開始付款">等董事放行</span>}
+                        {(inv.status === 'released' || inv.status === 'payment_processing') && <span className="px-3 py-1.5 rounded-lg text-[13px] font-bold bg-gray-100 text-gray-500 whitespace-nowrap" title="董事放行後由董事匯款並按付款完成">等董事付款</span>}
                         <button onClick={() => voidInvoice(inv)} disabled={busyId === inv.id} className="flex items-center gap-1 bg-white border border-red-200 text-red-600 px-3 py-1.5 rounded-lg text-[13px] font-bold hover:bg-red-50 disabled:opacity-40 whitespace-nowrap">
                           <Ban size={12} /> 作廢
                         </button>
@@ -795,7 +1001,7 @@ export default function EditorPayables() {
                                 <td className="px-2 py-2 whitespace-nowrap text-gray-600">{row.uploadedAt ? format(parseISO(row.uploadedAt), 'MM/dd') : '—'}</td>
                                 <td className="px-2 py-2 whitespace-nowrap text-gray-600">{row.tierLabel || '—'}</td>
                                 <td className="px-5 py-2 text-right whitespace-nowrap">
-                                  {row.asset ? (
+                                  {row.asset && !chairman ? (
                                     <button
                                       type="button"
                                       onClick={() => { setFeeCustom(''); setFeeAsset(row.asset!); }}

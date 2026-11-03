@@ -197,6 +197,18 @@ export function billingMonthOptions(assets: Asset[], now: Date = new Date()): st
   return Array.from(months).sort().reverse();
 }
 
+/**
+ * 請款頁一打開要停在哪個月（2026-11 使用者：11 月要請的是 10 月的帳，每次都要自己切回去）。
+ * 上個月還有沒處理完的（hasOpenWork 由各頁依身分判斷）→ 上個月；否則本月。
+ * ⚠️ 用 Date 算上個月，不要 slice(0,7)。
+ */
+export function defaultBillingMonth(hasOpenWork: (month: string) => boolean, now: Date = new Date()): string {
+  const thisMonth = format(now, 'yyyy-MM');
+  const prev = format(new Date(now.getFullYear(), now.getMonth() - 1, 1), 'yyyy-MM');
+  if (prev < EDITOR_BILLING_START_MONTH) return thisMonth;
+  return hasOpenWork(prev) ? prev : thisMonth;
+}
+
 /** 2026-08 → 8月 */
 export function monthLabel(month: string): string {
   const [, mm] = month.split('-');
@@ -288,6 +300,9 @@ export interface EditorMonthSummary {
   submittedAmount: number;
   approvedCount: number;
   approvedAmount: number;
+  /** 會長已核發、還沒開始付款 */
+  releasedCount: number;
+  releasedAmount: number;
   processingCount: number;
   processingAmount: number;
   /** 已標記請款完成 */
@@ -324,6 +339,7 @@ export function summarizeByEditor(
         unsubmittedCount: 0, unsubmittedAmount: 0,
         submittedCount: 0, submittedAmount: 0,
         approvedCount: 0, approvedAmount: 0,
+        releasedCount: 0, releasedAmount: 0,
         processingCount: 0, processingAmount: 0,
         paidCount: 0, paidAmount: 0,
         totalCount: 0, totalAmount: 0,
@@ -351,6 +367,9 @@ export function summarizeByEditor(
     } else if (inv.status === 'approved') {
       r.approvedCount += inv.itemCount;
       r.approvedAmount += inv.totalAmount;
+    } else if (inv.status === 'released') {
+      r.releasedCount += inv.itemCount;
+      r.releasedAmount += inv.totalAmount;
     } else if (inv.status === 'payment_processing') {
       r.processingCount += inv.itemCount;
       r.processingAmount += inv.totalAmount;
@@ -361,8 +380,8 @@ export function summarizeByEditor(
   }
 
   for (const r of rows.values()) {
-    r.totalCount = r.unsubmittedCount + r.submittedCount + r.approvedCount + r.processingCount + r.paidCount;
-    r.totalAmount = r.unsubmittedAmount + r.submittedAmount + r.approvedAmount + r.processingAmount + r.paidAmount;
+    r.totalCount = r.unsubmittedCount + r.submittedCount + r.approvedCount + r.releasedCount + r.processingCount + r.paidCount;
+    r.totalAmount = r.unsubmittedAmount + r.submittedAmount + r.approvedAmount + r.releasedAmount + r.processingAmount + r.paidAmount;
   }
 
   return Array.from(rows.values())
@@ -404,7 +423,7 @@ export function findFee950Issues(invoices: EditorInvoice[], assets: Asset[]): Fe
     const wrongAssetIds = (invoice.items || []).filter(isWrong).map(it => it.assetId);
     if (wrongAssetIds.length === 0) continue;
     const row = { invoice, wrongAssetIds };
-    if (invoice.status === 'submitted' || invoice.status === 'approved') result.unpaid.push(row);
+    if (invoice.status === 'submitted' || invoice.status === 'approved' || invoice.status === 'released') result.unpaid.push(row);
     else if (invoice.status === 'payment_processing') result.processing.push(row);
     else if (invoice.status === 'paid') result.paid.push(row);
   }

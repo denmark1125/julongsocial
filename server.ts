@@ -80,7 +80,7 @@ app.use(express.json({
 }));
 app.use(cookieParser());
 
-type AuthedRole = 'engineer' | 'manager' | 'employee' | 'editor';
+type AuthedRole = 'engineer' | 'manager' | 'employee' | 'editor' | 'chairman';
 interface AuthedUser {
   uid: string;
   email?: string;
@@ -1725,7 +1725,14 @@ app.post("/v/:token/approve", async (req, res) => {
       const from = deriveFlowStage(a);
       const now = new Date().toISOString();
       if (from === 'client_review') {
-        const to = a.cloudUploadedAt ? 'ready' : 'to_upload';
+        // 內部剪輯不用上傳雲端（不請款、沒人會按），業主通過就直接可排程。判定同 src/lib/editorRoster.ts isInternalWork
+        let internal = !!a.internalEdit;
+        if (!internal) {
+          let editorId = String(a.billableEditorId || a.editorId || '');
+          if (!editorId && a.vendorId) editorId = String((await tx.get(adminDb.collection("vendors").doc(String(a.vendorId)))).data()?.editorId || '');
+          if (editorId) internal = (await tx.get(adminDb.collection("editors").doc(editorId))).data()?.kind === 'internal';
+        }
+        const to = a.cloudUploadedAt || internal ? 'ready' : 'to_upload';
         tx.update(ref, {
           flowStage: to, flowSince: now, stage: 'finished', approved: to === 'ready',
           flowLog: [...(a.flowLog || []), { from, to, at: now, byName: '業主（預覽連結）', note: '業主在預覽頁按審核通過' }],
