@@ -16,6 +16,7 @@ import {
   Receipt, Send, CheckCircle2, FileText, Ban, Wallet, CalendarDays, ShieldCheck,
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
+import { InvoiceProgress } from './BillingProgress';
 import toast from 'react-hot-toast';
 
 const money = (n: number) => `$${n.toLocaleString()}`;
@@ -479,6 +480,9 @@ export default function EditorInvoicePage({ userProfile }: { userProfile: UserPr
                     {inv.submittedAt ? `${format(parseISO(inv.submittedAt), 'MM/dd HH:mm')} 送出` : ''}
                   </span>
                 </div>
+                {inv.status !== 'void' && (
+                  <div className="rounded-2xl bg-[#F5F5F0]/60 px-3 sm:px-5 py-4"><InvoiceProgress inv={inv} /></div>
+                )}
                 <div className="text-[13px] text-gray-500 leading-relaxed">
                   {inv.items.map(it => `${it.vendorName}｜${it.title}（${money(it.amount)}）`).join('　')}
                 </div>

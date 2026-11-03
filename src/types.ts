@@ -118,6 +118,9 @@ export interface EditorInvoice {
   note?: string;
   approvedAt?: string;
   approvedByUid?: string;
+  /** 董事款項放行（2026-11） */
+  releasedAt?: string;
+  releasedByUid?: string;
   processingAt?: string;
   processingByUid?: string;
   paidAt?: string;
