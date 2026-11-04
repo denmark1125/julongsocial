@@ -224,6 +224,13 @@ describe('登入紀錄 loginLogs（2026-11-04）', () => {
     await assertSucceeds(setDoc(doc(as('staff'), 'loginLogs', 'l3'), log('staff', { kind: 'login' })));
   });
 
+  it('使用時段 active：同一人同一小時只記得進一筆（同 id 第二次寫被擋）', async () => {
+    await assertSucceeds(setDoc(doc(as('staff'), 'loginLogs', 'staff_2026110410'), log('staff', { kind: 'active' })));
+    await assertFails(setDoc(doc(as('staff'), 'loginLogs', 'staff_2026110410'), log('staff', { kind: 'active' })));
+    // 對照組：下一個小時是新文件，可以記
+    await assertSucceeds(setDoc(doc(as('staff'), 'loginLogs', 'staff_2026110411'), log('staff', { kind: 'active' })));
+  });
+
   it('只有工程師讀得到；主管、本人都讀不到', async () => {
     await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'loginLogs', 'l1'), log('staff')));
     await assertSucceeds(getDoc(doc(as('boss'), 'loginLogs', 'l1')));

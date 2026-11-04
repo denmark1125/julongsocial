@@ -25,7 +25,7 @@ import EditorSchedule from './components/EditorSchedule';
 import EditorInvoicePage from './components/EditorInvoicePage';
 import ChairmanView, { ChairmanSection } from './components/ChairmanView';
 import LoginActivity from './components/LoginActivity';
-import { markExplicitLogin, recordLogin } from './lib/loginLog';
+import { markExplicitLogin, recordLogin, startActivityHeartbeat } from './lib/loginLog';
 import Logo from './components/Logo';
 import { Toaster } from 'react-hot-toast';
 import { LogIn, Mail, Lock, User as UserIcon } from 'lucide-react';
@@ -104,6 +104,12 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // 使用時段：登入中、分頁開著且有在動，每人每小時記一筆（給工程師找冷門時段更新版本）
+  useEffect(() => {
+    if (!user || !userProfile) return;
+    return startActivityHeartbeat(user.uid, userProfile);
+  }, [user?.uid, userProfile?.role]);
 
   // 剪輯師只有這兩個頁面：不管 activeTab 當下是什麼（含 dashboard 預設值或 ?tab= query param）
   // 只要不在白名單內一律導回 editorQueue，讓側邊欄高亮/header標題跟 renderContent 的強制導向保持一致。
