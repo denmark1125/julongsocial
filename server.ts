@@ -2068,6 +2068,27 @@ app.get("/api/health", (req, res) => {
 });
 
 // Password Reset Endpoint (Admin Only)
+/** 工程師看登入紀錄用：Firebase Auth 自己記的最後登入／最後使用時間（登入紀錄功能上線前的也有） */
+app.get("/api/admin/auth-activity", async (req, res) => {
+  try {
+    const me = await requireUser(req);
+    if (me.role !== "engineer") return res.status(403).json({ error: "只有工程師可以看" });
+    const out: any[] = [];
+    let token: string | undefined;
+    do {
+      const page = await adminAuth.listUsers(1000, token);
+      for (const u of page.users) out.push({ uid: u.uid, disabled: u.disabled, creationTime: toIso(u.metadata.creationTime), lastSignInTime: toIso(u.metadata.lastSignInTime), lastRefreshTime: toIso(u.metadata.lastRefreshTime) });
+      token = page.pageToken;
+    } while (token);
+    return res.json({ users: out });
+  } catch (e: any) {
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("auth-activity failed:", e?.message);
+    return res.status(500).json({ error: e?.message || "讀取失敗" });
+  }
+});
+function toIso(s?: string | null) { return s ? new Date(s).toISOString() : undefined; }
+
 app.post("/api/admin/reset-password", async (req, res) => {
   const { targetUid, newPassword } = req.body;
 

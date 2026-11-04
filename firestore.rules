@@ -485,6 +485,17 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // 登入紀錄（2026-11-04）：每個人只能記自己的、只能新增；只有工程師讀得到。改不了也刪不了＝紀錄可信
+    match /loginLogs/{id} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'displayName', 'role', 'kind', 'device', 'at'])
+        && request.resource.data.kind in ['login', 'open']
+        && request.resource.data.at is string && request.resource.data.at.size() < 40;
+      allow update, delete: if false;
+    }
+
     match /version_logs/{logId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();

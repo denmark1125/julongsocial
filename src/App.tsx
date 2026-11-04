@@ -24,6 +24,8 @@ import EditorAssetQueue from './components/EditorAssetQueue';
 import EditorSchedule from './components/EditorSchedule';
 import EditorInvoicePage from './components/EditorInvoicePage';
 import ChairmanView, { ChairmanSection } from './components/ChairmanView';
+import LoginActivity from './components/LoginActivity';
+import { markExplicitLogin, recordLogin } from './lib/loginLog';
 import Logo from './components/Logo';
 import { Toaster } from 'react-hot-toast';
 import { LogIn, Mail, Lock, User as UserIcon } from 'lucide-react';
@@ -76,6 +78,7 @@ export default function App() {
           const userDoc = await getDoc(doc(db, 'users', user.uid));
           if (userDoc.exists()) {
             setUserProfile(userDoc.data() as UserProfile);
+            recordLogin(user.uid, userDoc.data() as UserProfile);
             setUser(user);
           } else {
             // 2026-09-30 拿掉「特定 email 登入就自動建 engineer 文件」的初始化：
@@ -128,6 +131,7 @@ export default function App() {
     const securePassword = password + PASSWORD_SUFFIX;
 
     try {
+      markExplicitLogin();
       await signInWithEmailAndPassword(auth, loginEmail, securePassword);
     } catch (error: any) {
       console.error('Login failed:', error);
@@ -145,6 +149,7 @@ export default function App() {
   const handleGoogleLogin = async () => {
     const provider = new GoogleAuthProvider();
     try {
+      markExplicitLogin();
       await signInWithPopup(auth, provider);
     } catch (error: any) {
       console.error('Login failed:', error);
@@ -241,6 +246,7 @@ export default function App() {
     users: ['engineer', 'manager'],
     lineIntegration: ['engineer', 'manager'],
     version: ['engineer'],
+    loginLog: ['engineer'],
     editorQueue: ['editor'],
     editorAssets: ['editor'],
     editorSchedule: ['editor'],
@@ -310,6 +316,7 @@ export default function App() {
       case 'users': return <UserManagement currentUserRole={userProfile?.role || 'employee'} onOpenLine={() => setActiveTab('lineIntegration')} />;
       case 'lineIntegration': return <LineIntegration currentUserRole={userProfile?.role || 'employee'} />;
       case 'version': return <VersionLogView />;
+      case 'loginLog': return <LoginActivity />;
       default: return <Dashboard setActiveTab={setActiveTab} />;
     }
   };

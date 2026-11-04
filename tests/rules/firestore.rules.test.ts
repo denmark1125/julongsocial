@@ -210,6 +210,34 @@ describe('會長核發剪輯費（2026-11）：主管核准 → 會長核發 →
   });
 });
 
+describe('登入紀錄 loginLogs（2026-11-04）', () => {
+  const log = (uid: string, extra: Record<string, unknown> = {}) => ({ uid, username: uid, displayName: uid, role: 'employee', kind: 'open', device: '電腦', at: NOW, ...extra });
+
+  it('每個人只能記自己的；記別人的不行', async () => {
+    await assertSucceeds(setDoc(doc(as('staff'), 'loginLogs', 'l1'), log('staff')));
+    await assertFails(setDoc(doc(as('staff'), 'loginLogs', 'l2'), log('mgr')));
+  });
+
+  it('不能夾帶其他欄位、kind 只能 login／open', async () => {
+    await assertFails(setDoc(doc(as('staff'), 'loginLogs', 'l1'), log('staff', { extra: 1 })));
+    await assertFails(setDoc(doc(as('staff'), 'loginLogs', 'l2'), log('staff', { kind: 'hack' })));
+    await assertSucceeds(setDoc(doc(as('staff'), 'loginLogs', 'l3'), log('staff', { kind: 'login' })));
+  });
+
+  it('只有工程師讀得到；主管、本人都讀不到', async () => {
+    await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'loginLogs', 'l1'), log('staff')));
+    await assertSucceeds(getDoc(doc(as('boss'), 'loginLogs', 'l1')));
+    await assertFails(getDoc(doc(as('mgr'), 'loginLogs', 'l1')));
+    await assertFails(getDoc(doc(as('staff'), 'loginLogs', 'l1')));
+  });
+
+  it('記了就改不了也刪不了（連工程師都不行）', async () => {
+    await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(), 'loginLogs', 'l1'), log('staff')));
+    await assertFails(updateDoc(doc(as('staff'), 'loginLogs', 'l1'), { at: NOW }));
+    await assertFails(deleteDoc(doc(as('boss'), 'loginLogs', 'l1')));
+  });
+});
+
 describe('剪輯順序：公司排、剪輯師不能改', () => {
   it('員工可以排剪輯順序，剪輯師不行（同一支片、同一個欄位）', async () => {
     await assertSucceeds(updateDoc(doc(as('staff'), 'assets', 'a1'), { editOrder: 1 }));
