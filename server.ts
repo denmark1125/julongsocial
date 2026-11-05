@@ -23,6 +23,8 @@ import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.j
 import { isBookingChange, planShootSync, toCalendarEvent, type TimetreeShootChange } from "./src/lib/shootSync.js";
 import { buildCheckPlan, runPublishAudit } from "./src/lib/publishAuditJob.js";
 import { NOTIFY_KIND_MAP, resolveNotifyMode, type NotifyMode, type NotifyRules } from "./src/lib/notify/kinds.js";
+import { chaseMessage, directAssetId, pickChases, type ChaseItem, type ChasePost } from "./src/lib/notify/reviewChase.js";
+import { taipeiDay, taipeiTime } from "./src/lib/publishAudit.js";
 import { listMetaPages } from "./src/lib/metaGraph.js";
 import { isR2Configured, R2_PART_SIZE, createMultipartUpload, presignParts, completeMultipartUpload, headObject, presignGet, deleteObject, reviewObjectKey } from "./src/lib/r2.js";
 
@@ -2996,6 +2998,71 @@ app.post("/api/admin/test-flow-digest-push", async (req, res) => {
 // 每分鐘由 Cloudflare Worker 打一次（Vercel 免費方案的 cron 一天只能一次）。
 // ===============================================================
 
+/** 指定幾個同事（uid）綁定的 LINE；沒綁的也回傳名字，給「正式時會發給誰」看 */
+async function userTargetsByUids(uids: string[]): Promise<{ bound: NotifyTarget[]; names: string[] }> {
+  const bound: NotifyTarget[] = [];
+  const names: string[] = [];
+  for (const uid of [...new Set(uids)]) {
+    const u = (await adminDb.collection("users").doc(uid).get()).data();
+    if (!u) continue;
+    const name = u.displayName || u.username || "同事";
+    let id: string | null = null;
+    if (u.lineUserId) id = (await adminDb.collection("line_connections").doc(u.lineUserId).get()).data()?.lineUserId || null;
+    names.push(id ? name : `${name}（還沒綁 LINE）`);
+    if (id && !bound.some((t) => t.id === id)) bound.push({ type: "user", id, label: name });
+  }
+  return { bound, names };
+}
+
+/**
+ * 內部催片（2026-11-05）：上片前 48、24 小時還沒過業主審 → 通知該 IP 的藏鏡人＋PM。規則在 src/lib/notify/reviewChase.ts。
+ * 由每分鐘的稽核在「整點」與「各片前 48／24 小時那一刻」叫（見 buildCheckPlan 的 chaseMinutes），不另外輪詢。
+ * 省讀取：先只讀 48 小時內的貼文；有候選才去讀素材與 IP。
+ */
+async function runReviewChase(now = new Date()): Promise<number> {
+  const stamp = (d: Date) => `${taipeiDay(d)}T${taipeiTime(d)}`;
+  const snap = await adminDb.collection("posts")
+    .where("scheduledAt", ">", stamp(now)).where("scheduledAt", "<=", stamp(new Date(now.getTime() + 48 * 3600_000))).get();
+  const posts: ChasePost[] = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+  // 先不看素材，挑出「這一級還沒催過」的；沒有就直接結束（大部分時候）
+  const cands = pickChases(posts, () => null, now);
+  if (!cands.length) return 0;
+  const candPosts = posts.filter((x) => cands.some((c) => c.postId === x.id));
+  // 片在哪：貼文直接掛的（assetId），或「排上片日」指到這篇的（asset.plannedPostId）
+  const byPost = new Map<string, any>();
+  for (const p of candPosts) {
+    const id = directAssetId(p);
+    if (id) { const a = (await adminDb.collection("assets").doc(id).get()).data(); if (a) byPost.set(p.id, a); }
+  }
+  const missing = candPosts.filter((p) => !byPost.has(p.id)).map((p) => p.id);
+  for (let i = 0; i < missing.length; i += 30) {
+    const s = await adminDb.collection("assets").where("plannedPostId", "in", missing.slice(i, i + 30)).get();
+    s.docs.forEach((d: any) => { const a = d.data(); if (!a.voidedAt && !byPost.has(a.plannedPostId)) byPost.set(a.plannedPostId, a); });
+  }
+  const items = pickChases(candPosts, (p) => byPost.get(p.id) || null, now);
+  const byVendor = new Map<string, ChaseItem[]>();
+  for (const it of items) byVendor.set(it.vendorId, [...(byVendor.get(it.vendorId) || []), it]);
+  let sent = 0;
+  for (const [vendorId, list] of byVendor) {
+    const v = (await adminDb.collection("vendors").doc(vendorId).get()).data() || {};
+    const { bound, names } = await userTargetsByUids([...(v.assignedUserIds || []), ...(v.pmUserIds || [])]);
+    // 藏鏡人／PM 都沒綁 LINE（或沒設定）→ 改推管理者，訊息裡寫明原本該給誰
+    const targets = bound.length ? bound : await ownerTargets();
+    const note = bound.length ? "" : `\n（這個 IP 的藏鏡人／PM ${names.length ? names.join("、") : "還沒設定"}，先通知管理者）`;
+    const r = await notify("review_chase", bound.length ? bound : targets.map((t) => ({ ...t, label: names.join("、") || "管理者" })),
+      [{ type: "text", text: chaseMessage(v.name || "", list) + note }], `${v.name || ""} ${list.length} 支還沒審完`);
+    if (r.mode !== "off") sent += r.sent;
+    if (r.mode !== "off") {
+      for (const it of list) {
+        await adminDb.collection("posts").doc(it.postId).set({
+          reviewChase: { [`h${it.tier}`]: now.toISOString(), forScheduledAt: it.scheduledAt },
+        }, { merge: true });
+      }
+    }
+  }
+  return sent;
+}
+
 /** 發布稽核推給老闆（11-05 使用者決定），開關在通知中心「發布稽核」 */
 async function pushPublishAudit(text: string): Promise<number> {
   if (process.env.PUBLISH_AUDIT_PUSH === "off") return 0; // 緊急關閉用的環境變數，保留
@@ -3021,14 +3088,19 @@ app.get("/api/cron/publish-audit", async (req, res) => {
   if (!ok) return res.status(401).json({ error: "unauthorized" });
   if (!adminDb) return res.status(500).json({ error: "Firebase Admin not initialized" });
   try {
-    // 整點那次如果不在小抄上，只更新小抄、不跑稽核（Worker 帶 mode=refresh）
+    // 整點（或催片時刻但不在稽核時間點）：只重算小抄＋跑催片，不跑發布稽核（Worker 帶 mode=refresh）。
+    // 小抄只在這裡重算（一小時一次），省資料庫讀取；稽核時間點的呼叫不回傳小抄。
     if (req.query.mode === "refresh") {
-      return res.json({ refreshed: true, plan: await buildCheckPlan(adminDb) });
+      const chased = await runReviewChase().catch((e: any) => { console.error("review-chase failed", e?.message); return 0; });
+      return res.json({ refreshed: true, chased, plan: await buildCheckPlan(adminDb) });
     }
     const r = await runPublishAudit(publishAuditDeps());
-    // 回傳今天要叫醒的時間點，Worker 存進免費 KV 當小抄，其他分鐘就不用叫我（省資料庫讀取，見 buildCheckPlan）
-    const plan = await buildCheckPlan(adminDb);
-    res.json({ checked: r.checked, changed: r.changed, alerts: r.alerts.length, report: !!r.report, reminder: !!r.reminder, plan });
+    const chased = req.query.chase === "1"
+      ? await runReviewChase().catch((e: any) => { console.error("review-chase failed", e?.message); return 0; })
+      : 0;
+    // 整點剛好也是稽核時間點（例如 20:00 有片）：跑完稽核也要順便重算小抄
+    const plan = req.query.refreshPlan === "1" ? await buildCheckPlan(adminDb) : undefined;
+    res.json({ checked: r.checked, changed: r.changed, alerts: r.alerts.length, report: !!r.report, reminder: !!r.reminder, chased, plan });
   } catch (e: any) {
     console.error("publish-audit failed", e);
     res.status(e?.httpStatus || 500).json({ error: e?.message || "unknown error" });
