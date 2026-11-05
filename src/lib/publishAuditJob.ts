@@ -4,6 +4,7 @@ import {
   taipeiToDate, type LivePost, type PlatformAudit,
 } from './publishAudit.js';
 import { fetchFacebookPosts, fetchInstagramPosts, listMetaPages, type MetaPage } from './metaGraph.js';
+import { describePrecheck, PRECHECK_ICON, precheckAll, unmatchedCards, type VendorCalendar } from './publishPrecheck.js';
 
 /**
  * 發布稽核的排程工作（伺服器用，2026-11-05）。由 /api/cron/publish-audit 每分鐘呼叫一次。
@@ -32,6 +33,7 @@ export interface JobResult {
   alerts: string[];
   report?: string;
   reminder?: string;
+  precheck?: string;   // 這一輪發布前檢查要推的文字（沒有問題就沒有）
   rows: AuditRow[];
 }
 
@@ -47,7 +49,8 @@ export interface AuditRow {
 
 const LOOKBACK_HOURS = 26;
 const REPORT_AT = '18:00';
-const REMINDER_AT = '19:00';
+/** 中午提醒「今天要發哪些片」（11-05 使用者要求；原本 19:00 的提醒拿掉：那時多半已經下班關機） */
+const NOON_AT = '12:00';
 
 /** 台北時間的「yyyy-MM-ddTHH:mm」，跟 posts.scheduledAt 同格式，可以直接字串比大小 */
 function taipeiStamp(d: Date): string {
@@ -92,7 +95,7 @@ export async function runPublishAudit(deps: JobDeps): Promise<JobResult> {
   const postSnap = await db.collection('posts')
     .where('scheduledAt', '>=', fromStamp).where('scheduledAt', '<=', nowStamp).get();
   const posts = postSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }))
-    .filter((p: any) => p.status !== 'draft' && p.scheduledAt)
+    .filter((p: any) => p.scheduledAt) // 草稿也查：排上片日自動建的貼文一開始就是草稿，小編不一定會改成已排程（11-05 好正點）
     .sort((a: any, b: any) => a.scheduledAt.localeCompare(b.scheduledAt));
 
   const open = posts.filter((p: any) => (p.platforms || []).some((pf: string) =>
@@ -174,12 +177,31 @@ export async function runPublishAudit(deps: JobDeps): Promise<JobResult> {
     }
   }
 
+  // 發布前檢查：RPA 機器人（rpa/meta_calendar.py）抄回新的 Meta 日曆就比一次（每抄一次最多推一則）
+  try {
+    const pre = await evaluatePrecheck(db, await getVendors(), now, !!dryRun);
+    if (pre) {
+      result.precheck = pre;
+      if (!dryRun) await push(pre);
+    }
+  } catch (e: any) {
+    console.error('publish-precheck failed', e?.message);
+  }
+
   // 一天一次的工作：用 publishAuditReports/{日期} 記「推過了」，每分鐘的呼叫只有第一次會真的做
   const day = taipeiDay(now);
   const hhmm = taipeiTime(now);
-  if (hhmm >= REPORT_AT) {
+  if (hhmm >= NOON_AT) {
     const ref = db.collection('publishAuditReports').doc(day);
     const meta = (await ref.get()).data() || {};
+    if (hhmm < REPORT_AT && (!meta.noonSentAt || dryRun)) {
+      const brief = await buildNoonBrief(db, await getVendors(), now);
+      result.reminder = brief || undefined;
+      if (!dryRun) {
+        await ref.set({ day, noonSentAt: now.toISOString() }, { merge: true });
+        if (brief) await push(brief);
+      }
+    }
     if (hhmm >= REPORT_AT && (!meta.reportSentAt || dryRun)) {
       const fresh = new Map(result.rows.map(r => [`${r.postId}|${r.platform}`, r.audit] as [string, PlatformAudit]));
       const report = await buildDailyReport(db, await getVendors(), now, metaToken, deps.appUrl, fresh);
@@ -187,14 +209,6 @@ export async function runPublishAudit(deps: JobDeps): Promise<JobResult> {
       if (!dryRun) {
         await ref.set({ day, reportSentAt: now.toISOString(), text: report.text, unscheduled: report.unscheduled }, { merge: true });
         await push(report.text);
-      }
-    }
-    if (hhmm >= REMINDER_AT && hhmm < '23:00' && (!meta.reminderSentAt || dryRun)) {
-      const reminder = await buildReadinessReminder(db, await getVendors(), now, REMINDER_AT);
-      result.reminder = reminder || undefined;
-      if (!dryRun) {
-        await ref.set({ day, reminderSentAt: now.toISOString() }, { merge: true });
-        if (reminder) await push(reminder);
       }
     }
   }
@@ -206,12 +220,12 @@ function stripUndefined<T extends object>(o: T): T {
 }
 
 /** 今晚（from 之後）還沒到時間的準時 IP 貼文，片子好了沒 */
-async function upcomingReadiness(db: any, vmap: Map<string, VendorInfo>, now: Date) {
+async function upcomingReadiness(db: any, vmap: Map<string, VendorInfo>, now: Date, allVendors = false) {
   const nowStamp = taipeiStamp(now);
   const endStamp = `${taipeiDay(now)}T23:59`;
   const snap = await db.collection('posts').where('scheduledAt', '>', nowStamp).where('scheduledAt', '<=', endStamp).get();
   const posts = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }))
-    .filter((p: any) => p.status !== 'draft' && p.contentType !== 'post' && vmap.get(p.vendorId)?.strict)
+    .filter((p: any) => vmap.has(p.vendorId) && (allVendors || (p.contentType !== 'post' && vmap.get(p.vendorId)?.strict)))
     .sort((a: any, b: any) => a.scheduledAt.localeCompare(b.scheduledAt));
   const out: { post: any; vendor: VendorInfo; ready: boolean; label: string }[] = [];
   for (const p of posts) {
@@ -231,11 +245,29 @@ async function upcomingReadiness(db: any, vmap: Map<string, VendorInfo>, now: Da
   return out;
 }
 
-async function buildReadinessReminder(db: any, vmap: Map<string, VendorInfo>, now: Date, at: string): Promise<string | null> {
-  const items = (await upcomingReadiness(db, vmap, now)).filter(x => !x.ready);
+/**
+ * 12:00「今天要發哪些片」：今天還沒到時間的所有排程（每個 IP 都列，準時 IP 加標記），
+ * 片子好了沒、Meta 上排了沒（機器人 11:55 看過的話）。沒有排程就不推。
+ */
+async function buildNoonBrief(db: any, vmap: Map<string, VendorInfo>, now: Date): Promise<string | null> {
+  const items = await upcomingReadiness(db, vmap, now, true);
   if (!items.length) return null;
-  return [`⏳ ${at} 提醒：今晚準時 IP 還有片沒好`,
-    ...items.map(x => `・${x.vendor.name} ${x.post.scheduledAt.slice(11, 16)}「${(x.post.title || '').slice(0, 20)}」${x.label}`)].join('\n');
+  const day = taipeiDay(now);
+  const pre = (await db.collection('publishPrechecks').doc(day).get()).data();
+  const calendars: Record<string, VendorCalendar> = pre?.vendors || {};
+  const meta = new Map(precheckAll(items.filter(x => x.vendor.strict && calendars[x.vendor.id]).map(x => x.post), calendars)
+    .map(r => [`${r.postId}|${r.platform}`, r.result]));
+  const lines = items.map(x => {
+    const p = x.post;
+    const pfs = (p.platforms || []).join('/');
+    const metaBits = (p.platforms || []).map((pf: string) => meta.get(`${p.id}|${pf}`)).filter(Boolean);
+    const metaText = !metaBits.length ? '' : metaBits.every((r: any) => r.status === 'scheduled') ? '｜Meta 已排好 ✓'
+      : `｜Meta ${metaBits.some((r: any) => r.status === 'unreadable') ? '讀不到' : '還沒排好'} ⚠️`;
+    return `・${p.scheduledAt.slice(11, 16)} ${x.vendor.name}${x.vendor.strict ? '（準時）' : ''}「${(p.title || '').slice(0, 16)}」${pfs}｜${x.ready ? '成片已好 ✓' : `${x.label} ⚠️`}${metaText}`;
+  });
+  const extra = unmatchedCards(items.filter(x => x.vendor.strict).map(x => x.post), calendars, day, taipeiTime(now))
+    .map(x => `❓ ${vmap.get(x.vendorId)?.name || ''} ${x.card.platform} Meta 排了 ${x.card.time}，系統今天沒有對應的排程 → 請確認`);
+  return [`☀️ ${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))} 今天要發的片（${items.length} 支）`, ...lines, ...extra].join('\n');
 }
 
 /**
@@ -250,7 +282,7 @@ export async function buildDailyReport(
   const nowStamp = taipeiStamp(now);
   const snap = await db.collection('posts').where('scheduledAt', '>', fromStamp).where('scheduledAt', '<=', nowStamp).get();
   const posts = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }))
-    .filter((p: any) => p.status !== 'draft' && vmap.get(p.vendorId)?.fbPageId)
+    .filter((p: any) => vmap.get(p.vendorId)?.fbPageId)
     .sort((a: any, b: any) => a.scheduledAt.localeCompare(b.scheduledAt));
 
   const lines: string[] = [];
@@ -304,4 +336,52 @@ export async function buildDailyReport(
     appUrl ? `詳情：${appUrl}/?tab=publishAudit` : '',
   ].filter(Boolean).join('\n');
   return { text, unscheduled };
+}
+
+/**
+ * 拿機器人抄回來的 Meta 日曆比今天還沒到時間的準時 IP 排程。
+ * 同一份抄本只比一次（evaluatedFetchedAt），結果寫回同一份文件給頁面看。回傳要推的 LINE 文字（沒問題回 null）。
+ */
+async function evaluatePrecheck(db: any, vmap: Map<string, VendorInfo>, now: Date, dryRun: boolean): Promise<string | null> {
+  const day = taipeiDay(now);
+  const ref = db.collection('publishPrechecks').doc(day);
+  const doc = (await ref.get()).data();
+  if (!doc?.fetchedAt || (!dryRun && doc.evaluatedFetchedAt === doc.fetchedAt)) return null;
+
+  const calendars: Record<string, VendorCalendar> = doc.vendors || {};
+  const nowStamp = taipeiStamp(now);
+  const snap = await db.collection('posts').where('scheduledAt', '>=', `${day}T00:00`).where('scheduledAt', '<=', `${day}T23:59`).get();
+  const dayPosts = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }))
+    .filter((p: any) => vmap.get(p.vendorId)?.strict && vmap.get(p.vendorId)?.fbPageId);
+  const posts = dayPosts.filter((p: any) => p.scheduledAt > nowStamp); // 已過時間的交給發布後稽核
+  const rows = precheckAll(posts, calendars);
+  const extra = unmatchedCards(dayPosts, calendars, day, taipeiTime(now));
+
+  const titleOf = new Map(posts.map((p: any) => [p.id, p]));
+  const lines: string[] = [];
+  const grouped = new Map<string, string[]>();
+  for (const r of rows) {
+    if (r.result.status === 'scheduled') continue;
+    const p: any = titleOf.get(r.postId);
+    const key = `${r.postId}|${PRECHECK_ICON[r.result.status]} ${vmap.get(r.vendorId)?.name || ''} {PF}「${(p?.title || '').slice(0, 16)}」${describePrecheck(r.result, p.scheduledAt)}`;
+    grouped.set(key, [...(grouped.get(key) || []), r.platform]);
+  }
+  for (const [k, pfs] of grouped) lines.push(k.slice(k.indexOf('|') + 1).replace('{PF}', pfs.join('/')));
+  for (const x of extra) {
+    lines.push(`❓ ${vmap.get(x.vendorId)?.name || ''} ${x.card.platform} Meta 排了 ${x.card.time}，系統今天沒有對應的排程 → 請確認（業主自己排的就不用管）`);
+  }
+
+  if (!dryRun) {
+    await ref.set({
+      evaluatedFetchedAt: doc.fetchedAt,
+      evaluatedAt: now.toISOString(),
+      results: Object.fromEntries(rows.map(r => [`${r.postId}|${r.platform}`, r.result])),
+      extra: extra.map(x => ({ vendorId: x.vendorId, ...x.card })),
+    }, { merge: true });
+  }
+  if (!lines.length) return null;
+  const at = taipeiTime(new Date(doc.fetchedAt));
+  // 中午前那一輪（11:55）的結果併進 12:00「今天要發的片」，不另外推，免得 5 分鐘內收兩則
+  if (at < NOON_AT) return null;
+  return [`🗓️ 發布前檢查（${at} 看 Meta 排程）`, ...lines].join('\n');
 }

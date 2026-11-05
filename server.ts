@@ -2228,7 +2228,15 @@ app.post("/api/webhook/line", async (req: any, res) => {
       }
       continue;
     }
-    if (event?.type !== "follow" || event?.source?.type !== "user") continue;
+    // 個人：加好友（follow）時記下 LINE，員工管理才綁得到。
+    // 2026-11-05 加上「傳任何一句話」也記：本來就是好友的人不會再觸發 follow（老闆本人就卡在這），
+    // 以前只能叫他封鎖再解除封鎖。已經記過的人傳訊息不重寫（下面 existingSnap 有就跳過）。
+    if (event?.source?.type !== "user") continue;
+    if (event?.type !== "follow" && event?.type !== "message") continue;
+    if (event.type === "message" && adminDb) {
+      const known = await adminDb.collection("line_connections").where("lineUserId", "==", event.source.userId).limit(1).get();
+      if (!known.empty) continue;
+    }
     const lineUserId = event.source.userId;
     try {
       const profileRes = await fetch(`https://api.line.me/v2/bot/profile/${lineUserId}`, {

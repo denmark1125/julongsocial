@@ -7,6 +7,7 @@ import { Post, Vendor } from '../types';
 import {
   AUDIT_STATUS_ICON, AUDIT_STATUS_LABEL, AUDITABLE_PLATFORMS, describeAudit, type AuditStatus, type PlatformAudit,
 } from '../lib/publishAudit';
+import { describePrecheck, PRECHECK_ICON, precheckAll, unmatchedCards, type PrecheckResult, type VendorCalendar } from '../lib/publishPrecheck';
 
 /**
  * 發布稽核（2026-11-05）：某一天排定的貼文，IG/FB 實際有沒有發、發在哪、時間對不對。
@@ -39,6 +40,8 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
   const [posts, setPosts] = useState<Post[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [report, setReport] = useState<Report | null>(null);
+  // 發布前檢查：RPA 機器人（11:55、17:30、18:00）抄回來的 Meta 排程日曆
+  const [precheckDoc, setPrecheckDoc] = useState<{ fetchedAt?: string; vendors?: Record<string, VendorCalendar> } | null>(null);
   const [running, setRunning] = useState(false);
   const [runMsg, setRunMsg] = useState('');
   // 「立刻檢查」的結果（不寫資料庫、不推 LINE），蓋在畫面上直到換日期
@@ -51,12 +54,25 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
     return onSnapshot(q, s => setPosts(s.docs.map(d => ({ id: d.id, ...d.data() } as Post))), e => console.warn('讀取貼文失敗', e));
   }, [day]);
   useEffect(() => onSnapshot(doc(db, 'publishAuditReports', day), s => setReport(s.exists() ? (s.data() as Report) : null), () => setReport(null)), [day]);
+  useEffect(() => onSnapshot(doc(db, 'publishPrechecks', day), s => setPrecheckDoc(s.exists() ? (s.data() as any) : null), () => setPrecheckDoc(null)), [day]);
 
   const vmap = useMemo(() => new Map(vendors.map(v => [v.id!, v])), [vendors]);
+  // 跟伺服器用同一個 precheckAll 算，畫面不另外寫一套
+  const precheck = useMemo(() => {
+    if (!precheckDoc?.vendors) return new Map<string, PrecheckResult>();
+    const strictPosts = posts.filter(p => vmap.get(p.vendorId)?.strictTiming && precheckDoc.vendors![p.vendorId]);
+    return new Map(precheckAll(strictPosts as any, precheckDoc.vendors).map(r => [`${r.postId}|${r.platform}`, r.result]));
+  }, [precheckDoc, posts, vmap]);
+  // Meta 排了、系統當天卻沒有的（看機器人抄的那一刻之後的）
+  const precheckExtra = useMemo(() => {
+    if (!precheckDoc?.vendors || !precheckDoc.fetchedAt) return [];
+    const strictPosts = posts.filter(p => vmap.get(p.vendorId)?.strictTiming);
+    return unmatchedCards(strictPosts as any, precheckDoc.vendors, day, format(parseISO(precheckDoc.fetchedAt), 'HH:mm'));
+  }, [precheckDoc, posts, vmap, day]);
   const vendorName = (id: string) => vmap.get(id)?.name || id;
 
+  // 草稿也列：排上片日自動建的貼文一開始就是草稿，小編不一定會改成已排程，但那天一樣要發
   const rows = useMemo(() => posts
-    .filter(p => p.status !== 'draft')
     .map(p => {
       const v = vmap.get(p.vendorId);
       const cells = (p.platforms || []).map(pf => {
@@ -84,7 +100,9 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
   }, [rows]);
 
   // 準時 IP 卻沒設粉專＝整家都沒在稽核，要讓人看得到
-  const unconfigured = vendors.filter(v => v.strictTiming && !v.metaFbPageId && v.status !== 'ended');
+  // 只發 TikTok 的（依妍／縈寶）本來就不需要 FB 粉專，不能叫人去設
+  const unconfigured = vendors.filter(v => v.strictTiming && !v.metaFbPageId && v.status !== 'ended'
+    && [...(v.defaultPlatforms?.video || []), ...(v.defaultPlatforms?.post || [])].some(pf => pf === 'IG' || pf === 'FB'));
 
   const runNow = async () => {
     setRunning(true); setRunMsg('');
@@ -137,6 +155,22 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
         ))}
       </div>
 
+      <p className="text-[13px] text-gray-400 -mt-3">
+        發布前檢查：{precheckDoc?.fetchedAt ? `機器人 ${format(parseISO(precheckDoc.fetchedAt), 'HH:mm')} 看過 Meta 排程` : '這天機器人還沒看過 Meta 排程（每天 11:55、17:30、18:00 自動看，電腦要開著）'}
+        {precheckDoc?.vendors && Object.values<VendorCalendar>(precheckDoc.vendors).some(v => !v.ok) && (
+          <span className="text-red-500">　讀不到：{Object.values<VendorCalendar>(precheckDoc.vendors).filter(v => !v.ok).map(v => `${v.name}（${v.error}）`).join('、')}</span>
+        )}
+      </p>
+
+      {precheckExtra.length > 0 && (
+        <div className="bg-amber-50 border border-amber-100 rounded-2xl px-5 py-3 text-[13px] text-amber-800 space-y-1">
+          <p className="font-bold">❓ Meta 上排了、系統今天沒有對應的排程（業主自己排的就不用管）</p>
+          {precheckExtra.map((x, i) => (
+            <p key={i}>{vmap.get(x.vendorId)?.name} {x.card.platform} {x.card.time}</p>
+          ))}
+        </div>
+      )}
+
       {unconfigured.length > 0 && (
         <div className="bg-amber-50 border border-amber-100 rounded-2xl px-5 py-3 text-[13px] text-amber-800">
           這些準時 IP 還沒設定 FB 粉專，所以沒有在稽核：{unconfigured.map(v => v.name).join('、')}（到廠商管理 → 編輯 → 發布稽核設定）
@@ -154,8 +188,18 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                   <span className="text-[15px] font-bold tabular-nums whitespace-nowrap">{p.scheduledAt.slice(11, 16)}</span>
                   <span className="text-[15px] font-bold whitespace-nowrap">{v?.name || '（未知 IP）'}</span>
                   {v?.strictTiming && <span className="text-[12px] px-2 py-0.5 rounded-full bg-[#5A5A40]/10 text-[#5A5A40] font-bold whitespace-nowrap">準時</span>}
+                  {p.status === 'draft' && <span className="text-[12px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-bold whitespace-nowrap" title="系統裡這則還是草稿，一樣會稽核">草稿</span>}
                   <span className="text-[14px] text-gray-500 truncate min-w-0">{p.title}</span>
                 </div>
+                {cells.some(c => precheck.has(`${p.id}|${c.pf}`)) && (
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-gray-500">
+                    <span className="font-bold whitespace-nowrap">發布前（Meta 排程）</span>
+                    {cells.map(({ pf }) => {
+                      const r = precheck.get(`${p.id}|${pf}`);
+                      return r ? <span key={pf} className="whitespace-nowrap">{PRECHECK_ICON[r.status]} {pf} {describePrecheck(r, p.scheduledAt)}</span> : null;
+                    })}
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-2">
                   {cells.map(({ pf, a, status, configured }) => {
                     const text = !configured && AUDITABLE_PLATFORMS.includes(pf as any)

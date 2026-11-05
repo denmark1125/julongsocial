@@ -596,6 +596,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 發布前檢查（2026-11-05）：RPA 機器人抄回來的 Meta 排程日曆（rpa/meta_calendar.py 用服務帳號寫），公司內部看
+    match /publishPrechecks/{day} {
+      allow read: if isAuthenticated() && !isEditorRole();
+      allow write: if false;
+    }
+
     match /editors/{editorId} {
       allow read: if isAuthenticated();
       // 請款單引用 editorId/editorName，這份名冊等於薪酬對象清單，剪輯師本人絕不該能改。

@@ -223,21 +223,26 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     setIsNotiOpen(!isNotiOpen);
   };
 
+  /**
+   * 側欄照「一支片的生命週期」分組（2026-11-05 使用者確認）：製作 → 發布 → 客戶與帳務 → 設定。
+   * ⚠️ 只加分組小標題、調順序；**不收合**（使用者怕同事改了位置找不到）、頁面名稱與網址都不改。
+   * 新功能請放進對應的 group，不要再往最下面接。剪輯師／董事的選單沒有 group，不顯示小標題。
+   */
   const menuItems = [
     { id: 'dashboard', label: '儀表板', icon: LayoutDashboard, roles: ['engineer', 'manager', 'employee'] },
-    { id: 'vendors', label: '廠商管理', icon: Users, roles: ['engineer', 'manager', 'employee'] },
-    { id: 'posts', label: '貼文管理', icon: FileText, roles: ['engineer', 'manager', 'employee'] },
-    { id: 'videos', label: '素材資料庫', icon: Video, roles: ['engineer', 'manager', 'employee'] },
     // 拍攝＋剪輯交棒合併成一條產線；原本的「剪輯排序」只是一份清單，不值得單獨佔一個主分頁
-    { id: 'shootBookings', label: '製作進度', icon: Film, roles: ['engineer', 'manager', 'employee'] },
-    { id: 'calendar', label: '社群日曆', icon: CalendarIcon, roles: ['engineer', 'manager', 'employee'] },
+    { id: 'shootBookings', label: '製作進度', icon: Film, roles: ['engineer', 'manager', 'employee'], group: '製作' },
+    { id: 'videos', label: '素材資料庫', icon: Video, roles: ['engineer', 'manager', 'employee'], group: '製作' },
+    { id: 'calendar', label: '社群日曆', icon: CalendarIcon, roles: ['engineer', 'manager', 'employee'], group: '發布' },
+    { id: 'posts', label: '貼文管理', icon: FileText, roles: ['engineer', 'manager', 'employee'], group: '發布' },
     // 發布稽核（2026-11-05）：排程 vs IG/FB 實際發布，見 PublishAuditPage.tsx
-    { id: 'publishAudit', label: '發布稽核', icon: ClipboardCheck, roles: ['engineer', 'manager'] },
-    { id: 'billing', label: '帳務管理', icon: CreditCard, roles: ['engineer', 'manager'] },
-    { id: 'users', label: '員工管理', icon: ShieldCheck, roles: ['engineer', 'manager'] },
-    { id: 'lineIntegration', label: 'LINE 串接管理', icon: MessageCircle, roles: ['engineer', 'manager'] },
-    { id: 'version', label: '版本日誌', icon: History, roles: ['engineer'] },
-    { id: 'loginLog', label: '登入紀錄', icon: LogIn, roles: ['engineer'] },
+    { id: 'publishAudit', label: '發布稽核', icon: ClipboardCheck, roles: ['engineer', 'manager'], group: '發布' },
+    { id: 'vendors', label: '廠商管理', icon: Users, roles: ['engineer', 'manager', 'employee'], group: '客戶與帳務' },
+    { id: 'billing', label: '帳務管理', icon: CreditCard, roles: ['engineer', 'manager'], group: '客戶與帳務' },
+    { id: 'users', label: '員工管理', icon: ShieldCheck, roles: ['engineer', 'manager'], group: '設定' },
+    { id: 'lineIntegration', label: 'LINE 串接管理', icon: MessageCircle, roles: ['engineer', 'manager'], group: '設定' },
+    { id: 'version', label: '版本日誌', icon: History, roles: ['engineer'], group: '設定' },
+    { id: 'loginLog', label: '登入紀錄', icon: LogIn, roles: ['engineer'], group: '設定' },
     { id: 'editorQueue', label: '我的剪輯任務', icon: Scissors, roles: ['editor'] },
     { id: 'editorAssets', label: '我的所有片', icon: Film, roles: ['editor'] },
     { id: 'editorSchedule', label: '上片排程', icon: CalendarDays, roles: ['editor'] },
@@ -272,6 +277,11 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     (!userProfile || item.roles.includes(isChairman ? 'chairman' : userProfile.role)) &&
     !(item.id === 'editorInvoice' && isInternalEditor)
   );
+  /** 這一項是不是一組的第一項（要在它上面放小標題） */
+  const groupStartsAt = (idx: number) => {
+    const g = (filteredMenu[idx] as { group?: string }).group;
+    return !!g && g !== (filteredMenu[idx - 1] as { group?: string } | undefined)?.group;
+  };
 
   return (
     <div className="flex h-screen bg-[#F5F5F0] text-[#1a1a1a] font-sans overflow-hidden">
@@ -292,8 +302,11 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
         </div>
 
         <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
-          {filteredMenu.map((item) => (
+          {filteredMenu.map((item, idx) => (
             <div key={item.id} className="space-y-1">
+              {groupStartsAt(idx) && (isSidebarOpen
+                ? <p className="px-3 pt-3 text-[12px] font-bold text-gray-400 tracking-wider whitespace-nowrap">{(item as { group?: string }).group}</p>
+                : <div className="mx-3 mt-2 border-t border-black/5" />)}
               <button
                 onClick={() => openItem(item.id)}
                 className={cn(
@@ -389,8 +402,11 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
               </div>
               
               <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-                {filteredMenu.map((item) => (
+                {filteredMenu.map((item, idx) => (
                   <div key={item.id} className="space-y-1">
+                    {groupStartsAt(idx) && (
+                      <p className="px-4 pt-3 text-[13px] font-bold text-gray-400 tracking-wider whitespace-nowrap">{(item as { group?: string }).group}</p>
+                    )}
                     <button
                       onClick={() => {
                         openItem(item.id);
