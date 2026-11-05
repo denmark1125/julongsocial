@@ -53,7 +53,7 @@ export const NOTIFY_KINDS: NotifyKindDef[] = [
   { id: 'shoot_sync_alert', target: 'owner', label: 'TimeTree 同步失敗', audience: 'internal', recipientLabel: '管理者', whenLabel: '同步出錯時', defaultMode: 'personalSwitch', priority: 2 },
   // ── 規劃中（之後幾個階段做）──
   { id: 'air_notice', target: 'clientGroup', label: '上片通知', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '發布後確認上線＋緩衝 10 分鐘', defaultMode: 'test', priority: 1, planned: true },
-  { id: 'review_chase', target: 'staff', label: '內部催片', audience: 'internal', recipientLabel: '該 IP 的藏鏡人（廠商管理勾選的）', whenLabel: '上片前 24 小時還沒審完', defaultMode: 'test', priority: 2, planned: true },
+  { id: 'review_chase', target: 'staff', label: '內部催片', audience: 'internal', recipientLabel: '該 IP 的藏鏡人＋PM（廠商管理勾選的）', whenLabel: '上片前 24 小時還沒審完', defaultMode: 'test', priority: 2, planned: true },
   { id: 'shoot_booking', target: 'clientGroup', label: '拍攝預約通知', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '同事按「確認發送」後', defaultMode: 'test', priority: 1, planned: true },
   { id: 'shoot_reminder', target: 'clientGroup', label: '拍攝前一天提醒', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '拍攝前一天 12:00', defaultMode: 'test', priority: 1, planned: true },
   { id: 'monthly_billing', target: 'clientGroup', label: '每月帳款通知', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '每月固定日（合約流程完成後）', defaultMode: 'off', priority: 2, planned: true },

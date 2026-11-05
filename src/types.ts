@@ -365,7 +365,9 @@ export interface Vendor {
                                         // 只有變動的月份才留一筆，變更只影響 fromMonth(含)之後，不回溯改寫歷史月份的目標與欠片
   cooperationStartMonth?: string; // YYYY-MM，合作正式起算月；該月之前不列入任何目標/欠片/庫存追蹤，避免新客戶還沒開始拍就先冒出欠片
   weeklyPattern?: number[]; // 長度4，[第1週,第2週,第3週,第4週]目標影音支數（自然月每7天一段，第4段吸收月底剩餘天數）；不填則用 monthlyTargetVideos/4 平均攤提
-  assignedUserIds?: string[]; // 指派負責此IP的同事 uid（用於庫存警示通知過濾；engineer/manager 一律看得到全部，不需被指派）
+  assignedUserIds?: string[]; // 藏鏡人（畫面上叫「藏鏡人」）：負責此IP拍攝的同事 uid（庫存警示、催片通知的對象）
+  /** PM（2026-11-05）：盯這個 IP、盯藏鏡人的人（秀姨、David…），跟藏鏡人分開。催片通知藏鏡人＋PM 一起收 */
+  pmUserIds?: string[];
   excludeFromStats?: boolean; // 勾選後不列入本月發文/欠片統計與提醒（內部帳號等不需追蹤進度）
   /**
    * 由非管理者建立、還沒被核准。核准前**不列入任何目標/欠片/庫存計算**。

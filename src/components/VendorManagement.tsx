@@ -73,6 +73,7 @@ function emptyVendorForm() {
     excludeFromStats: false,
     pauseHistory: [] as PauseRecord[],
     assignedUserIds: [] as string[],
+    pmUserIds: [] as string[],
     editorId: '',
     editorName: '',
     selfPublishing: false,
@@ -702,6 +703,7 @@ export default function VendorManagement() {
                       excludeFromStats: vendor.excludeFromStats || false,
                       pauseHistory: vendor.pauseHistory || [],
                       assignedUserIds: vendor.assignedUserIds || [],
+                      pmUserIds: vendor.pmUserIds || [],
                       editorId: vendor.editorId || '',
                       editorName: vendor.editorName || '',
                       selfPublishing: vendor.selfPublishing || false,
@@ -822,6 +824,12 @@ export default function VendorManagement() {
                   <div className="flex items-center text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-lg border border-blue-100 w-fit">
                     <span className="mr-1">藏鏡人:</span>
                     <span>{vendor.assignedUserIds.map(uid => users.find(u => u.uid === uid)?.displayName || '?').join('、')}</span>
+                  </div>
+                )}
+                {vendor.pmUserIds && vendor.pmUserIds.length > 0 && (
+                  <div className="flex items-center text-xs font-bold text-[#5A5A40] bg-[#5A5A40]/10 px-2 py-1 rounded-lg border border-[#5A5A40]/20 w-fit">
+                    <span className="mr-1">PM:</span>
+                    <span>{vendor.pmUserIds.map(uid => users.find(u => u.uid === uid)?.displayName || '?').join('、')}</span>
                   </div>
                 )}
                 {vendor.excludeFromStats && (
@@ -1128,6 +1136,41 @@ export default function VendorManagement() {
                     })}
                   </div>
                   <p className="text-xs text-gray-400 mt-1">系統內的告警/鈴鐺不分派任何人都看得到全部；這裡指派的人是之後LINE推播通知的對象。</p>
+                </div>
+                )}
+
+                {/* PM（2026-11-05）：盯這個 IP、盯藏鏡人的人，跟藏鏡人分開。催片通知藏鏡人＋PM 一起收。候選人＝主管與工程師帳號 */}
+                {showField && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">PM</label>
+                  <div className="flex flex-wrap gap-2">
+                    {users.filter(u => u.role === 'manager' || u.role === 'engineer').map(u => {
+                      const checked = formData.pmUserIds.includes(u.uid);
+                      return (
+                        <label
+                          key={u.uid}
+                          className={cn(
+                            "flex items-center gap-2 px-3 py-2 rounded-xl border cursor-pointer text-sm transition-all",
+                            checked ? "bg-[#5A5A40] text-white border-[#5A5A40]" : "bg-[#F5F5F0] text-gray-600 border-transparent hover:border-[#5A5A40]/30"
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              const next = e.target.checked
+                                ? [...formData.pmUserIds, u.uid]
+                                : formData.pmUserIds.filter(id => id !== u.uid);
+                              setFormData({ ...formData, pmUserIds: next });
+                            }}
+                            className="hidden"
+                          />
+                          {u.displayName || u.username}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">盯這個 IP 和藏鏡人的人；片子快到上片日還沒審完時，PM 會跟藏鏡人一起收到 LINE 提醒。</p>
                 </div>
                 )}
 
