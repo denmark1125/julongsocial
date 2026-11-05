@@ -30,6 +30,8 @@ export interface NotifyKindDef {
   recipientLabel: string;
   /** 什麼時候發 */
   whenLabel: string;
+  /** 白話說明這是什麼（使用者 11-05：名詞看不懂） */
+  description: string;
   /**
    * 預設模式。'personalSwitch'＝沿用舊的 LINE_PERSONAL_PUSH 總開關（on→live、其他→off），
    * 讓搬進通知中心的當下行為完全不變；之後在畫面上改了就以畫面為準。
@@ -43,20 +45,20 @@ export interface NotifyKindDef {
 
 export const NOTIFY_KINDS: NotifyKindDef[] = [
   // ── 剪輯流程（使用者：很順，盡量不動）──
-  { id: 'editor_review', target: 'editorGroup', label: '剪輯送審通知', audience: 'internal', recipientLabel: '該剪輯師的剪輯群組', whenLabel: '剪輯師交片送審時', defaultMode: 'live', priority: 1 },
-  { id: 'editor_reminder', target: 'editorGroup', label: '待審提醒', audience: 'internal', recipientLabel: '剪輯群組', whenLabel: '每 2 個上班日 09:30', defaultMode: 'live', priority: 2 },
+  { id: 'editor_review', target: 'editorGroup', label: '剪輯送審通知', description: '剪輯師交片後，通知藏鏡人「有新片可以拿給業主審」', audience: 'internal', recipientLabel: '該剪輯師的剪輯群組', whenLabel: '剪輯師交片送審時', defaultMode: 'live', priority: 1 },
+  { id: 'editor_reminder', target: 'editorGroup', label: '待審提醒', description: '提醒剪輯群組：哪些片客戶還沒審、哪些審過還沒上傳雲端', audience: 'internal', recipientLabel: '剪輯群組', whenLabel: '每 2 個上班日 09:30', defaultMode: 'live', priority: 2 },
   // ── 給老闆 ──
-  { id: 'publish_audit', target: 'owner', label: '發布稽核', audience: 'internal', recipientLabel: '管理者', whenLabel: '12:00、18:00、發布前檢查與發布後有問題時', defaultMode: 'live', priority: 1 },
-  { id: 'stock_alert', target: 'owner', label: '影片庫存告急', audience: 'internal', recipientLabel: '管理者', whenLabel: '每天 09:00', defaultMode: 'personalSwitch', priority: 3 },
-  { id: 'flow_digest', target: 'owner', label: '製作進度彙總', audience: 'internal', recipientLabel: '管理者', whenLabel: '每天 09:30', defaultMode: 'personalSwitch', priority: 3 },
-  { id: 'flow_event', target: 'owner', label: '交棒即時通知', audience: 'internal', recipientLabel: '管理者', whenLabel: '新片送審／上傳雲端時', defaultMode: 'personalSwitch', priority: 3 },
-  { id: 'shoot_sync_alert', target: 'owner', label: 'TimeTree 同步失敗', audience: 'internal', recipientLabel: '管理者', whenLabel: '同步出錯時', defaultMode: 'personalSwitch', priority: 2 },
+  { id: 'publish_audit', target: 'owner', label: '發布稽核', description: '今天要發哪些片、Meta 排了沒、發出去有沒有發錯帳號／時間', audience: 'internal', recipientLabel: '管理者', whenLabel: '12:00、18:00、發布前檢查與發布後有問題時', defaultMode: 'live', priority: 1 },
+  { id: 'stock_alert', target: 'owner', label: '影片庫存快用完', description: '某個 IP 能用的成片快用完了（兩週內不夠發），要趕快安排拍攝', audience: 'internal', recipientLabel: '管理者', whenLabel: '每天 09:00', defaultMode: 'personalSwitch', priority: 3 },
+  { id: 'flow_digest', target: 'owner', label: '每日製作進度整理', description: '每天早上整理昨天的進度：哪些片送客戶審了、哪些已上傳雲端可排程（跟「即時通知」二選一）', audience: 'internal', recipientLabel: '管理者', whenLabel: '每天 09:30', defaultMode: 'personalSwitch', priority: 3 },
+  { id: 'flow_event', target: 'owner', label: '製作進度即時通知', description: '跟「每日製作進度整理」同一類，但不等隔天，每有一支片送審或上傳就馬上推一則（兩個二選一）', audience: 'internal', recipientLabel: '管理者', whenLabel: '新片送審／上傳雲端時', defaultMode: 'personalSwitch', priority: 3 },
+  { id: 'shoot_sync_alert', target: 'owner', label: 'TimeTree 同步失敗', description: '拍攝行事曆從 TimeTree 同步進系統時出錯，要人去看', audience: 'internal', recipientLabel: '管理者', whenLabel: '同步出錯時', defaultMode: 'personalSwitch', priority: 2 },
   // ── 規劃中（之後幾個階段做）──
-  { id: 'air_notice', target: 'clientGroup', label: '上片通知', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '發布後確認上線＋緩衝 10 分鐘', defaultMode: 'test', priority: 1, planned: true },
-  { id: 'review_chase', target: 'staff', label: '內部催片', audience: 'internal', recipientLabel: '該 IP 的藏鏡人＋PM（廠商管理勾選的）', whenLabel: '上片前 24 小時還沒審完', defaultMode: 'test', priority: 2, planned: true },
-  { id: 'shoot_booking', target: 'clientGroup', label: '拍攝預約通知', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '同事按「確認發送」後', defaultMode: 'test', priority: 1, planned: true },
-  { id: 'shoot_reminder', target: 'clientGroup', label: '拍攝前一天提醒', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '拍攝前一天 12:00', defaultMode: 'test', priority: 1, planned: true },
-  { id: 'monthly_billing', target: 'clientGroup', label: '每月帳款通知', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '每月固定日（合約流程完成後）', defaultMode: 'off', priority: 2, planned: true },
+  { id: 'air_notice', target: 'clientGroup', label: '上片通知', description: '片子確認上線後，通知客戶「影片已於幾點準時發布」', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '發布後確認上線＋緩衝 10 分鐘', defaultMode: 'test', priority: 1, planned: true },
+  { id: 'review_chase', target: 'staff', label: '內部催片', description: '排定上片前 24 小時片子還沒審完，提醒藏鏡人和 PM 去催', audience: 'internal', recipientLabel: '該 IP 的藏鏡人＋PM（廠商管理勾選的）', whenLabel: '上片前 24 小時還沒審完', defaultMode: 'test', priority: 2, planned: true },
+  { id: 'shoot_booking', target: 'clientGroup', label: '拍攝預約通知', description: 'TimeTree 有新的拍攝預約，同事確認沒登錯後通知客戶', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '同事按「確認發送」後', defaultMode: 'test', priority: 1, planned: true },
+  { id: 'shoot_reminder', target: 'clientGroup', label: '拍攝前一天提醒', description: '拍攝前一天提醒客戶「明天幾點要拍」', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '拍攝前一天 12:00', defaultMode: 'test', priority: 1, planned: true },
+  { id: 'monthly_billing', target: 'clientGroup', label: '每月帳款通知', description: '每月通知客戶本月帳款（等合約流程做好）', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '每月固定日（合約流程完成後）', defaultMode: 'off', priority: 2, planned: true },
 ];
 
 export const NOTIFY_KIND_MAP = new Map(NOTIFY_KINDS.map(k => [k.id, k]));

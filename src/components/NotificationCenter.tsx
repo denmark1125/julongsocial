@@ -131,6 +131,7 @@ export default function NotificationCenter({ quota, used }: { quota?: number | n
                     </span>
                     {k.planned && <span className="text-[12px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-400 font-bold whitespace-nowrap">規劃中</span>}
                   </div>
+                  <p className="text-[14px] text-gray-700">{k.description}</p>
                   <p className="text-[13px] text-gray-500">發給：{k.recipientLabel}　·　{k.whenLabel}</p>
                   <p className="text-[12px] text-gray-400">
                     本月 {u?.units || 0} 則{u?.last ? `　·　上次 ${format(parseISO(u.last), 'MM/dd HH:mm')}` : ''}
