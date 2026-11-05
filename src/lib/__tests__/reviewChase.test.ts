@@ -65,3 +65,12 @@ describe('片掛在排上片日（asset.plannedPostId）', () => {
     expect(pickChases([p], viaBoard, new Date('2026-11-06T00:00:00+08:00'))[0].stage).toBe('客戶還沒審');
   });
 });
+
+describe('催片時間（不打擾下班）', () => {
+  it('平日 09:30、週末 13:00', async () => {
+    const { chaseTimeFor } = await import('../notify/reviewChase');
+    expect(chaseTimeFor(new Date('2026-11-05T08:00:00+08:00'))).toBe('09:30'); // 週四
+    expect(chaseTimeFor(new Date('2026-11-07T08:00:00+08:00'))).toBe('13:00'); // 週六
+    expect(chaseTimeFor(new Date('2026-11-08T23:30:00+08:00'))).toBe('13:00'); // 週日深夜仍算週日
+  });
+});

@@ -5,6 +5,7 @@ import {
 } from './publishAudit.js';
 import { fetchFacebookPosts, fetchInstagramPosts, listMetaPages, type MetaPage } from './metaGraph.js';
 import { describePrecheck, PRECHECK_ICON, precheckAll, unmatchedCards, type VendorCalendar } from './publishPrecheck.js';
+import { chaseTimeFor } from './notify/reviewChase.js';
 
 /**
  * 發布稽核的排程工作（伺服器用，2026-11-05）。由 /api/cron/publish-audit 每分鐘呼叫一次。
@@ -419,21 +420,14 @@ const FIXED_MINUTES = ['11:57', '11:58', '11:59', '12:00', '12:01', '17:31', '17
 
 export async function buildCheckPlan(db: any, now = new Date()): Promise<{ day: string; minutes: string[]; chaseMinutes: string[] }> {
   const day = taipeiDay(now);
-  // 3 小時前排的也算進來（例如 21:00 的片晚發，凌晨前還要看幾次）；往後看 50 小時給催片算「前 48／24 小時」那一刻
+  // 3 小時前排的也算進來（例如 21:00 的片晚發，凌晨前還要看幾次）
   const from = taipeiStamp(new Date(now.getTime() - 3 * 3600_000));
-  const snap = await db.collection('posts').where('scheduledAt', '>=', from).where('scheduledAt', '<=', taipeiStamp(new Date(now.getTime() + 50 * 3600_000))).get();
+  const snap = await db.collection('posts').where('scheduledAt', '>=', from).where('scheduledAt', '<=', `${day}T23:59`).get();
   const minutes = new Set(FIXED_MINUTES);
-  const chaseMinutes = new Set<string>();
+  // 內部催片一天只在一個時刻（平日 09:30、週末 13:00），不打擾同事下班
+  const chaseMinutes = new Set<string>([chaseTimeFor(now)]);
   for (const d of snap.docs) {
     const p = d.data();
-    // 內部催片：上片前 48、24 小時那一刻（今天之內、還沒過的）
-    if (p.contentType !== 'post') {
-      for (const h of [48, 24]) {
-        const t = new Date(taipeiToDate(p.scheduledAt).getTime() - h * 3600_000);
-        if (taipeiDay(t) === day && t.getTime() >= now.getTime() - 60_000) chaseMinutes.add(taipeiTime(t));
-      }
-    }
-    if (p.scheduledAt.slice(0, 10) > day) continue; // 明天以後的只為了催片
     if (!(p.platforms || []).some((pf: string) => AUDITABLE_PLATFORMS.includes(pf as any))) continue;
     const at = taipeiToDate(p.scheduledAt).getTime();
     for (const m of AFTER_OFFSETS) {

@@ -5,13 +5,23 @@ import { taipeiToDate } from '../publishAudit.js';
  * 內部催片（2026-11-05）：排定上片前 48 小時、前 24 小時，片子還沒過業主審 → 通知該 IP 的藏鏡人＋PM。
  *
  * 使用者決定：
- * - 48 小時提醒一次、24 小時再提醒一次（「要盡早跳通知」）
+ * - 48 小時提醒一次、24 小時再提醒一次（「要盡早跳通知」）；但只在平日 09:30／週末 13:00 發（不打擾下班）
  * - 不只「客戶還沒審」，還沒有片／還在剪／客戶要改也一起催
  * - 同一支片每個時間點只催一次（post.reviewChase.h48 / h24 記已催時間）
  * 判斷審過沒一律走 deriveFlowStage（to_upload／ready＝業主已通過），不要直接讀 asset.approved。
  */
 
 export type ChaseTier = 48 | 24;
+
+/**
+ * 什麼時候催（11-05 使用者：晚上是同事休息時間，不要打擾）：
+ * 平日 09:30、週末 13:00，一天查一次。國定假日目前當平日（要的話再加假日表）。
+ */
+export function chaseTimeFor(now: Date): string {
+  const tpe = new Date(now.getTime() + 8 * 3600_000);
+  const dow = tpe.getUTCDay(); // 0＝週日、6＝週六（台北日期）
+  return dow === 0 || dow === 6 ? '13:00' : '09:30';
+}
 
 export interface ChasePost {
   id: string;

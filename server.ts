@@ -23,7 +23,7 @@ import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.j
 import { isBookingChange, planShootSync, toCalendarEvent, type TimetreeShootChange } from "./src/lib/shootSync.js";
 import { buildCheckPlan, runPublishAudit } from "./src/lib/publishAuditJob.js";
 import { NOTIFY_KIND_MAP, resolveNotifyMode, type NotifyMode, type NotifyRules } from "./src/lib/notify/kinds.js";
-import { chaseMessage, directAssetId, pickChases, type ChaseItem, type ChasePost } from "./src/lib/notify/reviewChase.js";
+import { chaseMessage, chaseTimeFor, directAssetId, pickChases, type ChaseItem, type ChasePost } from "./src/lib/notify/reviewChase.js";
 import { taipeiDay, taipeiTime } from "./src/lib/publishAudit.js";
 import { listMetaPages } from "./src/lib/metaGraph.js";
 import { isR2Configured, R2_PART_SIZE, createMultipartUpload, presignParts, completeMultipartUpload, headObject, presignGet, deleteObject, reviewObjectKey } from "./src/lib/r2.js";
@@ -3016,10 +3016,14 @@ async function userTargetsByUids(uids: string[]): Promise<{ bound: NotifyTarget[
 
 /**
  * 內部催片（2026-11-05）：上片前 48、24 小時還沒過業主審 → 通知該 IP 的藏鏡人＋PM。規則在 src/lib/notify/reviewChase.ts。
- * 由每分鐘的稽核在「整點」與「各片前 48／24 小時那一刻」叫（見 buildCheckPlan 的 chaseMinutes），不另外輪詢。
+ * 一天只在平日 09:30／週末 13:00 跑一次（使用者：晚上是同事休息時間），由 Worker 照小抄的 chaseMinutes 帶 chase=1 叫。
  * 省讀取：先只讀 48 小時內的貼文；有候選才去讀素材與 IP。
  */
 async function runReviewChase(now = new Date()): Promise<number> {
+  // 保險：只在當天的催片時刻前後 10 分鐘內才發（平日 09:30、週末 13:00），深夜誤觸也不會吵到同事
+  const at = chaseTimeFor(now);
+  const diff = Math.abs((Number(taipeiTime(now).slice(0, 2)) * 60 + Number(taipeiTime(now).slice(3))) - (Number(at.slice(0, 2)) * 60 + Number(at.slice(3))));
+  if (diff > 10) return 0;
   const stamp = (d: Date) => `${taipeiDay(d)}T${taipeiTime(d)}`;
   const snap = await adminDb.collection("posts")
     .where("scheduledAt", ">", stamp(now)).where("scheduledAt", "<=", stamp(new Date(now.getTime() + 48 * 3600_000))).get();
@@ -3091,7 +3095,10 @@ app.get("/api/cron/publish-audit", async (req, res) => {
     // 整點（或催片時刻但不在稽核時間點）：只重算小抄＋跑催片，不跑發布稽核（Worker 帶 mode=refresh）。
     // 小抄只在這裡重算（一小時一次），省資料庫讀取；稽核時間點的呼叫不回傳小抄。
     if (req.query.mode === "refresh") {
-      const chased = await runReviewChase().catch((e: any) => { console.error("review-chase failed", e?.message); return 0; });
+      // 催片只在 Worker 帶 chase=1 時跑（平日 09:30／週末 13:00），整點更新小抄不催
+      const chased = req.query.chase === "1"
+        ? await runReviewChase().catch((e: any) => { console.error("review-chase failed", e?.message); return 0; })
+        : 0;
       return res.json({ refreshed: true, chased, plan: await buildCheckPlan(adminDb) });
     }
     const r = await runPublishAudit(publishAuditDeps());
