@@ -3,7 +3,7 @@ import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestor
 import { format, parseISO, startOfMonth } from 'date-fns';
 import toast from 'react-hot-toast';
 import { auth, db } from '../firebase';
-import { NOTIFY_MODE_LABEL, type NotifyKindDef, type NotifyMode } from '../lib/notify/kinds';
+import { NOTIFY_KIND_MAP, NOTIFY_MODE_LABEL, NOTIFY_TARGET_GROUPS, type NotifyKindDef, type NotifyMode } from '../lib/notify/kinds';
 
 /**
  * 通知中心（2026-11-05）：每種 LINE 通知發給誰、開關、本月用了幾則、發送紀錄。
@@ -35,7 +35,12 @@ export default function NotificationCenter({ quota, used }: { quota?: number | n
   const [logs, setLogs] = useState<Log[]>([]);
 
   const load = async () => {
-    try { setKinds((await api('/api/admin/notify-rules')).kinds); setErr(''); }
+    try {
+      // 顯示用欄位（名稱、發送對象分組…）以前端這份登記表為準：前後端版本不同步時畫面也不會整頁空白
+      const rows: KindRow[] = (await api('/api/admin/notify-rules')).kinds;
+      setKinds(rows.map(k => ({ ...k, ...(NOTIFY_KIND_MAP.get(k.id) || {}), mode: k.mode, rule: k.rule })));
+      setErr('');
+    }
     catch (e: any) { setErr(e.message); }
   };
   useEffect(() => { load(); }, []);
@@ -92,9 +97,16 @@ export default function NotificationCenter({ quota, used }: { quota?: number | n
 
       {err && <p className="text-sm text-red-500 px-1">{err}</p>}
 
-      <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
-        <ul className="divide-y divide-black/5">
-          {kinds.map(k => {
+      {/* 照發送對象分組（使用者 11-05：不然難看懂） */}
+      {NOTIFY_TARGET_GROUPS.filter(g => kinds.some(k => k.target === g.id)).map(g => (
+        <div key={g.id} className="space-y-2">
+          <div className="flex items-baseline gap-3 px-1">
+            <p className="text-sm font-bold text-gray-600 whitespace-nowrap">{g.label}</p>
+            <p className="text-[12px] text-gray-400 min-w-0">{g.hint}</p>
+          </div>
+          <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
+            <ul className="divide-y divide-black/5">
+              {kinds.filter(k => k.target === g.id).map(k => {
             const u = usage.get(k.id);
             return (
               <li key={k.id} className="px-5 py-3.5 flex flex-col md:flex-row md:items-center gap-3">
@@ -128,8 +140,10 @@ export default function NotificationCenter({ quota, used }: { quota?: number | n
               </li>
             );
           })}
-        </ul>
-      </div>
+            </ul>
+          </div>
+        </div>
+      ))}
 
       <div className="space-y-2">
         <p className="text-sm font-bold text-gray-500 px-1">本月發送紀錄</p>
