@@ -114,6 +114,10 @@ def read_calendar(page, business_id: str, asset_id: str, today: datetime) -> lis
     for c in data["cards"]:
         if c["day"] != today.day:
             continue  # 只要今天（週曆上其他天的卡片不管）
+        # Meta 自己放的「建議發文時段」格子（「本週你的 Instagram 粉絲在這個時段最為活躍。排定時間」），不是排程。
+        # 11-05 曾被誤認成 CWORKS 20:00 有排 IG。特徵：封面是 Meta 的插圖、文字有「最為活躍」
+        if "最為活躍" in (c["status"] or "") or "assets_DO_NOT_HARDCODE" in (c["cover"] or "")                 or not re.search(r"(fbcdn|cdninstagram)\.", c["cover"] or ""):
+            continue
         for pf in c["platforms"] or [""]:
             out.append({
                 "date": today.strftime("%Y-%m-%d"),
