@@ -55,7 +55,7 @@ export const NOTIFY_KINDS: NotifyKindDef[] = [
   { id: 'shoot_sync_alert', target: 'owner', label: 'TimeTree 同步失敗', description: '拍攝行事曆從 TimeTree 同步進系統時出錯，要人去看', audience: 'internal', recipientLabel: '管理者', whenLabel: '同步出錯時', defaultMode: 'personalSwitch', priority: 2 },
   // ── 規劃中（之後幾個階段做）──
   { id: 'air_notice', target: 'clientGroup', label: '上片通知', description: '片子確認上線後，通知客戶「影片已於幾點準時發布」', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '發布後確認上線＋緩衝 10 分鐘', defaultMode: 'test', priority: 1, planned: true },
-  { id: 'review_chase', target: 'staff', label: '內部催片', description: '上片前 48、24 小時片子還沒過業主審（還沒有片／還在剪／客戶要改／客戶還沒審），提醒藏鏡人和 PM 去催', audience: 'internal', recipientLabel: '該 IP 的藏鏡人＋PM（廠商管理勾選的）', whenLabel: '上片前 48 小時、前 24 小時', defaultMode: 'test', priority: 2 },
+  { id: 'review_chase', target: 'staff', label: '內部催片', description: '上片前 48、24 小時片子還沒過業主審（還沒有片／還在剪／客戶要改／客戶還沒審），提醒藏鏡人和 PM 去催', audience: 'internal', recipientLabel: '該 IP 的藏鏡人＋PM（廠商管理勾選的）', whenLabel: '平日 09:30、週末 13:00（上片前 48、24 小時內還沒審完的）', defaultMode: 'test', priority: 2 },
   { id: 'shoot_booking', target: 'clientGroup', label: '拍攝預約通知', description: 'TimeTree 有新的拍攝預約，同事確認沒登錯後通知客戶', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '同事按「確認發送」後', defaultMode: 'test', priority: 1, planned: true },
   { id: 'shoot_reminder', target: 'clientGroup', label: '拍攝前一天提醒', description: '拍攝前一天提醒客戶「明天幾點要拍」', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '拍攝前一天 12:00', defaultMode: 'test', priority: 1, planned: true },
   { id: 'monthly_billing', target: 'clientGroup', label: '每月帳款通知', description: '每月通知客戶本月帳款（等合約流程做好）', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '每月固定日（合約流程完成後）', defaultMode: 'off', priority: 2, planned: true },
