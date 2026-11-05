@@ -4,6 +4,7 @@ import { X, Calendar, Clock, Globe, CheckCircle2, FileText, Video, ExternalLink,
 import { format, parseISO } from 'date-fns';
 import { clsx } from 'clsx';
 import { setPostStatus, togglePostConfirmation, togglePostPlatformPublished, POST_STATUS_LABEL } from '../lib/postActions';
+import { AUDIT_STATUS_ICON, describeAudit } from '../lib/publishAudit';
 import { isClientApproved } from '../lib/assetFlow';
 
 interface PostDetailModalProps {
@@ -147,6 +148,22 @@ export default function PostDetailModal({ post, vendor, asset, onClose, assets, 
                 );
               })}
             </div>
+            {/* 發布稽核（2026-11-05）：伺服器到點後自動比對 IG/FB，見 src/lib/publishAudit.ts */}
+            {post.platforms.some(pf => post.publishAudit?.[pf]?.forScheduledAt === post.scheduledAt) && (
+              <div className="mt-3 space-y-1">
+                {post.platforms.map(pf => {
+                  const a = post.publishAudit?.[pf];
+                  if (!a || a.forScheduledAt !== post.scheduledAt || a.status === 'unsupported') return null;
+                  return (
+                    <div key={pf} className="flex items-center gap-2 text-[13px] text-gray-600 min-w-0">
+                      <span className="font-bold whitespace-nowrap">{AUDIT_STATUS_ICON[a.status]} {pf} 稽核</span>
+                      <span className="min-w-0">{describeAudit(a, post.scheduledAt, id => vendors?.find(v => v.id === id)?.name || '別的 IP')}</span>
+                      {a.permalink && <a href={a.permalink} target="_blank" rel="noreferrer" className="shrink-0 text-gray-400 hover:text-[#5A5A40]">看貼文</a>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Content Body */}

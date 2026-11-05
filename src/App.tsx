@@ -25,6 +25,7 @@ import EditorSchedule from './components/EditorSchedule';
 import EditorInvoicePage from './components/EditorInvoicePage';
 import ChairmanView, { ChairmanSection } from './components/ChairmanView';
 import LoginActivity from './components/LoginActivity';
+import PublishAuditPage from './components/PublishAuditPage';
 import { markExplicitLogin, recordLogin, startActivityHeartbeat } from './lib/loginLog';
 import Logo from './components/Logo';
 import { Toaster } from 'react-hot-toast';
@@ -253,6 +254,7 @@ export default function App() {
     lineIntegration: ['engineer', 'manager'],
     version: ['engineer'],
     loginLog: ['engineer'],
+    publishAudit: ['engineer', 'manager'],
     editorQueue: ['editor'],
     editorAssets: ['editor'],
     editorSchedule: ['editor'],
@@ -323,6 +325,7 @@ export default function App() {
       case 'lineIntegration': return <LineIntegration currentUserRole={userProfile?.role || 'employee'} />;
       case 'version': return <VersionLogView />;
       case 'loginLog': return <LoginActivity />;
+      case 'publishAudit': return <PublishAuditPage isEngineer={userProfile?.role === 'engineer'} />;
       default: return <Dashboard setActiveTab={setActiveTab} />;
     }
   };

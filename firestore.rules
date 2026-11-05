@@ -590,6 +590,12 @@ service cloud.firestore {
       allow read, create, update, delete: if isAuthenticated() && !isEditorRole();
     }
 
+    // 發布稽核日報（2026-11-05）：伺服器每天 18:00 寫，公司內部看；剪輯師不看、任何人都不能從前端改
+    match /publishAuditReports/{day} {
+      allow read: if isAuthenticated() && !isEditorRole();
+      allow write: if false;
+    }
+
     match /editors/{editorId} {
       allow read: if isAuthenticated();
       // 請款單引用 editorId/editorName，這份名冊等於薪酬對象清單，剪輯師本人絕不該能改。

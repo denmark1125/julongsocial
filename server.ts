@@ -21,6 +21,8 @@ import { summarizeFolder } from "./src/lib/rawFolder.js";
 import { buildPendingListMessage, buildReminderMessage, buildReviewNotifyMessage, isPendingQuery, listPendingReviews, pickReviewReminders } from "./src/lib/lineReviewNotify.js";
 import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
 import { isBookingChange, planShootSync, toCalendarEvent, type TimetreeShootChange } from "./src/lib/shootSync.js";
+import { runPublishAudit } from "./src/lib/publishAuditJob.js";
+import { listMetaPages } from "./src/lib/metaGraph.js";
 import { isR2Configured, R2_PART_SIZE, createMultipartUpload, presignParts, completeMultipartUpload, headObject, presignGet, deleteObject, reviewObjectKey } from "./src/lib/r2.js";
 
 dotenv.config();
@@ -2870,6 +2872,93 @@ app.post("/api/admin/test-flow-digest-push", async (req, res) => {
   } catch (error: any) {
     console.error("test-flow-digest-push failed", error);
     res.status(500).json({ error: error.message || "Unknown error occurred" });
+  }
+});
+
+// ===============================================================
+// 發布稽核（2026-11-05）：排程 vs IG/FB 實際發出去的貼文，見 src/lib/publishAudit.ts
+// 每分鐘由 Cloudflare Worker 打一次（Vercel 免費方案的 cron 一天只能一次）。
+// ===============================================================
+
+/**
+ * 稽核的 LINE 只推給老闆本人（11-05 使用者決定）。
+ * ⚠️ 刻意**不走** personalPushEnabled 總開關：那個是「同事個人通知」的開關（10-30 關掉省額度），
+ *    稽核是老闆自己要的，關不關由 PUBLISH_AUDIT_PUSH=off 單獨控制。
+ * 收件人＝engineer 角色綁定的 LINE ＋ PUBLISH_AUDIT_LINE_TO（逗號分隔的 LINE userId，備援用）。
+ */
+async function getPublishAuditRecipients(): Promise<string[]> {
+  if (process.env.PUBLISH_AUDIT_PUSH === "off") return [];
+  const snap = await adminDb.collection("users").where("role", "==", "engineer").get();
+  const connIds = snap.docs.map((d: any) => d.data().lineUserId).filter(Boolean);
+  const bound = await Promise.all(connIds.map(async (id: string) => {
+    const c = await adminDb.collection("line_connections").doc(id).get();
+    return c.exists ? c.data()?.lineUserId : null;
+  }));
+  const extra = String(process.env.PUBLISH_AUDIT_LINE_TO || "").split(",").map((x) => x.trim()).filter(Boolean);
+  return [...new Set([...bound.filter(Boolean), ...extra])] as string[];
+}
+
+async function pushPublishAudit(text: string): Promise<number> {
+  const to = await getPublishAuditRecipients();
+  // LINE 文字訊息上限 5000 字
+  await Promise.all(to.map((id) => sendLinePushMessage(id, { type: "text", text: text.slice(0, 4900) })));
+  return to.length;
+}
+
+function publishAuditDeps(extra: { dryRun?: boolean; now?: Date } = {}) {
+  const metaToken = process.env.META_PUBLISH_AUDIT_TOKEN;
+  if (!metaToken) throw Object.assign(new Error("META_PUBLISH_AUDIT_TOKEN 沒有設定"), { httpStatus: 500 });
+  return {
+    db: adminDb, metaToken, push: pushPublishAudit,
+    appUrl: process.env.APP_URL || "https://julongsocial.vercel.app", ...extra,
+  };
+}
+
+app.get("/api/cron/publish-audit", async (req, res) => {
+  // 每分鐘的觸發來自審片搬運那支 Cloudflare Worker（review-media-worker），沿用它本來就有的 REVIEW_MEDIA_SECRET，
+  // 不另外發一把新密碼；CRON_SECRET 留給手動或之後改用 Vercel cron。
+  const auth = req.headers.authorization || "";
+  const ok = [process.env.CRON_SECRET, process.env.REVIEW_MEDIA_SECRET].some((s) => s && auth === `Bearer ${s}`);
+  if (!ok) return res.status(401).json({ error: "unauthorized" });
+  if (!adminDb) return res.status(500).json({ error: "Firebase Admin not initialized" });
+  try {
+    const r = await runPublishAudit(publishAuditDeps());
+    res.json({ checked: r.checked, changed: r.changed, alerts: r.alerts.length, report: !!r.report, reminder: !!r.reminder });
+  } catch (e: any) {
+    console.error("publish-audit failed", e);
+    res.status(e?.httpStatus || 500).json({ error: e?.message || "unknown error" });
+  }
+});
+
+/** 工程師手動跑一次（預設只算不寫、不推）。`now` 可指定時間重播某一刻，例如 "2026-11-03T20:06:00+08:00" */
+app.post("/api/admin/publish-audit/run", async (req, res) => {
+  try {
+    const user = await requireUser(req);
+    if (user.role !== "engineer") return res.status(403).json({ error: "只有工程師可以手動執行" });
+    const dryRun = req.body?.dryRun !== false;
+    const now = req.body?.now ? new Date(req.body.now) : undefined;
+    const r = await runPublishAudit(publishAuditDeps({ dryRun, now }));
+    res.json(r);
+  } catch (e: any) {
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("publish-audit run failed", e);
+    res.status(500).json({ error: e?.message || "unknown error" });
+  }
+});
+
+/** 廠商設定的「FB 粉專」下拉選單：這把 token 管得到的粉專（不回傳 token） */
+app.post("/api/admin/meta-pages", async (req, res) => {
+  try {
+    const user = await requireUser(req);
+    if (user.role !== "engineer" && user.role !== "manager") return res.status(403).json({ error: "只有主管可以設定" });
+    const token = process.env.META_PUBLISH_AUDIT_TOKEN;
+    if (!token) return res.status(500).json({ error: "META_PUBLISH_AUDIT_TOKEN 沒有設定" });
+    const pages = await listMetaPages(token);
+    res.json({ pages: pages.map((p) => ({ id: p.id, name: p.name, igUsername: p.igUsername || null })) });
+  } catch (e: any) {
+    if (e?.httpStatus) return sendAuthError(res, e);
+    console.error("meta-pages failed", e);
+    res.status(500).json({ error: e?.message || "unknown error" });
   }
 });
 

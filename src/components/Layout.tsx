@@ -25,8 +25,7 @@ import {
   Receipt,
   CalendarDays,
   ChevronDown,
-  MessageCircle
-} from 'lucide-react';
+  MessageCircle, ClipboardCheck } from 'lucide-react';
 import { auth, db } from '../firebase';
 import { signOut } from 'firebase/auth';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
@@ -232,6 +231,8 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
     // 拍攝＋剪輯交棒合併成一條產線；原本的「剪輯排序」只是一份清單，不值得單獨佔一個主分頁
     { id: 'shootBookings', label: '製作進度', icon: Film, roles: ['engineer', 'manager', 'employee'] },
     { id: 'calendar', label: '社群日曆', icon: CalendarIcon, roles: ['engineer', 'manager', 'employee'] },
+    // 發布稽核（2026-11-05）：排程 vs IG/FB 實際發布，見 PublishAuditPage.tsx
+    { id: 'publishAudit', label: '發布稽核', icon: ClipboardCheck, roles: ['engineer', 'manager'] },
     { id: 'billing', label: '帳務管理', icon: CreditCard, roles: ['engineer', 'manager'] },
     { id: 'users', label: '員工管理', icon: ShieldCheck, roles: ['engineer', 'manager'] },
     { id: 'lineIntegration', label: 'LINE 串接管理', icon: MessageCircle, roles: ['engineer', 'manager'] },

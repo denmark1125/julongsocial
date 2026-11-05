@@ -89,6 +89,10 @@ function emptyVendorForm() {
     finishedFolderName: '',
     clientFolderId: '',
     clientFolderName: '',
+    // 發布稽核（2026-11-05）：準時 IP＋粉專對應，見 src/lib/publishAudit.ts
+    strictTiming: false,
+    metaFbPageId: '',
+    metaIgPageId: '',
   };
 }
 
@@ -122,6 +126,25 @@ export default function VendorManagement() {
   const isManagerRole = myRole === 'engineer' || myRole === 'manager';
   /** 新增時只有必要欄位；編輯時或按了「其他設定」才全部顯示 */
   const showField = Boolean(editingVendor) || showAllFields;
+  // 發布稽核的粉專下拉：表單打開才去問（只有主管看得到這區）
+  const [metaPages, setMetaPages] = useState<{ id: string; name: string; igUsername: string | null }[] | null>(null);
+  const [metaPagesError, setMetaPagesError] = useState('');
+  useEffect(() => {
+    if (!isModalOpen || !isManagerRole || metaPages) return;
+    (async () => {
+      try {
+        const idToken = await auth.currentUser?.getIdToken();
+        const r = await fetch('/api/admin/meta-pages', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d?.error || `伺服器回 ${r.status}`);
+        setMetaPages(d.pages || []);
+      } catch (e: any) {
+        setMetaPagesError(e?.message || '讀不到粉專清單');
+      }
+    })();
+  }, [isModalOpen, isManagerRole, metaPages]);
 
   /**
    * 指定這個 IP 的毛片資料夾。
@@ -690,6 +713,9 @@ export default function VendorManagement() {
                       finishedFolderName: vendor.finishedFolderName || '',
                       clientFolderId: vendor.clientFolderId || '',
                       clientFolderName: vendor.clientFolderName || '',
+                      strictTiming: vendor.strictTiming || false,
+                      metaFbPageId: vendor.metaFbPageId || '',
+                      metaIgPageId: vendor.metaIgPageId || '',
                       // 還沒在這張卡上明確設定的，先帶入「發布習慣」裡已經設好的平台：
                       // 老闆原本就在那裡設過，打開來應該是已經勾好的狀態，不是一張空表。
                       // 按下儲存就會變成這張卡上的正式設定，之後不再依賴發布習慣。
@@ -1240,6 +1266,56 @@ export default function VendorManagement() {
                     })}
                   </div>
                 </div>
+
+                {/* 發布稽核（2026-11-05）：系統每分鐘拿排程去比 IG/FB 實際發出去的貼文 */}
+                {showField && isManagerRole && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">發布稽核</label>
+                  <p className="text-[13px] text-gray-400 mb-3">
+                    系統在排定時間後自動到 IG/FB 檢查有沒有發、發到哪個帳號、時間對不對，有問題推 LINE 給老闆。
+                  </p>
+                  <div className="bg-[#F5F5F0] rounded-2xl p-3 space-y-3">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formData.strictTiming}
+                        onChange={(e) => setFormData({ ...formData, strictTiming: e.target.checked })}
+                        className="mt-0.5 rounded border-gray-300 text-[#5A5A40] focus:ring-[#5A5A40]"
+                      />
+                      <span>
+                        <span className="block text-sm font-bold text-gray-700">準時發布</span>
+                        <span className="block text-[13px] text-gray-400">勾選＝一定要在排定時間發，沒發會警示。不勾＝做不出來就不發，沒發不算錯。</span>
+                      </span>
+                    </label>
+                    {([
+                      { key: 'metaFbPageId' as const, label: 'FB 粉專', hint: '' },
+                      { key: 'metaIgPageId' as const, label: 'IG 帳號', hint: '不選＝跟 FB 粉專同一個' },
+                    ]).map(({ key, label, hint }) => (
+                      <div key={key} className="flex items-center gap-3">
+                        <span className="shrink-0 w-16 text-xs font-bold text-gray-600 whitespace-nowrap">{label}</span>
+                        <select
+                          value={formData[key]}
+                          onChange={(e) => setFormData({ ...formData, [key]: e.target.value })}
+                          className="flex-1 min-w-0 px-3 py-1.5 bg-white rounded-xl border border-black/5 text-xs focus:outline-none focus:border-[#5A5A40]/30"
+                        >
+                          <option value="">{key === 'metaFbPageId' ? '不稽核' : hint}</option>
+                          {/* 已存的值不在清單裡（例如權限被拿掉）也要留著顯示，不然一存檔就被洗掉 */}
+                          {formData[key] && !metaPages?.some(p => p.id === formData[key]) && (
+                            <option value={formData[key]}>{formData[key]}（目前讀不到這個粉專）</option>
+                          )}
+                          {(metaPages || []).map(p => (
+                            <option key={p.id} value={p.id}>
+                              {key === 'metaIgPageId' ? `${p.igUsername ? '@' + p.igUsername : '（沒有 IG）'}｜${p.name}` : p.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                    {metaPagesError && <p className="text-[13px] text-red-500">{metaPagesError}</p>}
+                    {!metaPages && !metaPagesError && <p className="text-[13px] text-gray-400">讀取粉專清單中…</p>}
+                  </div>
+                </div>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>

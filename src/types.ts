@@ -1,3 +1,5 @@
+import type { PublishAudit } from './lib/publishAudit.js';
+
 export interface BillingService {
   name: string;
   price: number;
@@ -401,6 +403,15 @@ export interface Vendor {
   clientFolderId?: string;
   clientFolderName?: string;
   selfPublishing?: boolean; // Vendor publishes by themselves
+  /**
+   * 發布稽核（2026-11-05）：準時 IP＝一定要在排定時間發（又生、縈寶、廣信、CWORKS、好正點、紅茶造咖）。
+   * 準時 IP 查時間、沒發算漏發；彈性 IP（如自然風，做不出來就不發）沒發不算錯、不查時間。
+   */
+  strictTiming?: boolean;
+  /** 這個 IP 的 FB 粉專 id（稽核去這裡看 FB 貼文）。不是機密，token 在伺服器 */
+  metaFbPageId?: string;
+  /** IG 掛在哪個粉專底下；不填＝跟 FB 同一個。廣信：FB 是旅行社粉專、IG 掛在孝文的粉專 */
+  metaIgPageId?: string;
   defaultPlatforms?: VendorDefaultPlatforms; // 這個 IP 預設的發布平台（依內容形式分開），新增貼文時自動帶入；見 VendorDefaultPlatforms
   status?: 'active' | 'paused' | 'ended'; // 不填視同 active
   pausedUntil?: string;     // YYYY-MM-DD，冷凍期預計恢復日（僅 status='paused' 時有意義）
@@ -438,6 +449,8 @@ export interface Post {
   createdFrom?: string;
   /** 系統建立時用的標題。title 還等於它＝小編沒改過 */
   autoTitle?: string;
+  /** 發布稽核結果（伺服器每分鐘寫），key＝平台 IG/FB。見 src/lib/publishAudit.ts */
+  publishAudit?: PublishAudit;
 }
 
 export type AssetType = 'video' | 'post';
