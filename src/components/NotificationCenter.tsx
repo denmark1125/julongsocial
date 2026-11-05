@@ -33,11 +33,14 @@ export default function NotificationCenter({ quota, used }: { quota?: number | n
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState<string | null>(null);
   const [logs, setLogs] = useState<Log[]>([]);
+  const [managers, setManagers] = useState<{ name: string; bound: boolean }[] | null>(null);
 
   const load = async () => {
     try {
       // 顯示用欄位（名稱、發送對象分組…）以前端這份登記表為準：前後端版本不同步時畫面也不會整頁空白
-      const rows: KindRow[] = (await api('/api/admin/notify-rules')).kinds;
+      const data = await api('/api/admin/notify-rules');
+      const rows: KindRow[] = data.kinds;
+      setManagers(data.managers || null);
       setKinds(rows.map(k => ({ ...k, ...(NOTIFY_KIND_MAP.get(k.id) || {}), mode: k.mode, rule: k.rule })));
       setErr('');
     }
@@ -84,7 +87,7 @@ export default function NotificationCenter({ quota, used }: { quota?: number | n
   return (
     <div className="space-y-5">
       <p className="text-[13px] text-gray-400 px-1">
-        每種通知可以分別「關閉／測試／正式」。測試＝只發給老闆，訊息前面會註明正式時要發給誰；對客戶的通知請先測試一兩週再切正式。
+        每種通知可以分別「關閉／測試／正式」。測試＝只發給管理者（工程師帳號），訊息前面會註明正式時要發給誰；對客戶的通知請先測試一兩週再切正式。
       </p>
 
       <div className="bg-white rounded-2xl border border-black/5 shadow-sm px-5 py-4 flex flex-wrap items-baseline gap-x-8 gap-y-2 text-sm">
@@ -104,6 +107,16 @@ export default function NotificationCenter({ quota, used }: { quota?: number | n
             <p className="text-sm font-bold text-gray-600 whitespace-nowrap">{g.label}</p>
             <p className="text-[12px] text-gray-400 min-w-0">{g.hint}</p>
           </div>
+          {g.id === 'owner' && managers && (
+            <p className="text-[13px] px-1">
+              <span className="text-gray-400">目前會收到的人：</span>
+              {managers.length === 0 ? <span className="text-red-600 font-bold">沒有工程師帳號</span> : managers.map((m, i) => (
+                <span key={i} className={`mr-3 font-bold whitespace-nowrap ${m.bound ? 'text-green-700' : 'text-red-600'}`}>
+                  {m.name}（{m.bound ? 'LINE 已綁定 ✓' : 'LINE 還沒綁定，收不到'}）
+                </span>
+              ))}
+            </p>
+          )}
           <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
             <ul className="divide-y divide-black/5">
               {kinds.filter(k => k.target === g.id).map(k => {

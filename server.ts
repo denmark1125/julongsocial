@@ -2335,7 +2335,7 @@ async function userTargetsByRoles(roles: string[]): Promise<NotifyTarget[]> {
 async function ownerTargets(): Promise<NotifyTarget[]> {
   const t = await userTargetsByRoles(["engineer"]);
   for (const id of String(process.env.PUBLISH_AUDIT_LINE_TO || "").split(",").map((x) => x.trim()).filter(Boolean)) {
-    if (!t.some((x) => x.id === id)) t.push({ type: "user", id, label: "老闆" });
+    if (!t.some((x) => x.id === id)) t.push({ type: "user", id, label: "管理者" });
   }
   return t;
 }
@@ -2373,7 +2373,7 @@ async function notify(kind: string, targets: NotifyTarget[], messages: any[], su
   if (mode === "test") {
     actual = await ownerTargets();
     const who = targets.map((t) => t.label).join("、") || "（沒有收件人）";
-    msgs = [{ type: "text", text: `［測試］${def.label}，正式時會發給：${who}` }, ...messages];
+    msgs = [{ type: "text", text: `［測試］${def.label}，正式時會發給：${who}` }, ...messages]; // 測試＝改發管理者
   }
   const results: any[] = [];
   for (const t of actual) {
@@ -3058,7 +3058,14 @@ app.post("/api/admin/notify-rules", async (req, res) => {
     if (user.role !== "engineer" && user.role !== "manager") return res.status(403).json({ error: "只有主管可以看" });
     const rules = await getNotifyRules();
     const kinds = [...NOTIFY_KIND_MAP.values()].map((k) => ({ ...k, mode: resolveNotifyMode(k.id, rules, personalPushEnabled()), rule: rules[k.id] || null }));
-    res.json({ kinds, personalSwitch: personalPushEnabled() });
+    // 「給管理者」實際會發給誰：工程師帳號＋LINE 有沒有綁好（使用者 11-05 問「老闆是誰」）
+    const engineers = (await adminDb.collection("users").where("role", "==", "engineer").get()).docs.map((d: any) => d.data());
+    const managers = await Promise.all(engineers.map(async (u: any) => {
+      let bound = false;
+      if (u.lineUserId) bound = !!(await adminDb.collection("line_connections").doc(u.lineUserId).get()).data()?.lineUserId;
+      return { name: u.displayName || u.username || "（沒有名字）", bound };
+    }));
+    res.json({ kinds, personalSwitch: personalPushEnabled(), managers });
   } catch (e: any) {
     if (e?.httpStatus) return sendAuthError(res, e);
     res.status(500).json({ error: e?.message || "unknown error" });

@@ -3,9 +3,9 @@
  *
  * 規則：
  * - 新增任何 LINE 通知，一律先在這裡登記一種 kind，再呼叫 server 的 notify(kind, …)；不准再直接呼叫 sendLinePushMessage。
- * - mode：off＝不發；test＝改發給老闆、前面加「［測試］原本要發給…」；live＝照收件對象發。
+ * - mode：off＝不發；test＝改發給管理者（工程師帳號）、前面加「［測試］原本要發給…」；live＝照收件對象發。
  *   畫面上改的存在 Firestore appConfig/notifications，沒改過的用這裡的 defaultMode。
- * - 對客戶的通知（audience=client）預設一律 test：先讓老闆看一兩週，確認都對再切 live。
+ * - 對客戶的通知（audience=client）預設一律 test：先讓管理者看一兩週，確認都對再切 live。
  */
 
 export type NotifyMode = 'off' | 'test' | 'live';
@@ -13,7 +13,7 @@ export type NotifyTargetGroup = 'owner' | 'editorGroup' | 'staff' | 'clientGroup
 
 /** 通知規則頁的分組順序與名稱 */
 export const NOTIFY_TARGET_GROUPS: { id: NotifyTargetGroup; label: string; hint: string }[] = [
-  { id: 'owner', label: '給老闆', hint: '推給工程師帳號綁定的 LINE' },
+  { id: 'owner', label: '給管理者（工程師帳號）', hint: '推給「員工管理」裡角色是工程師、而且綁好 LINE 的人' },
   { id: 'staff', label: '給同事個人', hint: '推給同事自己的 LINE（要先在「同事個人通知」綁定）' },
   { id: 'editorGroup', label: '給剪輯群組', hint: '每位剪輯師一個群組（在「剪輯群組」綁定）' },
   { id: 'clientGroup', label: '給客戶群組', hint: '每個 IP 一個群組（在「客戶群組」綁定）；群組按人數扣額度' },
@@ -46,11 +46,11 @@ export const NOTIFY_KINDS: NotifyKindDef[] = [
   { id: 'editor_review', target: 'editorGroup', label: '剪輯送審通知', audience: 'internal', recipientLabel: '該剪輯師的剪輯群組', whenLabel: '剪輯師交片送審時', defaultMode: 'live', priority: 1 },
   { id: 'editor_reminder', target: 'editorGroup', label: '待審提醒', audience: 'internal', recipientLabel: '剪輯群組', whenLabel: '每 2 個上班日 09:30', defaultMode: 'live', priority: 2 },
   // ── 給老闆 ──
-  { id: 'publish_audit', target: 'owner', label: '發布稽核', audience: 'internal', recipientLabel: '老闆', whenLabel: '12:00、18:00、發布前檢查與發布後有問題時', defaultMode: 'live', priority: 1 },
-  { id: 'stock_alert', target: 'owner', label: '影片庫存告急', audience: 'internal', recipientLabel: '老闆', whenLabel: '每天 09:00', defaultMode: 'personalSwitch', priority: 3 },
-  { id: 'flow_digest', target: 'owner', label: '製作進度彙總', audience: 'internal', recipientLabel: '老闆', whenLabel: '每天 09:30', defaultMode: 'personalSwitch', priority: 3 },
-  { id: 'flow_event', target: 'owner', label: '交棒即時通知', audience: 'internal', recipientLabel: '老闆', whenLabel: '新片送審／上傳雲端時', defaultMode: 'personalSwitch', priority: 3 },
-  { id: 'shoot_sync_alert', target: 'owner', label: 'TimeTree 同步失敗', audience: 'internal', recipientLabel: '老闆', whenLabel: '同步出錯時', defaultMode: 'personalSwitch', priority: 2 },
+  { id: 'publish_audit', target: 'owner', label: '發布稽核', audience: 'internal', recipientLabel: '管理者', whenLabel: '12:00、18:00、發布前檢查與發布後有問題時', defaultMode: 'live', priority: 1 },
+  { id: 'stock_alert', target: 'owner', label: '影片庫存告急', audience: 'internal', recipientLabel: '管理者', whenLabel: '每天 09:00', defaultMode: 'personalSwitch', priority: 3 },
+  { id: 'flow_digest', target: 'owner', label: '製作進度彙總', audience: 'internal', recipientLabel: '管理者', whenLabel: '每天 09:30', defaultMode: 'personalSwitch', priority: 3 },
+  { id: 'flow_event', target: 'owner', label: '交棒即時通知', audience: 'internal', recipientLabel: '管理者', whenLabel: '新片送審／上傳雲端時', defaultMode: 'personalSwitch', priority: 3 },
+  { id: 'shoot_sync_alert', target: 'owner', label: 'TimeTree 同步失敗', audience: 'internal', recipientLabel: '管理者', whenLabel: '同步出錯時', defaultMode: 'personalSwitch', priority: 2 },
   // ── 規劃中（之後幾個階段做）──
   { id: 'air_notice', target: 'clientGroup', label: '上片通知', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '發布後確認上線＋緩衝 10 分鐘', defaultMode: 'test', priority: 1, planned: true },
   { id: 'review_chase', target: 'staff', label: '內部催片', audience: 'internal', recipientLabel: 'IP 指派的負責同事', whenLabel: '上片前 24 小時還沒審完', defaultMode: 'test', priority: 2, planned: true },
@@ -78,4 +78,4 @@ export function resolveNotifyMode(kindId: string, rules: NotifyRules | null | un
   return base;
 }
 
-export const NOTIFY_MODE_LABEL: Record<NotifyMode, string> = { off: '關閉', test: '測試（只發老闆）', live: '正式' };
+export const NOTIFY_MODE_LABEL: Record<NotifyMode, string> = { off: '關閉', test: '測試（只發管理者）', live: '正式' };
