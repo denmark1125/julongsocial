@@ -1,7 +1,8 @@
 /**
- * 發布前檢查（2026-11-05）：今天的系統排程 vs Meta Business Suite 日曆上「排好還沒發」的內容。
+ * 發布前檢查（2026-11-05）：今天的系統排程 vs Meta Business Suite／TikTok Business Suite 上「排好還沒發」的內容。
  *
- * 資料來源是 RPA 機器人（rpa/meta_calendar.py）抄回來的卡片，存在 publishPrechecks/{日期}。
+ * 資料來源是 RPA 機器人抄回來的卡片，存在 publishPrechecks/{日期}：
+ *   vendors＝Meta（rpa/meta_calendar.py）、tiktok＝TikTok（rpa/tiktok_calendar.py）。兩邊用 mergeCalendars 併起來再比。
  * Meta 官方 API 讀不到 Business Suite 的待發排程，所以只能用瀏覽器看畫面。
  *
  * 只查「準時 IP」、只查今天、只查還沒到時間的貼文：已經過時間的交給發布後稽核（publishAudit.ts）。
@@ -11,7 +12,7 @@
 export interface CalendarCard {
   date: string;      // yyyy-MM-dd（台北）
   time: string;      // HH:mm
-  platform: 'FB' | 'IG' | '';
+  platform: 'FB' | 'IG' | 'TikTok' | '';
   cover?: string;
   status?: string;   // 畫面上的狀態字（現存／已典藏…）
   assetId?: string;
@@ -22,6 +23,32 @@ export interface VendorCalendar {
   name?: string;
   error?: string;
   cards?: CalendarCard[];
+  /** 這份日曆涵蓋哪些平台（mergeCalendars 填）；沒填＝舊資料，只有 IG/FB */
+  platforms?: string[];
+  /** 個別平台讀不到（例如 TikTok 登入過期但 Meta 正常） */
+  platformErrors?: Record<string, string>;
+}
+
+/** Meta 與 TikTok 兩個機器人抄回來的日曆併成一份；哪個平台讀不到就只有那個平台標「讀不到」 */
+export function mergeCalendars(meta?: Record<string, VendorCalendar> | null, tiktok?: Record<string, VendorCalendar> | null): Record<string, VendorCalendar> {
+  const out: Record<string, VendorCalendar> = {};
+  for (const vid of new Set([...Object.keys(meta || {}), ...Object.keys(tiktok || {})])) {
+    const m = meta?.[vid];
+    const t = tiktok?.[vid];
+    const platforms: string[] = [];
+    const platformErrors: Record<string, string> = {};
+    const cards: CalendarCard[] = [];
+    if (m) {
+      platforms.push('IG', 'FB');
+      if (!m.ok) { platformErrors.IG = platformErrors.FB = m.error || '讀不到 Meta 排程'; } else cards.push(...(m.cards || []));
+    }
+    if (t) {
+      platforms.push('TikTok');
+      if (!t.ok) platformErrors.TikTok = t.error || '讀不到 TikTok 排程'; else cards.push(...(t.cards || []));
+    }
+    out[vid] = { ok: true, name: m?.name || t?.name, cards, platforms, platformErrors };
+  }
+  return out;
 }
 
 export type PrecheckStatus =
@@ -41,8 +68,8 @@ export const PRECHECK_TOLERANCE_MIN = 15;
 /** 差超過這麼多就不認為是同一則（避免把早上已發的那則當成「時間排錯」） */
 export const PRECHECK_MATCH_WINDOW_MIN = 180;
 /** 卡片下方有這些字＝已經發出去了，不是待發排程 */
-const PUBLISHED_STATUS = ['現存', '已典藏', '已發佈', '已發布'];
-const PLATFORMS = ['IG', 'FB'] as const;
+const PUBLISHED_STATUS = ['現存', '已典藏', '已發佈', '已發布', 'published'];
+const PLATFORMS = ['IG', 'FB', 'TikTok'] as const;
 
 const minutes = (hhmm: string) => {
   const [h, m] = hhmm.split(':').map(Number);
@@ -57,9 +84,12 @@ export interface PrecheckPostInput { id: string; vendorId: string; scheduledAt: 
  */
 export function precheckOne(
   post: PrecheckPostInput, platform: string, cal: VendorCalendar | undefined, used: Set<CalendarCard> = new Set(),
-): PrecheckResult {
+): PrecheckResult | null {
   if (!cal) return { status: 'unreadable', error: '機器人這一輪沒讀這家' };
+  // 這份日曆沒涵蓋這個平台（例如只發 TikTok 的祥濱沒有 Meta 日曆）→ 不判斷
+  if (!(cal.platforms || ['IG', 'FB']).includes(platform)) return null; // 沒標涵蓋平台＝舊格式，只有 Meta
   if (!cal.ok) return { status: 'unreadable', error: cal.error || '讀不到日曆' };
+  if (cal.platformErrors?.[platform]) return { status: 'unreadable', error: cal.platformErrors[platform] };
   const day = post.scheduledAt.slice(0, 10);
   const plan = minutes(post.scheduledAt.slice(11, 16));
   const cands = (cal.cards || [])
@@ -86,7 +116,8 @@ function runPrecheck(posts: PrecheckPostInput[], calendars: Record<string, Vendo
     const used = usedBy.get(p.vendorId) || new Set<CalendarCard>();
     usedBy.set(p.vendorId, used);
     for (const pf of (p.platforms || []).filter(x => (PLATFORMS as readonly string[]).includes(x))) {
-      rows.push({ postId: p.id, vendorId: p.vendorId, platform: pf, result: precheckOne(p, pf, calendars[p.vendorId], used) });
+      const result = precheckOne(p, pf, calendars[p.vendorId], used);
+      if (result) rows.push({ postId: p.id, vendorId: p.vendorId, platform: pf, result });
     }
   }
   const used = new Set<CalendarCard>();
@@ -127,9 +158,9 @@ export const PRECHECK_ICON: Record<PrecheckStatus, string> = {
 export function describePrecheck(r: PrecheckResult, scheduledAt: string): string {
   const plan = scheduledAt.slice(11, 16);
   switch (r.status) {
-    case 'scheduled': return `Meta 已排好 ${r.metaTime}`;
-    case 'time_diff': return `Meta 排 ${r.metaTime}，系統寫 ${plan}`;
-    case 'not_scheduled': return `Meta 上還沒排（系統寫 ${plan}）`;
-    case 'unreadable': return `讀不到 Meta 日曆：${r.error || ''}`;
+    case 'scheduled': return `後台已排好 ${r.metaTime}`;
+    case 'time_diff': return `後台排 ${r.metaTime}，系統寫 ${plan}`;
+    case 'not_scheduled': return `後台還沒排（系統寫 ${plan}）`;
+    case 'unreadable': return `讀不到後台排程：${r.error || ''}`;
   }
 }

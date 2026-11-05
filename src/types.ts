@@ -419,6 +419,8 @@ export interface Vendor {
    * 'custom'＝封面另外設計（好正點：同事重新設計、上面有影片標題）→ 封面檢查不判對錯，只給人目視。
    */
   coverMode?: 'first_frame' | 'custom';
+  /** TikTok Business Suite 的帳號 ID（bs_id），TikTok 機器人（rpa/tiktok_calendar.py）用它切換帳號 */
+  tiktokBsId?: string;
   defaultPlatforms?: VendorDefaultPlatforms; // 這個 IP 預設的發布平台（依內容形式分開），新增貼文時自動帶入；見 VendorDefaultPlatforms
   status?: 'active' | 'paused' | 'ended'; // 不填視同 active
   pausedUntil?: string;     // YYYY-MM-DD，冷凍期預計恢復日（僅 status='paused' 時有意義）

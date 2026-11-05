@@ -4,7 +4,7 @@ import {
   taipeiToDate, type LivePost, type PlatformAudit,
 } from './publishAudit.js';
 import { fetchFacebookPosts, fetchInstagramPosts, listMetaPages, type MetaPage } from './metaGraph.js';
-import { describePrecheck, PRECHECK_ICON, precheckAll, unmatchedCards, type VendorCalendar } from './publishPrecheck.js';
+import { describePrecheck, mergeCalendars, PRECHECK_ICON, precheckAll, unmatchedCards, type VendorCalendar } from './publishPrecheck.js';
 import { chaseTimeFor } from './notify/reviewChase.js';
 
 /**
@@ -60,7 +60,7 @@ function taipeiStamp(d: Date): string {
   return `${taipeiDay(d)}T${taipeiTime(d)}`;
 }
 
-interface VendorInfo { id: string; name: string; strict: boolean; fbPageId?: string; igPageId?: string }
+interface VendorInfo { id: string; name: string; strict: boolean; fbPageId?: string; igPageId?: string; tiktokBsId?: string }
 
 // IP 名單幾乎不變：同一台伺服器 10 分鐘內重複用，不要每次叫醒都重讀 20 幾筆（省資料庫讀取）
 let vendorCache: { at: number; map: Map<string, VendorInfo> } | null = null;
@@ -78,7 +78,7 @@ async function loadVendorsFresh(db: any): Promise<Map<string, VendorInfo>> {
     const v = d.data() || {};
     return [d.id, {
       id: d.id, name: v.name || d.id, strict: !!v.strictTiming,
-      fbPageId: v.metaFbPageId || undefined, igPageId: v.metaIgPageId || v.metaFbPageId || undefined,
+      fbPageId: v.metaFbPageId || undefined, igPageId: v.metaIgPageId || v.metaFbPageId || undefined, tiktokBsId: v.tiktokBsId || undefined,
     }];
   }));
 }
@@ -283,7 +283,7 @@ async function buildNoonBrief(db: any, vmap: Map<string, VendorInfo>, now: Date)
   if (!items.length) return null;
   const day = taipeiDay(now);
   const pre = (await db.collection('publishPrechecks').doc(day).get()).data();
-  const calendars: Record<string, VendorCalendar> = pre?.vendors || {};
+  const calendars: Record<string, VendorCalendar> = mergeCalendars(pre?.vendors, pre?.tiktok);
   const meta = new Map(precheckAll(items.filter(x => x.vendor.strict && calendars[x.vendor.id]).map(x => x.post), calendars)
     .map(r => [`${r.postId}|${r.platform}`, r.result]));
   const lines = items.map(x => {
@@ -370,20 +370,22 @@ export async function buildDailyReport(
 }
 
 /**
- * 拿機器人抄回來的 Meta 日曆比今天還沒到時間的準時 IP 排程。
- * 同一份抄本只比一次（evaluatedFetchedAt），結果寫回同一份文件給頁面看。回傳要推的 LINE 文字（沒問題回 null）。
+ * 拿機器人抄回來的日曆（Meta＋TikTok）比今天還沒到時間的準時 IP 排程；順便做 TikTok 的發布後檢查。
+ * 同一份抄本只比一次（evaluatedKey＝兩個機器人的抄寫時間），結果寫回同一份文件給頁面看。回傳要推的 LINE 文字（沒問題回 null）。
  */
 async function evaluatePrecheck(db: any, vmap: Map<string, VendorInfo>, now: Date, dryRun: boolean): Promise<string | null> {
   const day = taipeiDay(now);
   const ref = db.collection('publishPrechecks').doc(day);
   const doc = (await ref.get()).data();
-  if (!doc?.fetchedAt || (!dryRun && doc.evaluatedFetchedAt === doc.fetchedAt)) return null;
+  if (!doc?.fetchedAt && !doc?.tiktokFetchedAt) return null;
+  const key = `${doc.fetchedAt || ''}|${doc.tiktokFetchedAt || ''}`;
+  if (!dryRun && doc.evaluatedKey === key) return null;
 
-  const calendars: Record<string, VendorCalendar> = doc.vendors || {};
+  const calendars = mergeCalendars(doc.vendors, doc.tiktok);
   const nowStamp = taipeiStamp(now);
   const snap = await db.collection('posts').where('scheduledAt', '>=', `${day}T00:00`).where('scheduledAt', '<=', `${day}T23:59`).get();
   const dayPosts = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }))
-    .filter((p: any) => vmap.get(p.vendorId)?.strict && vmap.get(p.vendorId)?.fbPageId);
+    .filter((p: any) => vmap.get(p.vendorId)?.strict && (vmap.get(p.vendorId)?.fbPageId || vmap.get(p.vendorId)?.tiktokBsId));
   const posts = dayPosts.filter((p: any) => p.scheduledAt > nowStamp); // 已過時間的交給發布後稽核
   const rows = precheckAll(posts, calendars);
   const extra = unmatchedCards(dayPosts, calendars, day, taipeiTime(now));
@@ -394,27 +396,71 @@ async function evaluatePrecheck(db: any, vmap: Map<string, VendorInfo>, now: Dat
   for (const r of rows) {
     if (r.result.status === 'scheduled') continue;
     const p: any = titleOf.get(r.postId);
-    const key = `${r.postId}|${PRECHECK_ICON[r.result.status]} ${vmap.get(r.vendorId)?.name || ''} {PF}「${(p?.title || '').slice(0, 16)}」${describePrecheck(r.result, p.scheduledAt)}`;
-    grouped.set(key, [...(grouped.get(key) || []), r.platform]);
+    const k = `${r.postId}|${PRECHECK_ICON[r.result.status]} ${vmap.get(r.vendorId)?.name || ''} {PF}「${(p?.title || '').slice(0, 16)}」${describePrecheck(r.result, p.scheduledAt)}`;
+    grouped.set(k, [...(grouped.get(k) || []), r.platform]);
   }
   for (const [k, pfs] of grouped) lines.push(k.slice(k.indexOf('|') + 1).replace('{PF}', pfs.join('/')));
   for (const x of extra) {
-    lines.push(`❓ ${vmap.get(x.vendorId)?.name || ''} ${x.card.platform} Meta 排了 ${x.card.time}，系統今天沒有對應的排程 → 請確認（業主自己排的就不用管）`);
+    lines.push(`❓ ${vmap.get(x.vendorId)?.name || ''} ${x.card.platform} 後台排了 ${x.card.time}，系統今天沒有對應的排程 → 請確認（業主自己排的就不用管）`);
   }
+
+  // TikTok 發布後檢查：TikTok 沒有能用的讀取管道，只能靠機器人抄回來的「已發布」卡片（只比時間）
+  const ttLines = doc.tiktokFetchedAt ? await auditTikTok(db, vmap, doc.tiktok || {}, now, dryRun) : [];
 
   if (!dryRun) {
     await ref.set({
-      evaluatedFetchedAt: doc.fetchedAt,
+      evaluatedKey: key,
+      evaluatedFetchedAt: doc.fetchedAt || null,
       evaluatedAt: now.toISOString(),
       results: Object.fromEntries(rows.map(r => [`${r.postId}|${r.platform}`, r.result])),
       extra: extra.map(x => ({ vendorId: x.vendorId, ...x.card })),
     }, { merge: true });
   }
-  if (!lines.length) return null;
-  const at = taipeiTime(new Date(doc.fetchedAt));
-  // 中午前那一輪（11:55）的結果併進 12:00「今天要發的片」，不另外推，免得 5 分鐘內收兩則
-  if (at < NOON_AT) return null;
-  return [`🗓️ 發布前檢查（${at} 看 Meta 排程）`, ...lines].join('\n');
+  const at = [doc.fetchedAt, doc.tiktokFetchedAt].filter(Boolean).map((t: string) => taipeiTime(new Date(t))).sort().pop() || '';
+  const out: string[] = [];
+  // 中午前那一輪（09:35／11:55）的發布前結果併進 12:00「今天要發的片」，不另外推；TikTok 發布後的問題照推
+  if (lines.length && at >= NOON_AT) out.push([`🗓️ 發布前檢查（${at} 看後台排程）`, ...lines].join('\n'));
+  if (ttLines.length) out.push(['🎵 TikTok 發布檢查', ...ttLines].join('\n'));
+  return out.length ? out.join('\n\n') : null;
+}
+
+/**
+ * TikTok 發布後檢查（2026-11-05）：最近 48 小時排了 TikTok 的貼文，在機器人抄回來的「已發布」卡片裡找得到嗎、時間對嗎。
+ * 用跟 IG/FB 同一套 auditOne（TikTok 沒文案可比，只比時間）。結果寫 posts.publishAudit.TikTok，問題只推一次。
+ * 時間只到機器人有跑的時候：晚上的片要隔天早上 09:35 才查得到（這台電腦下班關機）。
+ */
+async function auditTikTok(db: any, vmap: Map<string, VendorInfo>, tiktok: Record<string, VendorCalendar>, now: Date, dryRun: boolean): Promise<string[]> {
+  const live: LivePost[] = [];
+  for (const [vid, cal] of Object.entries(tiktok)) {
+    if (!cal?.ok) continue;
+    for (const c of cal.cards || []) {
+      if (c.status !== 'published' || !c.date || !c.time) continue;
+      live.push({ platform: 'TikTok', id: `tt_${vid}_${c.date}_${c.time}_${(c.cover || '').slice(-24)}`, vendorId: vid,
+        publishedAt: taipeiToDate(`${c.date}T${c.time}`).toISOString(), thumbnailUrl: c.cover });
+    }
+  }
+  const from = taipeiStamp(new Date(now.getTime() - 48 * 3600_000));
+  const snap = await db.collection('posts').where('scheduledAt', '>=', from).where('scheduledAt', '<=', taipeiStamp(now)).get();
+  const posts = snap.docs.map((d: any) => ({ id: d.id, ref: d.ref, ...d.data() }))
+    .filter((p: any) => (p.platforms || []).includes('TikTok') && vmap.get(p.vendorId)?.tiktokBsId && tiktok[p.vendorId]?.ok)
+    .sort((a: any, b: any) => a.scheduledAt.localeCompare(b.scheduledAt));
+  const claimed = new Set<string>();
+  for (const p of posts) { const a = p.publishAudit?.TikTok; if (a?.livePostId && a.forScheduledAt === p.scheduledAt) claimed.add(a.livePostId); }
+  const lines: string[] = [];
+  for (const p of posts) {
+    const v = vmap.get(p.vendorId)!;
+    const prev: PlatformAudit | undefined = p.publishAudit?.TikTok;
+    if (prev?.livePostId) claimed.delete(prev.livePostId);
+    const audit = auditOne({ post: p, platform: 'TikTok', strictTiming: v.strict, live, now, claimed, previous: prev, allowTikTok: true });
+    if (audit.livePostId) claimed.add(audit.livePostId);
+    if (shouldAlert(audit) || (audit.status === 'missing' && !audit.alertedAt)) {
+      lines.push(`${AUDIT_STATUS_ICON[audit.status]} ${v.name}「${(p.title || '').slice(0, 16)}」${describeAudit(audit, p.scheduledAt, id => vmap.get(id)?.name || id)}`);
+      audit.alertedAt = now.toISOString();
+    }
+    const changed = !prev || prev.status !== audit.status || prev.livePostId !== audit.livePostId || prev.alertedAt !== audit.alertedAt || prev.forScheduledAt !== audit.forScheduledAt;
+    if (changed && !dryRun) await p.ref.update({ 'publishAudit.TikTok': stripUndefined(audit) });
+  }
+  return lines;
 }
 
 /**

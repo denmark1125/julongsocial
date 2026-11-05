@@ -133,3 +133,19 @@ describe('改了排程時間', () => {
     expect(shouldAlert(r)).toBe(true);
   });
 });
+
+describe('TikTok 發布後（只比時間）', () => {
+  const tt: LivePost[] = [{ platform: 'TikTok', id: 'tt1', vendorId: 'xiang', publishedAt: '2026-11-03T11:56:00Z' }];
+  it('祥濱 11/3 排 20:00、TikTok 19:56 發 → 正確（差 4 分鐘）', () => {
+    const r = auditOne({ post: { id: 'p', vendorId: 'xiang', scheduledAt: '2026-11-03T20:00', content: '誰說辦桌不能超浪漫' }, platform: 'TikTok', strictTiming: true, live: tt, now: new Date('2026-11-04T01:35:00Z'), allowTikTok: true });
+    expect(r.status).toBe('ok');
+  });
+  it('沒開 allowTikTok（每分鐘的 Meta 稽核）→ 不碰 TikTok', () => {
+    const r = auditOne({ post: { id: 'p', vendorId: 'xiang', scheduledAt: '2026-11-03T20:00' }, platform: 'TikTok', strictTiming: true, live: tt, now: new Date('2026-11-04T01:35:00Z') });
+    expect(r.status).toBe('unsupported');
+  });
+  it('隔天早上還找不到 → 沒有發', () => {
+    const r = auditOne({ post: { id: 'p', vendorId: 'xiang', scheduledAt: '2026-11-05T20:00' }, platform: 'TikTok', strictTiming: true, live: tt, now: new Date('2026-11-06T01:35:00Z'), allowTikTok: true });
+    expect(r.status).toBe('missing');
+  });
+});

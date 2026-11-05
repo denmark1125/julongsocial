@@ -95,6 +95,7 @@ function emptyVendorForm() {
     metaFbPageId: '',
     metaIgPageId: '',
     coverMode: 'first_frame' as 'first_frame' | 'custom',
+    tiktokBsId: '',
   };
 }
 
@@ -720,6 +721,7 @@ export default function VendorManagement() {
                       metaFbPageId: vendor.metaFbPageId || '',
                       metaIgPageId: vendor.metaIgPageId || '',
                       coverMode: vendor.coverMode || 'first_frame',
+                      tiktokBsId: vendor.tiktokBsId || '',
                       // 還沒在這張卡上明確設定的，先帶入「發布習慣」裡已經設好的平台：
                       // 老闆原本就在那裡設過，打開來應該是已經勾好的狀態，不是一張空表。
                       // 按下儲存就會變成這張卡上的正式設定，之後不再依賴發布習慣。
@@ -1366,6 +1368,17 @@ export default function VendorManagement() {
                         <option value="first_frame">封面＝影片第一幀（不是就通知）</option>
                         <option value="custom">封面另外設計（不判對錯，只給人看）</option>
                       </select>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="shrink-0 w-16 text-xs font-bold text-gray-600 whitespace-nowrap">TikTok</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={formData.tiktokBsId}
+                        onChange={(e) => setFormData({ ...formData, tiktokBsId: e.target.value.replace(/\D/g, '') })}
+                        placeholder="TikTok Business Suite 帳號 ID（不填＝不檢查 TikTok）"
+                        className="flex-1 min-w-0 px-3 py-1.5 bg-white rounded-xl border border-black/5 text-xs focus:outline-none focus:border-[#5A5A40]/30"
+                      />
                     </div>
                     {metaPagesError && <p className="text-[13px] text-red-500">{metaPagesError}</p>}
                     {!metaPages && !metaPagesError && <p className="text-[13px] text-gray-400">讀取粉專清單中…</p>}

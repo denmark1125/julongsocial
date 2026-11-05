@@ -7,7 +7,7 @@ import { Post, Vendor } from '../types';
 import {
   AUDIT_STATUS_ICON, AUDIT_STATUS_LABEL, AUDITABLE_PLATFORMS, describeAudit, type AuditStatus, type PlatformAudit,
 } from '../lib/publishAudit';
-import { describePrecheck, PRECHECK_ICON, precheckAll, unmatchedCards, type PrecheckResult, type VendorCalendar } from '../lib/publishPrecheck';
+import { describePrecheck, mergeCalendars, PRECHECK_ICON, precheckAll, unmatchedCards, type PrecheckResult, type VendorCalendar } from '../lib/publishPrecheck';
 
 /**
  * 發布稽核（2026-11-05）：某一天排定的貼文，IG/FB 實際有沒有發、發在哪、時間對不對。
@@ -41,7 +41,7 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [report, setReport] = useState<Report | null>(null);
   // 發布前檢查：RPA 機器人（11:55、17:30、18:00）抄回來的 Meta 排程日曆
-  const [precheckDoc, setPrecheckDoc] = useState<{ fetchedAt?: string; vendors?: Record<string, VendorCalendar> } | null>(null);
+  const [precheckDoc, setPrecheckDoc] = useState<{ fetchedAt?: string; tiktokFetchedAt?: string; vendors?: Record<string, VendorCalendar>; tiktok?: Record<string, VendorCalendar> } | null>(null);
   const [running, setRunning] = useState(false);
   const [runMsg, setRunMsg] = useState('');
   // 「立刻檢查」的結果（不寫資料庫、不推 LINE），蓋在畫面上直到換日期
@@ -59,15 +59,17 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
   const vmap = useMemo(() => new Map(vendors.map(v => [v.id!, v])), [vendors]);
   // 跟伺服器用同一個 precheckAll 算，畫面不另外寫一套
   const precheck = useMemo(() => {
-    if (!precheckDoc?.vendors) return new Map<string, PrecheckResult>();
-    const strictPosts = posts.filter(p => vmap.get(p.vendorId)?.strictTiming && precheckDoc.vendors![p.vendorId]);
-    return new Map(precheckAll(strictPosts as any, precheckDoc.vendors).map(r => [`${r.postId}|${r.platform}`, r.result]));
+    if (!precheckDoc?.vendors && !precheckDoc?.tiktok) return new Map<string, PrecheckResult>();
+    const cals = mergeCalendars(precheckDoc.vendors, precheckDoc.tiktok);
+    const strictPosts = posts.filter(p => vmap.get(p.vendorId)?.strictTiming && cals[p.vendorId]);
+    return new Map(precheckAll(strictPosts as any, cals).map(r => [`${r.postId}|${r.platform}`, r.result]));
   }, [precheckDoc, posts, vmap]);
   // Meta 排了、系統當天卻沒有的（看機器人抄的那一刻之後的）
   const precheckExtra = useMemo(() => {
-    if (!precheckDoc?.vendors || !precheckDoc.fetchedAt) return [];
+    if ((!precheckDoc?.vendors && !precheckDoc?.tiktok) || !(precheckDoc.fetchedAt || precheckDoc.tiktokFetchedAt)) return [];
     const strictPosts = posts.filter(p => vmap.get(p.vendorId)?.strictTiming);
-    return unmatchedCards(strictPosts as any, precheckDoc.vendors, day, format(parseISO(precheckDoc.fetchedAt), 'HH:mm'));
+    return unmatchedCards(strictPosts as any, mergeCalendars(precheckDoc.vendors, precheckDoc.tiktok), day,
+      format(parseISO((precheckDoc.fetchedAt || precheckDoc.tiktokFetchedAt)!), 'HH:mm'));
   }, [precheckDoc, posts, vmap, day]);
   const vendorName = (id: string) => vmap.get(id)?.name || id;
 
@@ -79,9 +81,12 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
         const fresh = preview[`${p.id}|${pf}`];
         const saved = p.publishAudit?.[pf];
         const a = fresh || (saved && saved.forScheduledAt === p.scheduledAt ? saved : undefined);
-        const configured = !!v?.metaFbPageId;
-        // 沒設粉專＝根本沒在查，不能顯示成「等待中」騙人，跟尚未支援的平台一樣灰掉、不計數
-        const status: AuditStatus = !AUDITABLE_PLATFORMS.includes(pf as any) || !configured ? 'unsupported' : (a?.status || 'pending');
+        // TikTok 靠機器人抄卡片（隔天早上 09:35 才查得到晚上的片），IG/FB 靠 Meta API 每分鐘查
+        const isTikTok = pf === 'TikTok';
+        const configured = isTikTok ? !!v?.tiktokBsId : !!v?.metaFbPageId;
+        const supported = isTikTok || AUDITABLE_PLATFORMS.includes(pf as any);
+        // 沒設粉專／帳號＝根本沒在查，不能顯示成「等待中」騙人，跟尚未支援的平台一樣灰掉、不計數
+        const status: AuditStatus = !supported || !configured ? 'unsupported' : (a?.status || 'pending');
         return { pf, a, status, configured };
       });
       const worst = Math.min(...cells.map(c => SEVERITY[c.status]), 99);
@@ -129,7 +134,7 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
         <div className="space-y-1">
           <h2 className="text-2xl font-bold serif text-[#5A5A40]">發布稽核</h2>
-          <p className="text-sm text-gray-500">排定時間一到，系統自動去 IG/FB 看有沒有發、發到哪個帳號、時間對不對。TikTok 之後接。</p>
+          <p className="text-sm text-gray-500">排定時間一到，系統自動去 IG/FB 看有沒有發、發到哪個帳號、時間對不對；TikTok 由電腦上的機器人檢查（晚上的片隔天早上確認）。</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center bg-white p-1 rounded-xl border border-black/5 shadow-sm">
@@ -157,9 +162,11 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
 
       <p className="text-[13px] text-gray-400 -mt-3">
         發布前檢查：{precheckDoc?.fetchedAt ? `機器人 ${format(parseISO(precheckDoc.fetchedAt), 'HH:mm')} 看過 Meta 排程` : '這天機器人還沒看過 Meta 排程（每天 09:35、11:55、17:30、18:00 自動看，電腦要開著）'}
-        {precheckDoc?.vendors && Object.values<VendorCalendar>(precheckDoc.vendors).some(v => !v.ok) && (
-          <span className="text-red-500">　讀不到：{Object.values<VendorCalendar>(precheckDoc.vendors).filter(v => !v.ok).map(v => `${v.name}（${v.error}）`).join('、')}</span>
-        )}
+        {(() => {
+          const bad = [...Object.values<VendorCalendar>(precheckDoc?.vendors || {}).filter(v => !v.ok).map(v => `${v.name} Meta（${v.error}）`),
+            ...Object.values<VendorCalendar>(precheckDoc?.tiktok || {}).filter(v => !v.ok).map(v => `${v.name} TikTok（${v.error}）`)];
+          return bad.length ? <span className="text-red-500">　讀不到：{bad.join('、')}</span> : null;
+        })()}
       </p>
 
       {precheckExtra.length > 0 && (
@@ -223,9 +230,10 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                 )}
                 <div className="flex flex-wrap gap-2">
                   {cells.map(({ pf, a, status, configured }) => {
-                    const text = !configured && AUDITABLE_PLATFORMS.includes(pf as any)
-                      ? '這個 IP 還沒設定粉專'
-                      : a ? describeAudit(a, p.scheduledAt, vendorName) : AUDIT_STATUS_LABEL[status];
+                    const text = !configured && (pf === 'TikTok' || AUDITABLE_PLATFORMS.includes(pf as any))
+                      ? (pf === 'TikTok' ? '這個 IP 還沒設定 TikTok 帳號' : '這個 IP 還沒設定粉專')
+                      : a ? describeAudit(a, p.scheduledAt, vendorName)
+                      : pf === 'TikTok' && status === 'pending' ? '機器人下一輪確認（晚上的片隔天 09:35）' : AUDIT_STATUS_LABEL[status];
                     return (
                       <div key={pf} className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[13px] ${TONE[status]}`}>
                         <span className="font-bold whitespace-nowrap">{AUDIT_STATUS_ICON[status]} {pf}</span>

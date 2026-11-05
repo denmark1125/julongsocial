@@ -14,7 +14,8 @@ import { titleSimilarity } from './postMatch.js';
  * 本檔是純函式，伺服器排程與畫面共用；不要在別處另寫一套比對。
  */
 
-export type AuditPlatform = 'IG' | 'FB';
+export type AuditPlatform = 'IG' | 'FB' | 'TikTok';
+/** 每分鐘稽核（Meta API）查得到的平台；TikTok 只能靠機器人抄回來的卡片，另外由 auditTikTok 呼叫（allowTikTok） */
 export const AUDITABLE_PLATFORMS: AuditPlatform[] = ['IG', 'FB'];
 
 /** 平台上抓回來的一則貼文 */
@@ -173,6 +174,8 @@ export interface AuditOneArgs {
   now: Date;
   claimed?: Set<string>;
   previous?: PlatformAudit;
+  /** TikTok 的 live 由機器人卡片組成（發布後隔天檢查）時才允許 */
+  allowTikTok?: boolean;
 }
 
 /** 一筆排程的一個平台 → 稽核結果。不決定要不要推 LINE（那是 shouldAlert 的事） */
@@ -181,9 +184,9 @@ export function auditOne(args: AuditOneArgs): PlatformAudit {
   return { ...auditCore({ ...args, previous: prev }), forScheduledAt: args.post.scheduledAt };
 }
 
-function auditCore({ post, platform, strictTiming, live, now, claimed, previous }: AuditOneArgs): PlatformAudit {
+function auditCore({ post, platform, strictTiming, live, now, claimed, previous, allowTikTok }: AuditOneArgs): PlatformAudit {
   const checkedAt = now.toISOString();
-  if (!AUDITABLE_PLATFORMS.includes(platform as AuditPlatform)) {
+  if (!AUDITABLE_PLATFORMS.includes(platform as AuditPlatform) && !(allowTikTok && platform === 'TikTok')) {
     return { status: 'unsupported', checkedAt };
   }
   const p = platform as AuditPlatform;

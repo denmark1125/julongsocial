@@ -53,3 +53,27 @@ describe('Meta 有排、系統沒有', () => {
     expect(unmatchedCards([post('yasun', '2026-11-05T20:00')].map(p => ({ ...p, vendorId: 'yasun' })), { yasun: cal.yasun }, '2026-11-05', '17:30')).toEqual([]);
   });
 });
+
+describe('Meta＋TikTok 併在一起比', () => {
+  it('祥濱只發 TikTok：沒有 Meta 日曆也不會報 IG/FB 讀不到；TikTok 已排好', async () => {
+    const { mergeCalendars } = await import('../publishPrecheck');
+    const cals = mergeCalendars({}, { xiang: { ok: true, cards: [{ date: '2026-11-07', time: '20:00', platform: 'TikTok', status: 'scheduled' }] } });
+    const rows = precheckAll([{ id: 'p', vendorId: 'xiang', scheduledAt: '2026-11-07T20:00', platforms: ['TikTok'] }], cals);
+    expect(rows.map(r => `${r.platform}:${r.result.status}`)).toEqual(['TikTok:scheduled']);
+  });
+
+  it('TikTok 登入過期但 Meta 正常 → 只有 TikTok 讀不到，IG/FB 照常判斷', async () => {
+    const { mergeCalendars } = await import('../publishPrecheck');
+    const cals = mergeCalendars(
+      { hozen: { ok: true, cards: [{ date: '2026-11-05', time: '20:00', platform: 'IG' }, { date: '2026-11-05', time: '20:00', platform: 'FB' }] } },
+      { hozen: { ok: false, error: 'TikTok 登入過期' } });
+    const rows = precheckAll([{ id: 'p', vendorId: 'hozen', scheduledAt: '2026-11-05T20:00', platforms: ['IG', 'TikTok', 'FB'] }], cals);
+    expect(rows.map(r => `${r.platform}:${r.result.status}`)).toEqual(['IG:scheduled', 'TikTok:unreadable', 'FB:scheduled']);
+  });
+
+  it('TikTok 已發布的卡片不算「還沒發的排程」', async () => {
+    const { mergeCalendars } = await import('../publishPrecheck');
+    const cals = mergeCalendars({}, { v: { ok: true, cards: [{ date: '2026-11-05', time: '20:00', platform: 'TikTok', status: 'published' }] } });
+    expect(precheckOne({ id: 'p', vendorId: 'v', scheduledAt: '2026-11-05T20:00' }, 'TikTok', cals.v)?.status).toBe('not_scheduled');
+  });
+});
