@@ -156,7 +156,7 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
       </div>
 
       <p className="text-[13px] text-gray-400 -mt-3">
-        發布前檢查：{precheckDoc?.fetchedAt ? `機器人 ${format(parseISO(precheckDoc.fetchedAt), 'HH:mm')} 看過 Meta 排程` : '這天機器人還沒看過 Meta 排程（每天 11:55、17:30、18:00 自動看，電腦要開著）'}
+        發布前檢查：{precheckDoc?.fetchedAt ? `機器人 ${format(parseISO(precheckDoc.fetchedAt), 'HH:mm')} 看過 Meta 排程` : '這天機器人還沒看過 Meta 排程（每天 09:35、11:55、17:30、18:00 自動看，電腦要開著）'}
         {precheckDoc?.vendors && Object.values<VendorCalendar>(precheckDoc.vendors).some(v => !v.ok) && (
           <span className="text-red-500">　讀不到：{Object.values<VendorCalendar>(precheckDoc.vendors).filter(v => !v.ok).map(v => `${v.name}（${v.error}）`).join('、')}</span>
         )}
