@@ -21,7 +21,7 @@ import { summarizeFolder } from "./src/lib/rawFolder.js";
 import { buildPendingListMessage, buildReminderMessage, buildReviewNotifyMessage, isPendingQuery, listPendingReviews, pickReviewReminders } from "./src/lib/lineReviewNotify.js";
 import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
 import { isBookingChange, planShootSync, toCalendarEvent, type TimetreeShootChange } from "./src/lib/shootSync.js";
-import { runPublishAudit } from "./src/lib/publishAuditJob.js";
+import { buildCheckPlan, runPublishAudit } from "./src/lib/publishAuditJob.js";
 import { listMetaPages } from "./src/lib/metaGraph.js";
 import { isR2Configured, R2_PART_SIZE, createMultipartUpload, presignParts, completeMultipartUpload, headObject, presignGet, deleteObject, reviewObjectKey } from "./src/lib/r2.js";
 
@@ -2930,8 +2930,14 @@ app.get("/api/cron/publish-audit", async (req, res) => {
   if (!ok) return res.status(401).json({ error: "unauthorized" });
   if (!adminDb) return res.status(500).json({ error: "Firebase Admin not initialized" });
   try {
+    // 整點那次如果不在小抄上，只更新小抄、不跑稽核（Worker 帶 mode=refresh）
+    if (req.query.mode === "refresh") {
+      return res.json({ refreshed: true, plan: await buildCheckPlan(adminDb) });
+    }
     const r = await runPublishAudit(publishAuditDeps());
-    res.json({ checked: r.checked, changed: r.changed, alerts: r.alerts.length, report: !!r.report, reminder: !!r.reminder });
+    // 回傳今天要叫醒的時間點，Worker 存進免費 KV 當小抄，其他分鐘就不用叫我（省資料庫讀取，見 buildCheckPlan）
+    const plan = await buildCheckPlan(adminDb);
+    res.json({ checked: r.checked, changed: r.changed, alerts: r.alerts.length, report: !!r.report, reminder: !!r.reminder, plan });
   } catch (e: any) {
     console.error("publish-audit failed", e);
     res.status(e?.httpStatus || 500).json({ error: e?.message || "unknown error" });

@@ -47,7 +47,8 @@ export interface AuditRow {
   audit: PlatformAudit;
 }
 
-const LOOKBACK_HOURS = 26;
+/** 往回看幾小時的排程：叫醒時間最晚到排定後 180 分鐘，4 小時夠了（少讀資料庫） */
+const LOOKBACK_HOURS = 4;
 const REPORT_AT = '18:00';
 /** 中午提醒「今天要發哪些片」（11-05 使用者要求；原本 19:00 的提醒拿掉：那時多半已經下班關機） */
 const NOON_AT = '12:00';
@@ -59,7 +60,17 @@ function taipeiStamp(d: Date): string {
 
 interface VendorInfo { id: string; name: string; strict: boolean; fbPageId?: string; igPageId?: string }
 
+// IP 名單幾乎不變：同一台伺服器 10 分鐘內重複用，不要每次叫醒都重讀 20 幾筆（省資料庫讀取）
+let vendorCache: { at: number; map: Map<string, VendorInfo> } | null = null;
+
 async function loadVendors(db: any): Promise<Map<string, VendorInfo>> {
+  if (vendorCache && Date.now() - vendorCache.at < 10 * 60_000) return vendorCache.map;
+  const map = await loadVendorsFresh(db);
+  vendorCache = { at: Date.now(), map };
+  return map;
+}
+
+async function loadVendorsFresh(db: any): Promise<Map<string, VendorInfo>> {
   const snap = await db.collection('vendors').get();
   return new Map(snap.docs.map((d: any) => {
     const v = d.data() || {};
@@ -294,8 +305,10 @@ export async function buildDailyReport(
     const byStatus = new Map<string, string[]>();
     let anyOk = false;
     for (const pf of (p.platforms || []) as string[]) {
-      const a: PlatformAudit | undefined = fresh.get(`${p.id}|${pf}`) ?? p.publishAudit?.[pf];
+      let a: PlatformAudit | undefined = fresh.get(`${p.id}|${pf}`) ?? p.publishAudit?.[pf];
       if (!a || a.status === 'unsupported' || a.forScheduledAt !== p.scheduledAt) continue;
+      // 叫醒時間只到排定後 3 小時：前一晚的「還沒看到」到日報時就是整天沒發
+      if (a.status === 'not_seen' && p.scheduledAt.slice(0, 10) < taipeiDay(now)) a = { ...a, status: 'missing' };
       if (a.livePostId) claimed.add(a.livePostId);
       if (a.status === 'ok' || a.status === 'skipped') { if (a.status === 'ok') anyOk = true; continue; }
       const text = describeAudit(a, p.scheduledAt, id => vmap.get(id)?.name || id);
@@ -384,4 +397,34 @@ async function evaluatePrecheck(db: any, vmap: Map<string, VendorInfo>, now: Dat
   // 中午前那一輪（11:55）的結果併進 12:00「今天要發的片」，不另外推，免得 5 分鐘內收兩則
   if (at < NOON_AT) return null;
   return [`🗓️ 發布前檢查（${at} 看 Meta 排程）`, ...lines].join('\n');
+}
+
+/**
+ * 今天「需要叫醒稽核」的時間點（台北 HH:mm）。2026-11-05 為了省資料庫讀取：
+ * Cloudflare Worker 每分鐘醒來只看這份小抄（存在免費的 KV），時間點對到才叫剪輯系統，其他分鐘不碰資料庫。
+ *
+ * - 每支片排定時間後 0～15 分鐘每分鐘看（5 分鐘沒出現就警示、15 分鐘內補封面）
+ * - 之後 20/30/45/60/75/90/120/180 分鐘再看幾次（實際常晚 1 小時才發：紅茶造咖 19:00→20:01）
+ * - 機器人 11:55／17:30／18:00 讀完 Meta 排程後幾分鐘、12:00 今天要發的片、18:00 日報
+ * Worker 另外每個整點會叫一次，順便更新小抄（同事中途改排程也跟得上）。
+ */
+const AFTER_OFFSETS = [...Array.from({ length: 16 }, (_, i) => i), 20, 30, 45, 60, 75, 90, 120, 180];
+const FIXED_MINUTES = ['11:57', '11:58', '11:59', '12:00', '12:01', '17:31', '17:32', '17:33', '17:34', '18:00', '18:01', '18:02', '18:03', '18:04'];
+
+export async function buildCheckPlan(db: any, now = new Date()): Promise<{ day: string; minutes: string[] }> {
+  const day = taipeiDay(now);
+  // 3 小時前排的也算進來（例如 21:00 的片晚發，凌晨前還要看幾次）
+  const from = taipeiStamp(new Date(now.getTime() - 3 * 3600_000));
+  const snap = await db.collection('posts').where('scheduledAt', '>=', from).where('scheduledAt', '<=', `${day}T23:59`).get();
+  const minutes = new Set(FIXED_MINUTES);
+  for (const d of snap.docs) {
+    const p = d.data();
+    if (!(p.platforms || []).some((pf: string) => AUDITABLE_PLATFORMS.includes(pf as any))) continue;
+    const at = taipeiToDate(p.scheduledAt).getTime();
+    for (const m of AFTER_OFFSETS) {
+      const t = new Date(at + m * 60_000);
+      if (taipeiDay(t) === day && t.getTime() >= now.getTime() - 60_000) minutes.add(taipeiTime(t));
+    }
+  }
+  return { day, minutes: [...minutes].sort() };
 }
