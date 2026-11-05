@@ -22,6 +22,7 @@ import { buildPendingListMessage, buildReminderMessage, buildReviewNotifyMessage
 import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
 import { isBookingChange, planShootSync, toCalendarEvent, type TimetreeShootChange } from "./src/lib/shootSync.js";
 import { buildCheckPlan, runPublishAudit } from "./src/lib/publishAuditJob.js";
+import { NOTIFY_KIND_MAP, resolveNotifyMode, type NotifyMode, type NotifyRules } from "./src/lib/notify/kinds.js";
 import { listMetaPages } from "./src/lib/metaGraph.js";
 import { isR2Configured, R2_PART_SIZE, createMultipartUpload, presignParts, completeMultipartUpload, headObject, presignGet, deleteObject, reviewObjectKey } from "./src/lib/r2.js";
 
@@ -1356,10 +1357,10 @@ async function notifyReviewGroup(editorDocId: string, asset: any, version: numbe
   try {
     const editor: any = editorDocId ? (await adminDb.collection("editors").doc(editorDocId).get()).data() : null;
     if (editor?.lineGroupId) {
-      await sendLinePushMessage(editor.lineGroupId, buildReviewNotifyMessage({
+      await notify("editor_review", [{ type: "group", id: editor.lineGroupId, label: `剪輯群組（${editor.name || ''}）` }], [buildReviewNotifyMessage({
         vendorName: asset.vendorName || '', title: asset.title || '', version, editorName: editor.name || '',
         previewUrl: `https://${host}/v/${previewToken}`, fileId,
-      }));
+      })], `${asset.vendorName || ''}「${asset.title || ''}」第 ${version} 版送審`);
     }
   } catch (e: any) {
     console.error("review notify failed:", e?.message);
@@ -2287,6 +2288,118 @@ async function sendLinePushMessage(to: string, message: any) {
   }
 }
 
+/** 一次推多則（最多 5 則；LINE 一次呼叫只算一則額度） */
+async function sendLinePushMessages(to: string, messages: any[]) {
+  const accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!accessToken) throw new Error("LINE_CHANNEL_ACCESS_TOKEN not configured");
+  const res = await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ to, messages: messages.slice(0, 5) }),
+  });
+  if (!res.ok) throw new Error(`LINE push failed (${res.status}): ${await res.text()}`);
+}
+
+// ===============================================================
+// 通知中心（2026-11-05）：所有 LINE 推播的單一出口，見 src/lib/notify/kinds.ts
+// 規則（關閉／測試／正式）存在 appConfig/notifications，畫面在「LINE 串接管理 → 通知規則」。
+// ⚠️ 新的推播一律走 notify()，不要再直接 sendLinePushMessage —— 不然規則管不到、紀錄也看不到。
+//    （只有工程師按的「發測試」按鈕例外，那是測線路本身。）
+// ===============================================================
+type NotifyTarget = { type: "group" | "user"; id: string; label: string };
+
+let notifyRulesCache: { at: number; rules: NotifyRules } | null = null;
+/** 規則讀一次快取 10 分鐘（省資料庫讀取）；畫面改規則時會清掉 */
+async function getNotifyRules(): Promise<NotifyRules> {
+  if (notifyRulesCache && Date.now() - notifyRulesCache.at < 10 * 60_000) return notifyRulesCache.rules;
+  const snap = await adminDb.collection("appConfig").doc("notifications").get();
+  const rules = (snap.exists ? snap.data()?.rules : null) || {};
+  notifyRulesCache = { at: Date.now(), rules };
+  return rules;
+}
+
+/** 某些角色的人綁定的 LINE（不受舊總開關影響；開不開由 notify 的規則決定） */
+async function userTargetsByRoles(roles: string[]): Promise<NotifyTarget[]> {
+  const snaps = await Promise.all(roles.map((role) => adminDb.collection("users").where("role", "==", role).get()));
+  const users = snaps.flatMap((s: any) => s.docs).map((d: any) => d.data()).filter((u: any) => u.lineUserId);
+  const out: NotifyTarget[] = [];
+  for (const u of users) {
+    const c = await adminDb.collection("line_connections").doc(u.lineUserId).get();
+    const id = c.exists ? c.data()?.lineUserId : null;
+    if (id && !out.some((t) => t.id === id)) out.push({ type: "user", id, label: u.displayName || u.username || "同事" });
+  }
+  return out;
+}
+
+/** 老闆：engineer 綁定的 LINE ＋ PUBLISH_AUDIT_LINE_TO（備援）。測試模式也發到這裡 */
+async function ownerTargets(): Promise<NotifyTarget[]> {
+  const t = await userTargetsByRoles(["engineer"]);
+  for (const id of String(process.env.PUBLISH_AUDIT_LINE_TO || "").split(",").map((x) => x.trim()).filter(Boolean)) {
+    if (!t.some((x) => x.id === id)) t.push({ type: "user", id, label: "老闆" });
+  }
+  return t;
+}
+
+/** 群組人數（LINE 推到群組是按人數扣額度）。存在 line_groups，一天更新一次 */
+async function groupMemberCount(groupId: string): Promise<number> {
+  try {
+    const ref = adminDb.collection("line_groups").doc(groupId);
+    const g = (await ref.get()).data() || {};
+    if (g.memberCount && Date.now() - Date.parse(g.memberCountAt || "") < 86400_000) return g.memberCount;
+    const r = await fetch(`https://api.line.me/v2/bot/group/${encodeURIComponent(groupId)}/members/count`, {
+      headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}` },
+    });
+    const count = r.ok ? Number(((await r.json()) as any)?.count) || 0 : 0;
+    if (count) await ref.set({ memberCount: count, memberCountAt: new Date().toISOString() }, { merge: true });
+    return count || 1;
+  } catch {
+    return 1;
+  }
+}
+
+/**
+ * 發通知的唯一入口。
+ * - off：不發、不記
+ * - test：改發給老闆，前面多一則「［測試］…正式時會發給：…」
+ * - live：照 targets 發
+ * 有發的每次都寫一筆 notificationLogs（發給誰、成功沒、扣幾則），通知中心頁看得到。
+ */
+async function notify(kind: string, targets: NotifyTarget[], messages: any[], summary: string): Promise<{ mode: NotifyMode; sent: number; units: number }> {
+  const def = NOTIFY_KIND_MAP.get(kind);
+  const mode = resolveNotifyMode(kind, await getNotifyRules(), personalPushEnabled());
+  if (mode === "off" || !def) return { mode, sent: 0, units: 0 };
+  let actual = targets;
+  let msgs = messages;
+  if (mode === "test") {
+    actual = await ownerTargets();
+    const who = targets.map((t) => t.label).join("、") || "（沒有收件人）";
+    msgs = [{ type: "text", text: `［測試］${def.label}，正式時會發給：${who}` }, ...messages];
+  }
+  const results: any[] = [];
+  for (const t of actual) {
+    const units = t.type === "group" ? await groupMemberCount(t.id) : 1;
+    try {
+      await sendLinePushMessages(t.id, msgs);
+      results.push({ type: t.type, label: t.label, ok: true, units });
+    } catch (e: any) {
+      results.push({ type: t.type, label: t.label, ok: false, units: 0, error: String(e?.message || e).slice(0, 300) });
+    }
+  }
+  const sent = results.filter((r) => r.ok).length;
+  const units = results.reduce((n, r) => n + (r.units || 0), 0);
+  try {
+    if (results.length) {
+      await adminDb.collection("notificationLogs").add({
+        kind, mode, summary: String(summary || "").slice(0, 200), at: new Date().toISOString(),
+        intended: targets.map((t) => t.label), results, units,
+      });
+    }
+  } catch (e: any) {
+    console.error("notification log failed", e?.message);
+  }
+  return { mode, sent, units };
+}
+
 // 回覆（reply）不算每月訊息額度，推播（push）才算；replyToken 只能用一次、要在收到事件後盡快用
 async function sendLineReplyMessage(replyToken: string, message: any) {
   const accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
@@ -2643,11 +2756,8 @@ app.post("/api/notify/flow-event", async (req, res) => {
       }),
     };
 
-    const recipients = await getRecipientsByRoles(FLOW_NOTIFY_ROLES[kind]);
-    if (recipients.length === 0) return res.json({ pushed: false, reason: "no recipients bound" });
-
-    await Promise.all(recipients.map((to) => sendLinePushMessage(to, message)));
-    res.json({ pushed: true, recipientCount: recipients.length });
+    const r = await notify("flow_event", await userTargetsByRoles(FLOW_NOTIFY_ROLES[kind]), [message], `${FLOW_NOTIFY_STYLE[kind].title}：${asset.title || ''}`);
+    res.json({ pushed: r.sent > 0, recipientCount: r.sent, mode: r.mode });
   } catch (e: any) {
     if (e?.httpStatus) return sendAuthError(res, e);
     console.error("flow-event notify failed", e);
@@ -2747,7 +2857,8 @@ async function pushReviewReminders(baseUrl: string) {
     const picked = pickReviewReminders(mine);
     const message = buildReminderMessage(picked, baseUrl);
     if (!message) continue;
-    await sendLinePushMessage(ed.lineGroupId, message);
+    await notify("editor_reminder", [{ type: "group", id: ed.lineGroupId, label: `剪輯群組（${ed.name || ''}）` }], [message],
+      `客戶還沒審 ${picked.clientSlow.length}、待完成 ${picked.notCompleted.length}`);
     sent.push({ editor: ed.name, clientSlow: picked.clientSlow.length, notCompleted: picked.notCompleted.length });
   }
   return { groups: sent.length, sent };
@@ -2772,13 +2883,10 @@ app.get("/api/cron/flow-digest-push", async (req, res) => {
     const message = await buildFlowDigestMessage();
     if (!message) return res.json({ pushed: false, reason: "no handoffs today", reminders });
 
-    const recipients = await getRecipientsByRoles(
-      [...new Set([...FLOW_NOTIFY_ROLES.submitted, ...FLOW_NOTIFY_ROLES.uploaded])]
-    );
-    if (recipients.length === 0) return res.json({ pushed: false, reason: "no recipients bound" });
-
-    await Promise.all(recipients.map((to) => sendLinePushMessage(to, message)));
-    res.json({ pushed: true, recipientCount: recipients.length });
+    const r = await notify("flow_digest",
+      await userTargetsByRoles([...new Set([...FLOW_NOTIFY_ROLES.submitted, ...FLOW_NOTIFY_ROLES.uploaded])]),
+      [message], "製作進度彙總");
+    res.json({ pushed: r.sent > 0, recipientCount: r.sent, mode: r.mode, reminders });
   } catch (e: any) {
     console.error("flow-digest-push failed", e);
     res.status(500).json({ error: e.message || "unknown error" });
@@ -2888,29 +2996,12 @@ app.post("/api/admin/test-flow-digest-push", async (req, res) => {
 // 每分鐘由 Cloudflare Worker 打一次（Vercel 免費方案的 cron 一天只能一次）。
 // ===============================================================
 
-/**
- * 稽核的 LINE 只推給老闆本人（11-05 使用者決定）。
- * ⚠️ 刻意**不走** personalPushEnabled 總開關：那個是「同事個人通知」的開關（10-30 關掉省額度），
- *    稽核是老闆自己要的，關不關由 PUBLISH_AUDIT_PUSH=off 單獨控制。
- * 收件人＝engineer 角色綁定的 LINE ＋ PUBLISH_AUDIT_LINE_TO（逗號分隔的 LINE userId，備援用）。
- */
-async function getPublishAuditRecipients(): Promise<string[]> {
-  if (process.env.PUBLISH_AUDIT_PUSH === "off") return [];
-  const snap = await adminDb.collection("users").where("role", "==", "engineer").get();
-  const connIds = snap.docs.map((d: any) => d.data().lineUserId).filter(Boolean);
-  const bound = await Promise.all(connIds.map(async (id: string) => {
-    const c = await adminDb.collection("line_connections").doc(id).get();
-    return c.exists ? c.data()?.lineUserId : null;
-  }));
-  const extra = String(process.env.PUBLISH_AUDIT_LINE_TO || "").split(",").map((x) => x.trim()).filter(Boolean);
-  return [...new Set([...bound.filter(Boolean), ...extra])] as string[];
-}
-
+/** 發布稽核推給老闆（11-05 使用者決定），開關在通知中心「發布稽核」 */
 async function pushPublishAudit(text: string): Promise<number> {
-  const to = await getPublishAuditRecipients();
+  if (process.env.PUBLISH_AUDIT_PUSH === "off") return 0; // 緊急關閉用的環境變數，保留
   // LINE 文字訊息上限 5000 字
-  await Promise.all(to.map((id) => sendLinePushMessage(id, { type: "text", text: text.slice(0, 4900) })));
-  return to.length;
+  const r = await notify("publish_audit", await ownerTargets(), [{ type: "text", text: text.slice(0, 4900) }], text.split("\n")[0].slice(0, 120));
+  return r.sent;
 }
 
 function publishAuditDeps(extra: { dryRun?: boolean; now?: Date } = {}) {
@@ -2960,6 +3051,41 @@ app.post("/api/admin/publish-audit/run", async (req, res) => {
   }
 });
 
+// 通知中心：讀規則／改規則（主管、工程師）。改規則走伺服器，不開前端直寫 appConfig。
+app.post("/api/admin/notify-rules", async (req, res) => {
+  try {
+    const user = await requireUser(req);
+    if (user.role !== "engineer" && user.role !== "manager") return res.status(403).json({ error: "只有主管可以看" });
+    const rules = await getNotifyRules();
+    const kinds = [...NOTIFY_KIND_MAP.values()].map((k) => ({ ...k, mode: resolveNotifyMode(k.id, rules, personalPushEnabled()), rule: rules[k.id] || null }));
+    res.json({ kinds, personalSwitch: personalPushEnabled() });
+  } catch (e: any) {
+    if (e?.httpStatus) return sendAuthError(res, e);
+    res.status(500).json({ error: e?.message || "unknown error" });
+  }
+});
+
+app.post("/api/admin/notify-rules/set", async (req, res) => {
+  try {
+    const user = await requireUser(req);
+    if (user.role !== "engineer" && user.role !== "manager") return res.status(403).json({ error: "只有主管可以改" });
+    const { kind, mode } = req.body || {};
+    const def = NOTIFY_KIND_MAP.get(String(kind));
+    if (!def) return res.status(400).json({ error: "沒有這種通知" });
+    if (!["off", "test", "live"].includes(mode)) return res.status(400).json({ error: "模式不對" });
+    // 還在規劃中的通知不能切正式：功能沒做完就發給客戶最危險
+    if (def.planned && mode === "live") return res.status(400).json({ error: "這種通知還在規劃中，最多只能開測試" });
+    await adminDb.collection("appConfig").doc("notifications").set({
+      rules: { [def.id]: { mode, updatedAt: new Date().toISOString(), updatedBy: user.displayName || user.uid } },
+    }, { merge: true });
+    notifyRulesCache = null;
+    res.json({ ok: true, kind: def.id, mode });
+  } catch (e: any) {
+    if (e?.httpStatus) return sendAuthError(res, e);
+    res.status(500).json({ error: e?.message || "unknown error" });
+  }
+});
+
 /** 廠商設定的「FB 粉專」下拉選單：這把 token 管得到的粉專（不回傳 token） */
 app.post("/api/admin/meta-pages", async (req, res) => {
   try {
@@ -2988,11 +3114,8 @@ app.get("/api/cron/stock-alert-push", async (req, res) => {
     const message = await buildStockAlertMessage();
     if (!message) return res.json({ pushed: false, reason: "no urgent vendors" });
 
-    const recipients = await getStockAlertRecipients();
-    if (recipients.length === 0) return res.json({ pushed: false, reason: "no recipients bound" });
-
-    await Promise.all(recipients.map((to) => sendLinePushMessage(to, message)));
-    res.json({ pushed: true, recipientCount: recipients.length });
+    const r = await notify("stock_alert", await userTargetsByRoles(["engineer"]), [message], "影片庫存告急");
+    res.json({ pushed: r.sent > 0, recipientCount: r.sent, mode: r.mode });
   } catch (e: any) {
     console.error("stock-alert-push failed", e);
     res.status(500).json({ error: e.message || "unknown error" });
@@ -3056,9 +3179,9 @@ app.post("/api/shoot-sync", async (req, res) => {
 
   try {
     if (req.body?.alert) {
-      const recipients = await getRecipientsByRoles(["engineer"]);
-      await Promise.all(recipients.map((to) => sendLinePushMessage(to, { type: "text", text: `⚠ TimeTree 同步：${String(req.body.alert).slice(0, 500)}` })));
-      return res.json({ alerted: recipients.length });
+      const r = await notify("shoot_sync_alert", await userTargetsByRoles(["engineer"]),
+        [{ type: "text", text: `⚠ TimeTree 同步：${String(req.body.alert).slice(0, 500)}` }], String(req.body.alert).slice(0, 120));
+      return res.json({ alerted: r.sent, mode: r.mode });
     }
 
     const changes: TimetreeShootChange[] = Array.isArray(req.body?.changes) ? req.body.changes : [];

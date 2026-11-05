@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, deleteField, doc, onSnapshot, updateDoc } from 'firebase/firestore';
-import { CheckCircle2, AlertTriangle, RefreshCw, Send, Users, Scissors, User } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, RefreshCw, Send, Users, Scissors, User, BellRing } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -9,6 +9,7 @@ import { useLiveCollection } from '../lib/liveData';
 import { assignableEditors } from '../lib/editorRoster';
 import { Editor, UserRole, Vendor } from '../types';
 import UserManagement from './UserManagement';
+import NotificationCenter from './NotificationCenter';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -25,7 +26,7 @@ type Status = {
   configured: boolean; botName?: string | null; basicId?: string | null; webhookUrl?: string | null;
   webhookActive?: boolean; webhookPointsHere?: boolean; quotaType?: string | null; quota?: number | null; used?: number | null; personalPush?: boolean;
 };
-type Tab = 'clients' | 'editors' | 'people';
+type Tab = 'notify' | 'clients' | 'editors' | 'people';
 
 const select = 'w-full min-w-0 text-sm bg-[#F5F5F0] rounded-lg border-none px-3 py-2 truncate focus:ring-2 focus:ring-[#5A5A40]';
 
@@ -36,7 +37,7 @@ export default function LineIntegration({ currentUserRole }: { currentUserRole: 
   const [status, setStatus] = useState<Status | null>(null);
   const [statusError, setStatusError] = useState('');
   const [testing, setTesting] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>('clients');
+  const [tab, setTab] = useState<Tab>('notify');
 
   useEffect(() => onSnapshot(
     collection(db, 'line_groups'),
@@ -152,6 +153,8 @@ export default function LineIntegration({ currentUserRole }: { currentUserRole: 
   const boundEditors = activeEditors.filter(e => isLive(e.lineGroupId)).length;
   const overQuota = status?.quota != null && status.used != null && status.used >= status.quota;
   const tabs: { id: Tab; label: string; icon: typeof Users; count?: string }[] = [
+    // 通知中心（2026-11-05）：每種通知發給誰、開關、用量、紀錄
+    { id: 'notify', label: '通知規則', icon: BellRing },
     { id: 'clients', label: '客戶群組', icon: Users, count: `${boundClients}/${ipVendors.length}` },
     { id: 'editors', label: '剪輯群組', icon: Scissors, count: `${boundEditors}/${activeEditors.length}` },
     { id: 'people', label: '同事個人通知', icon: User },
@@ -159,7 +162,7 @@ export default function LineIntegration({ currentUserRole }: { currentUserRole: 
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-gray-500">客戶群組、剪輯群組、同事個人通知，都在這裡綁定</p>
+      <p className="text-sm text-gray-500">每種通知發給誰、要不要發；客戶群組、剪輯群組、同事個人的 LINE 也在這裡綁定</p>
 
       {/* 帳號狀態：一條橫的就好，不佔一整張大卡 */}
       <div className="bg-white rounded-2xl border border-black/5 shadow-sm px-5 py-4 flex flex-wrap items-center gap-x-8 gap-y-3 text-sm">
@@ -214,6 +217,8 @@ export default function LineIntegration({ currentUserRole }: { currentUserRole: 
         })}
       </div>
 
+      {tab === 'notify' && <NotificationCenter quota={status?.quotaType === 'limited' ? status?.quota : null} used={status?.used} />}
+
       {tab === 'clients' && (
         <div className="space-y-3">
           <p className="text-[13px] text-gray-400 px-1">之後拍攝提醒會發到這裡；目前只綁定，不會發任何訊息。剛加入機器人的群組，要有人在群組講一句話才會出現在選單</p>
@@ -245,7 +250,7 @@ export default function LineIntegration({ currentUserRole }: { currentUserRole: 
         <div className="space-y-3">
           {status?.configured && !status.personalPush && (
             <p className="text-[13px] text-amber-700 bg-amber-50 border border-amber-100 rounded-2xl px-4 py-2.5">
-              個人通知目前<b>全部關閉</b>（庫存警示、製作進度、同步失敗警報都不發私訊），省 LINE 則數；綁定照樣可以先做好，之後打開就會生效
+              庫存警示、製作進度、同步失敗警報要不要發私訊，改到「通知規則」分頁個別設定；綁定可以先做好，打開就會生效
             </p>
           )}
           <UserManagement currentUserRole={currentUserRole} mode="lineOnly" />
