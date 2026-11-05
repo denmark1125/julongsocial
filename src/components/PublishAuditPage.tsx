@@ -200,6 +200,27 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                     })}
                   </div>
                 )}
+                {/* 封面檢查（rpa/cover_check.py 在電腦上算，正式站沒有 ffmpeg）：發布後隔天早上 09:35 前會補上 */}
+                {cells.some(c => p.coverCheck?.[c.pf]) && (
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-gray-500">
+                    <span className="font-bold whitespace-nowrap">封面</span>
+                    {cells.map(({ pf }) => {
+                      const c = p.coverCheck?.[pf];
+                      if (!c) return null;
+                      const text = c.status === 'ok' ? '✅ 是影片第一幀'
+                        : c.status === 'mismatch' ? `❌ 不是影片第一幀（差 ${c.distance}）`
+                        : c.status === 'review' ? '👀 封面另外設計，請目視'
+                        : c.status === 'skipped' ? `— ${c.note || '不檢查'}`
+                        : `⚠️ ${c.note || '檢查失敗'}`;
+                      return (
+                        <span key={pf} className={`whitespace-nowrap ${c.status === 'mismatch' ? 'text-red-600 font-bold' : ''}`}>
+                          {pf} {text}
+                          {c.coverUrl && <a href={c.coverUrl} target="_blank" rel="noreferrer" className="ml-1 underline text-gray-400 hover:text-[#5A5A40]">看封面</a>}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-2">
                   {cells.map(({ pf, a, status, configured }) => {
                     const text = !configured && AUDITABLE_PLATFORMS.includes(pf as any)

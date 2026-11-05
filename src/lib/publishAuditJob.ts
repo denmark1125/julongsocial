@@ -35,6 +35,7 @@ export interface JobResult {
   report?: string;
   reminder?: string;
   precheck?: string;   // 這一輪發布前檢查要推的文字（沒有問題就沒有）
+  cover?: string;      // 這一輪封面檢查要推的文字
   rows: AuditRow[];
 }
 
@@ -198,6 +199,16 @@ export async function runPublishAudit(deps: JobDeps): Promise<JobResult> {
     }
   } catch (e: any) {
     console.error('publish-precheck failed', e?.message);
+  }
+
+  // 封面檢查：機器人（rpa/cover_check.py，09:35／11:55／17:30／18:00 在這台電腦跑）算完後幾分鐘推一次
+  if (COVER_ALERT_MINUTES.includes(taipeiTime(now)) || dryRun) {
+    try {
+      const msg = await coverAlerts(db, await getVendors(), now, !!dryRun);
+      if (msg) { result.cover = msg; if (!dryRun) await push(msg); }
+    } catch (e: any) {
+      console.error('cover alerts failed', e?.message);
+    }
   }
 
   // 一天一次的工作：用 publishAuditReports/{日期} 記「推過了」，每分鐘的呼叫只有第一次會真的做
@@ -416,7 +427,7 @@ async function evaluatePrecheck(db: any, vmap: Map<string, VendorInfo>, now: Dat
  * Worker 另外每個整點會叫一次，順便更新小抄（同事中途改排程也跟得上）。
  */
 const AFTER_OFFSETS = [...Array.from({ length: 16 }, (_, i) => i), 20, 30, 45, 60, 75, 90, 120, 180];
-const FIXED_MINUTES = ['11:57', '11:58', '11:59', '12:00', '12:01', '17:31', '17:32', '17:33', '17:34', '18:00', '18:01', '18:02', '18:03', '18:04'];
+const FIXED_MINUTES = ['09:40', '11:57', '11:58', '11:59', '12:00', '12:01', '17:31', '17:32', '17:33', '17:34', '18:00', '18:01', '18:02', '18:03', '18:04'];
 
 export async function buildCheckPlan(db: any, now = new Date()): Promise<{ day: string; minutes: string[]; chaseMinutes: string[] }> {
   const day = taipeiDay(now);
@@ -436,4 +447,32 @@ export async function buildCheckPlan(db: any, now = new Date()): Promise<{ day: 
     }
   }
   return { day, minutes: [...minutes].sort(), chaseMinutes: [...chaseMinutes].sort() };
+}
+
+/** 機器人跑完封面檢查後幾分鐘（09:35→09:40、11:55→12:00、17:30→17:34、18:00→18:04） */
+const COVER_ALERT_MINUTES = ['09:40', '12:00', '17:34', '18:04'];
+
+/**
+ * 最近 48 小時發出去的片，封面不是影片第一幀、還沒通知過的 → 一則 LINE（同一則只推一次）。
+ * 封面另外設計的 IP（coverMode=custom，好正點）機器人標 review，不推。
+ */
+async function coverAlerts(db: any, vmap: Map<string, VendorInfo>, now: Date, dryRun: boolean): Promise<string | null> {
+  const from = taipeiStamp(new Date(now.getTime() - 48 * 3600_000));
+  const snap = await db.collection('posts').where('scheduledAt', '>=', from).where('scheduledAt', '<=', taipeiStamp(now)).get();
+  const lines: string[] = [];
+  for (const d of snap.docs) {
+    const p = d.data();
+    const bad = Object.entries<any>(p.coverCheck || {}).filter(([, c]) => c?.status === 'mismatch' && !c.alertedAt);
+    if (!bad.length) continue;
+    const pfs = bad.map(([pf]) => pf).join('/');
+    const t = p.scheduledAt;
+    lines.push(`・${vmap.get(p.vendorId)?.name || ''} ${pfs} ${Number(t.slice(5, 7))}/${Number(t.slice(8, 10))} ${t.slice(11, 16)}「${(p.title || '').slice(0, 16)}」`);
+    if (!dryRun) {
+      const upd: Record<string, string> = {};
+      for (const [pf] of bad) upd[`coverCheck.${pf}.alertedAt`] = now.toISOString();
+      await d.ref.update(upd);
+    }
+  }
+  if (!lines.length) return null;
+  return ['🖼️ 封面不是影片第一幀', ...lines, '請到 IG／FB 確認並更換封面（另外設計的封面可在貼文標「自訂封面」）'].join('\n');
 }

@@ -6,6 +6,9 @@ import { clsx } from 'clsx';
 import { setPostStatus, togglePostConfirmation, togglePostPlatformPublished, POST_STATUS_LABEL } from '../lib/postActions';
 import { AUDIT_STATUS_ICON, describeAudit } from '../lib/publishAudit';
 import { isClientApproved } from '../lib/assetFlow';
+import { doc, updateDoc } from 'firebase/firestore';
+import toast from 'react-hot-toast';
+import { db } from '../firebase';
 
 interface PostDetailModalProps {
   post: Post;
@@ -148,6 +151,18 @@ export default function PostDetailModal({ post, vendor, asset, onClose, assets, 
                 );
               })}
             </div>
+            {/* 自訂封面（2026-11-05）：另外設計的封面，封面檢查就不比第一幀 */}
+            {editable && post.contentType !== 'post' && (
+              <label className="mt-3 flex items-center gap-2 text-[13px] text-gray-600 cursor-pointer w-fit">
+                <input
+                  type="checkbox"
+                  checked={!!post.customCover}
+                  onChange={(e) => updateDoc(doc(db, 'posts', post.id!), { customCover: e.target.checked }).catch(err => toast.error(err.message))}
+                  className="rounded border-gray-300 text-[#5A5A40] focus:ring-[#5A5A40]"
+                />
+                這支是另外設計的封面（不檢查是不是影片第一幀）
+              </label>
+            )}
             {/* 發布稽核（2026-11-05）：伺服器到點後自動比對 IG/FB，見 src/lib/publishAudit.ts */}
             {post.platforms.some(pf => post.publishAudit?.[pf]?.forScheduledAt === post.scheduledAt) && (
               <div className="mt-3 space-y-1">

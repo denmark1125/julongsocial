@@ -94,6 +94,7 @@ function emptyVendorForm() {
     strictTiming: false,
     metaFbPageId: '',
     metaIgPageId: '',
+    coverMode: 'first_frame' as 'first_frame' | 'custom',
   };
 }
 
@@ -718,6 +719,7 @@ export default function VendorManagement() {
                       strictTiming: vendor.strictTiming || false,
                       metaFbPageId: vendor.metaFbPageId || '',
                       metaIgPageId: vendor.metaIgPageId || '',
+                      coverMode: vendor.coverMode || 'first_frame',
                       // 還沒在這張卡上明確設定的，先帶入「發布習慣」裡已經設好的平台：
                       // 老闆原本就在那裡設過，打開來應該是已經勾好的狀態，不是一張空表。
                       // 按下儲存就會變成這張卡上的正式設定，之後不再依賴發布習慣。
@@ -1354,6 +1356,17 @@ export default function VendorManagement() {
                         </select>
                       </div>
                     ))}
+                    <div className="flex items-center gap-3">
+                      <span className="shrink-0 w-16 text-xs font-bold text-gray-600 whitespace-nowrap">封面</span>
+                      <select
+                        value={formData.coverMode}
+                        onChange={(e) => setFormData({ ...formData, coverMode: e.target.value as 'first_frame' | 'custom' })}
+                        className="flex-1 min-w-0 px-3 py-1.5 bg-white rounded-xl border border-black/5 text-xs focus:outline-none focus:border-[#5A5A40]/30"
+                      >
+                        <option value="first_frame">封面＝影片第一幀（不是就通知）</option>
+                        <option value="custom">封面另外設計（不判對錯，只給人看）</option>
+                      </select>
+                    </div>
                     {metaPagesError && <p className="text-[13px] text-red-500">{metaPagesError}</p>}
                     {!metaPages && !metaPagesError && <p className="text-[13px] text-gray-400">讀取粉專清單中…</p>}
                   </div>

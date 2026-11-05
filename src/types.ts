@@ -414,6 +414,11 @@ export interface Vendor {
   metaFbPageId?: string;
   /** IG 掛在哪個粉專底下；不填＝跟 FB 同一個。廣信：FB 是旅行社粉專、IG 掛在孝文的粉專 */
   metaIgPageId?: string;
+  /**
+   * 封面規則（2026-11-05）：不填＝封面要是影片第一幀（剪輯師把封面畫面放在影片最前面，九成的片都這樣）。
+   * 'custom'＝封面另外設計（好正點：同事重新設計、上面有影片標題）→ 封面檢查不判對錯，只給人目視。
+   */
+  coverMode?: 'first_frame' | 'custom';
   defaultPlatforms?: VendorDefaultPlatforms; // 這個 IP 預設的發布平台（依內容形式分開），新增貼文時自動帶入；見 VendorDefaultPlatforms
   status?: 'active' | 'paused' | 'ended'; // 不填視同 active
   pausedUntil?: string;     // YYYY-MM-DD，冷凍期預計恢復日（僅 status='paused' 時有意義）
@@ -453,6 +458,13 @@ export interface Post {
   autoTitle?: string;
   /** 發布稽核結果（伺服器每分鐘寫），key＝平台 IG/FB。見 src/lib/publishAudit.ts */
   publishAudit?: PublishAudit;
+  /** 這支是另外設計的封面（單支特例）→ 不做封面檢查 */
+  customCover?: boolean;
+  /**
+   * 封面檢查（rpa/cover_check.py 在這台電腦用 ffmpeg 算的，正式站沒有 ffmpeg）。key＝平台。
+   * status：ok＝封面是第一幀；mismatch＝不是（推 LINE）；review＝封面另外設計的 IP，請目視；skipped／error
+   */
+  coverCheck?: Record<string, { status: 'ok' | 'mismatch' | 'review' | 'skipped' | 'error'; distance?: number; coverUrl?: string; livePostId?: string; checkedAt?: string; note?: string; alertedAt?: string }>;
 }
 
 export type AssetType = 'video' | 'post';
