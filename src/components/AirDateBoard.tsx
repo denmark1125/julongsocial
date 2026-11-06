@@ -338,107 +338,8 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
     );
   };
 
-  return (
-    <div className={embedded ? 'flex h-[calc(100vh-150px)] min-h-[560px]' : 'fixed inset-0 bg-black/50 z-50 p-2 sm:p-4 flex'}>
-      <div className={`bg-[#F5F5F0] rounded-2xl w-full flex flex-col overflow-hidden ${embedded ? 'border border-black/5' : 'shadow-xl'}`}>
-        {/* 標題列。內嵌在素材資料庫時省掉：上面的子分頁已經寫了「排上片日」，多一列會把月曆往下擠（使用者 10-20） */}
-        {!embedded && <div className="bg-white flex items-center justify-between gap-3 px-4 sm:px-6 py-3 border-b border-black/5">
-          <div className="min-w-0">
-            <h3 className="text-lg font-bold serif text-[#5A5A40] flex items-center gap-2">
-              <CalendarDays size={18} /> 排上片日
-            </h3>
-            <p className="text-[13px] text-gray-500 truncate">
-              把左邊的片拖到那一天或小編的貼文上＝預計那天上，拖回左邊＝取消。剪輯師送審日＝上片日前 {EDIT_LEAD_DAYS} 天。
-            </p>
-          </div>
-          {onClose && (
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 shrink-0" aria-label="關閉">
-              <X className="w-5 h-5" />
-            </button>
-          )}
-        </div>}
-
-        {/* IP 篩選：比照社群日曆的按鈕列 */}
-        <div className={`bg-white px-4 sm:px-6 ${embedded ? 'py-2' : 'py-3'} border-b border-black/5 flex items-center gap-2 overflow-x-auto`}>
-          {ipVendors.map(v => {
-            const n = unplacedCount(v.id!);
-            const on = v.id === vendorId;
-            return (
-              <button
-                key={v.id}
-                onClick={() => { setVendorPick(v.id!); setSelectedId(null); }}
-                className={`shrink-0 px-3 py-1.5 rounded-full text-[13px] font-bold whitespace-nowrap border transition-colors ${on
-                  ? 'bg-[#5A5A40] border-[#5A5A40] text-white'
-                  : 'bg-white border-black/10 text-gray-600 hover:text-[#5A5A40]'}`}
-              >
-                {v.name}
-                {n > 0 && <span className={`ml-1.5 ${on ? 'text-white/70' : 'text-amber-600'}`}>{n}</span>}
-              </button>
-            );
-          })}
-          {embedded && (
-            <span
-              className="ml-auto shrink-0 flex items-center gap-1 text-[12px] text-gray-400 whitespace-nowrap cursor-help"
-              title={`把左邊的片拖到那一天或小編的貼文上＝預計那天上，拖回左邊＝取消。剪輯師送審日＝上片日前 ${EDIT_LEAD_DAYS} 天。`}
-            >
-              <Info size={13} /> 怎麼用
-            </span>
-          )}
-        </div>
-
-        {!vendor ? (
-          <p className="text-center text-gray-400 py-16">目前沒有要排的 IP。</p>
-        ) : (
-          <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 p-3 sm:p-4 overflow-y-auto lg:overflow-hidden">
-            {/* 左：還沒排上片日（拖回這裡＝清掉上片日與綁定） */}
-            <div
-              onDragOver={over('tray')}
-              onDrop={e => { const id = dragged(e); if (id) void place(id, null); }}
-              onClick={() => { if (selectedId) void place(selectedId, null); }}
-              className={`lg:w-64 shrink-0 bg-white rounded-2xl border p-3 flex flex-col lg:min-h-0 ${hoverKey === 'tray' ? 'border-[#5A5A40]/40' : 'border-black/5'}`}
-            >
-              <p className="text-[13px] font-bold text-[#5A5A40] mb-2 whitespace-nowrap">
-                還沒排上片日 <span className="font-normal text-gray-500">{unplaced.length} 支</span>
-              </p>
-              <div className="flex lg:flex-col gap-1.5 overflow-x-auto lg:overflow-x-visible lg:overflow-y-auto lg:min-h-0 pb-1">
-                {unplaced.length === 0
-                  ? <p className="text-[13px] text-gray-400">{vendor.name} 的毛片都排好了。</p>
-                  : unplaced.map(a => <div key={a.id} className="w-44 lg:w-auto shrink-0">{chip(a)}</div>)}
-              </div>
-            </div>
-
-            {/* 右：月曆 */}
-            <div className="flex-1 min-w-0 bg-white rounded-2xl border border-black/5 flex flex-col lg:min-h-0 overflow-hidden">
-              <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-black/5">
-                <span className="text-[15px] font-bold serif text-[#5A5A40] whitespace-nowrap">{format(monthCursor, 'yyyy年M月')}</span>
-                {noHabits && !selectedId && (
-                  <span className="flex-1 min-w-0 text-[12px] text-gray-500 truncate" title="這個 IP 沒設固定發片日，只有小編排好的貼文和加上去的發片日會算，系統不會自動遞補。">
-                    這個 IP 沒設固定發片日，只有小編排好的貼文和加上去的發片日會算，系統不會自動遞補。
-                  </span>
-                )}
-                {selectedId && (
-                  <span className="flex-1 min-w-0 text-[13px] text-[#5A5A40] font-bold truncate">
-                    已選「{pending.find(a => a.id === selectedId)?.title}」，點一天放下
-                  </span>
-                )}
-                <div className="flex items-center gap-1 shrink-0">
-                  <button onClick={() => setMonthCursor(m => addMonths(m, -1))} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100" aria-label="往前">
-                    <ChevronLeft size={18} />
-                  </button>
-                  <button onClick={() => setMonthCursor(startOfMonth(new Date()))} className="px-2 py-1 rounded-lg text-[13px] font-bold text-gray-600 hover:bg-gray-100">今天</button>
-                  <button onClick={() => setMonthCursor(m => addMonths(m, 1))} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100" aria-label="往後">
-                    <ChevronRight size={18} />
-                  </button>
-                </div>
-              </div>
-              <div className="grid grid-cols-7 border-b border-black/5">
-                {WEEKDAYS.split('').map(w => (
-                  <div key={w} className="py-2 text-center text-[13px] font-bold text-gray-500">{w}</div>
-                ))}
-              </div>
-              {/* 每週一樣高（使用者 10-20：過去的週壓矮很醜，要統一） */}
-              <div className="grid grid-cols-7 auto-rows-[minmax(104px,1fr)] flex-1 lg:min-h-0 lg:overflow-y-auto">
-                {gridDays.map(d => {
+  /** 月曆一格；list＝手機的一天一列 */
+  const renderDay = (d: Date, list = false) => {
                   const dateStr = format(d, 'yyyy-MM-dd');
                   const past = d < today;
                   // ⚠️ 不能只看 demandsByCell：那份只算到今天起 SUPPLY_HORIZON_DAYS（跟剪輯師同一個視窗），
@@ -457,17 +358,23 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                       onDrop={past ? undefined : e => { const id = dragged(e); if (id) placeOnDay(id, d); }}
                       onClick={() => { if (selectedId && !past) placeOnDay(selectedId, d); }}
                       className={[
-                        'group/day border-r border-b border-black/5 p-1.5 min-w-0 space-y-1 transition-colors',
+                        list ? `group/day border-b border-black/5 px-3 py-2 min-w-0 transition-colors ${dayPosts.length || loose.length || slotRows.length ? 'space-y-1.5' : 'flex flex-wrap items-center gap-x-3'}` : 'group/day border-r border-b border-black/5 p-1.5 min-w-0 space-y-1 transition-colors',
                         isSameMonth(d, monthCursor) ? '' : 'bg-gray-50/50',
                         past ? 'bg-gray-50/80 opacity-50' : isSlotDay ? 'bg-orange-50/60' : '',
                         hoverKey === dateStr ? '!bg-[#5A5A40]/10' : '',
                         selectedId && !past ? 'cursor-pointer hover:bg-[#5A5A40]/5' : '',
                       ].join(' ')}
                     >
-                      <div className="flex items-center gap-1">
+                      <div className={`flex items-center gap-1 ${list ? 'flex-1' : ''}`}>
+                        {list ? (
+                          <span className={`text-[14px] font-bold whitespace-nowrap shrink-0 ${isSameDay(d, today) ? 'text-white bg-[#5A5A40] px-2 rounded-full' : 'text-gray-700'}`}>
+                            {isSameDay(d, today) ? '今天' : format(d, 'M/d')}<span className={`ml-1 font-normal ${isSameDay(d, today) ? 'text-white/80' : 'text-gray-400'}`}>{WEEKDAYS[d.getDay()]}</span>
+                          </span>
+                        ) : (
                         <span className={`text-[13px] font-bold w-6 h-6 flex items-center justify-center rounded-full shrink-0 ${isSameDay(d, today) ? 'bg-[#5A5A40] text-white' : 'text-gray-500'}`}>
                           {d.getDate() === 1 ? format(d, 'M/d') : d.getDate()}
                         </span>
+                        )}
                         {isSlotDay && !past && <span className="text-[12px] text-orange-700 truncate">{extraByDay.has(dateStr) ? '加的發片日' : '發片日'}</span>}
                         {/* 固定發片日也能拿掉這一次（使用者 10-22：月片數到了，系統補的片拿不掉）。
                             跟社群日曆刪預排同一筆紀錄（dismissPlannedSlot），兩邊一致 */}
@@ -497,7 +404,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                           <button
                             type="button"
                             onClick={e => { e.stopPropagation(); void changeExtra(() => addExtraSlot(vendor, d), `${format(d, 'M/d')} 加了一個發片日`); }}
-                            className="ml-auto hidden group-hover/day:flex items-center text-[12px] text-orange-700 px-1 rounded hover:bg-orange-100 whitespace-nowrap shrink-0"
+                            className={`ml-auto ${list ? 'flex py-1' : 'hidden group-hover/day:flex'} items-center text-[12px] text-orange-700 px-1 rounded hover:bg-orange-100 whitespace-nowrap shrink-0`}
                           >
                             <Plus size={12} />發片日
                           </button>
@@ -562,14 +469,122 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                         <button
                           type="button"
                           onClick={e => { e.stopPropagation(); setTitleDay(dateStr); setTitleDraft(''); }}
-                          className="hidden group-hover/day:flex items-center text-[12px] text-blue-700 px-1 rounded hover:bg-blue-50 whitespace-nowrap"
+                          className={`${list ? 'flex py-1' : 'hidden group-hover/day:flex'} items-center text-[12px] text-blue-700 px-1 rounded hover:bg-blue-50 whitespace-nowrap`}
                         >
                           <Plus size={12} />預計片名
                         </button>
                       ))}
                     </div>
                   );
-                })}
+  };
+
+  return (
+    <div className={embedded ? 'flex md:h-[calc(100vh-150px)] md:min-h-[560px]' : 'fixed inset-0 bg-black/50 z-50 p-2 sm:p-4 flex'}>
+      <div className={`bg-[#F5F5F0] rounded-2xl w-full flex flex-col overflow-hidden ${embedded ? 'border border-black/5' : 'shadow-xl'}`}>
+        {/* 標題列。內嵌在素材資料庫時省掉：上面的子分頁已經寫了「排上片日」，多一列會把月曆往下擠（使用者 10-20） */}
+        {!embedded && <div className="bg-white flex items-center justify-between gap-3 px-4 sm:px-6 py-3 border-b border-black/5">
+          <div className="min-w-0">
+            <h3 className="text-lg font-bold serif text-[#5A5A40] flex items-center gap-2">
+              <CalendarDays size={18} /> 排上片日
+            </h3>
+            <p className="text-[13px] text-gray-500 truncate">
+              把左邊的片拖到那一天或小編的貼文上＝預計那天上，拖回左邊＝取消。剪輯師送審日＝上片日前 {EDIT_LEAD_DAYS} 天。
+            </p>
+          </div>
+          {onClose && (
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 shrink-0" aria-label="關閉">
+              <X className="w-5 h-5" />
+            </button>
+          )}
+        </div>}
+
+        {/* IP 篩選：比照社群日曆的按鈕列 */}
+        <div className={`bg-white px-4 sm:px-6 ${embedded ? 'py-2' : 'py-3'} border-b border-black/5 flex items-center gap-2 overflow-x-auto`}>
+          {ipVendors.map(v => {
+            const n = unplacedCount(v.id!);
+            const on = v.id === vendorId;
+            return (
+              <button
+                key={v.id}
+                onClick={() => { setVendorPick(v.id!); setSelectedId(null); }}
+                className={`shrink-0 px-3 py-1.5 rounded-full text-[13px] font-bold whitespace-nowrap border transition-colors ${on
+                  ? 'bg-[#5A5A40] border-[#5A5A40] text-white'
+                  : 'bg-white border-black/10 text-gray-600 hover:text-[#5A5A40]'}`}
+              >
+                {v.name}
+                {n > 0 && <span className={`ml-1.5 ${on ? 'text-white/70' : 'text-amber-600'}`}>{n}</span>}
+              </button>
+            );
+          })}
+          {embedded && (
+            <span
+              className="ml-auto shrink-0 flex items-center gap-1 text-[12px] text-gray-400 whitespace-nowrap cursor-help"
+              title={`把左邊的片拖到那一天或小編的貼文上＝預計那天上，拖回左邊＝取消。剪輯師送審日＝上片日前 ${EDIT_LEAD_DAYS} 天。`}
+            >
+              <Info size={13} /> 怎麼用
+            </span>
+          )}
+        </div>
+
+        {!vendor ? (
+          <p className="text-center text-gray-400 py-16">目前沒有要排的 IP。</p>
+        ) : (
+          <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 p-3 sm:p-4 overflow-y-auto lg:overflow-hidden">
+            {/* 左：還沒排上片日（拖回這裡＝清掉上片日與綁定） */}
+            <div
+              onDragOver={over('tray')}
+              onDrop={e => { const id = dragged(e); if (id) void place(id, null); }}
+              onClick={() => { if (selectedId) void place(selectedId, null); }}
+              className={`lg:w-64 shrink-0 bg-white rounded-2xl border p-3 flex flex-col lg:min-h-0 ${hoverKey === 'tray' ? 'border-[#5A5A40]/40' : 'border-black/5'}`}
+            >
+              <p className="text-[13px] font-bold text-[#5A5A40] mb-2 whitespace-nowrap">
+                還沒排上片日 <span className="font-normal text-gray-500">{unplaced.length} 支</span>
+                <span className="lg:hidden font-normal text-gray-400">・點一支片，再點下面的日子放下</span>
+              </p>
+              <div className="flex lg:flex-col gap-1.5 overflow-x-auto lg:overflow-x-visible lg:overflow-y-auto lg:min-h-0 pb-1">
+                {unplaced.length === 0
+                  ? <p className="text-[13px] text-gray-400">{vendor.name} 的毛片都排好了。</p>
+                  : unplaced.map(a => <div key={a.id} className="w-44 lg:w-auto shrink-0">{chip(a)}</div>)}
+              </div>
+            </div>
+
+            {/* 右：月曆 */}
+            <div className="flex-1 min-w-0 bg-white rounded-2xl border border-black/5 flex flex-col lg:min-h-0 overflow-hidden">
+              <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-black/5">
+                <span className="text-[15px] font-bold serif text-[#5A5A40] whitespace-nowrap">{format(monthCursor, 'yyyy年M月')}</span>
+                {noHabits && !selectedId && (
+                  <span className="flex-1 min-w-0 text-[12px] text-gray-500 truncate" title="這個 IP 沒設固定發片日，只有小編排好的貼文和加上去的發片日會算，系統不會自動遞補。">
+                    這個 IP 沒設固定發片日，只有小編排好的貼文和加上去的發片日會算，系統不會自動遞補。
+                  </span>
+                )}
+                {selectedId && (
+                  <span className="flex-1 min-w-0 text-[13px] text-[#5A5A40] font-bold truncate">
+                    已選「{pending.find(a => a.id === selectedId)?.title}」，點一天放下
+                  </span>
+                )}
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => setMonthCursor(m => addMonths(m, -1))} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100" aria-label="往前">
+                    <ChevronLeft size={18} />
+                  </button>
+                  <button onClick={() => setMonthCursor(startOfMonth(new Date()))} className="px-2 py-1 rounded-lg text-[13px] font-bold text-gray-600 hover:bg-gray-100">今天</button>
+                  <button onClick={() => setMonthCursor(m => addMonths(m, 1))} className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100" aria-label="往後">
+                    <ChevronRight size={18} />
+                  </button>
+                </div>
+              </div>
+              <div className="hidden md:grid grid-cols-7 border-b border-black/5">
+                {WEEKDAYS.split('').map(w => (
+                  <div key={w} className="py-2 text-center text-[13px] font-bold text-gray-500">{w}</div>
+                ))}
+              </div>
+              {/* 每週一樣高（使用者 10-20：過去的週壓矮很醜，要統一） */}
+              <div className="hidden md:grid grid-cols-7 auto-rows-[minmax(104px,1fr)] flex-1 lg:min-h-0 lg:overflow-y-auto">
+                {gridDays.map(d => renderDay(d))}
+              </div>
+              {/* 手機：月曆 7 欄擠到每格只剩「小…」，改成一天一列（只列今天以後；整個月都過去了就全列）。
+                  拖拉在手機不能用，點一下片、再點一天放下（原本就有的點選放置） */}
+              <div className="md:hidden flex-1">
+                {gridDays.filter(d => isSameMonth(d, monthCursor) && (d >= today || endOfMonth(monthCursor) < today)).map(d => renderDay(d, true))}
               </div>
             </div>
           </div>
