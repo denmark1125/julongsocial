@@ -17,7 +17,7 @@ export function videoProgress(p: Post, asset: Asset | undefined, today: string, 
   const date = p.scheduledAt ? format(parseISO(p.scheduledAt), 'yyyy-MM-dd') : '';
   const when = date ? format(parseISO(date), 'M/d') : '';
   if (p.status === 'published' || (p.status === 'scheduled' && date < today)) return { current: 5, note: `${when} 已發布` };
-  if (p.status === 'scheduled') return { current: 4, note: `已排程，${when} 自動發布` };
+  if (p.status === 'scheduled') return { current: 4, note: `已排程・預定 ${when} 發布` };
   const who = (a: Asset) => { const n = editorName(a); return n ? `（${n}）` : ''; };
   if (!asset) return { current: 0, note: '還沒有素材：等拍攝或等小編指派毛片' };
   switch (deriveFlowStage(asset)) {

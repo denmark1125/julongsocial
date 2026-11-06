@@ -98,7 +98,16 @@ def card_date(day: int, today: datetime) -> str:
     return best[1].strftime("%Y-%m-%d") if best else ""
 
 
-def read_account(page, bs_id: str, today: datetime) -> list[dict]:
+def target_days(now: datetime) -> list[datetime]:
+    """跟 meta_calendar 一樣：下班前（17:00 後）順便抄明天，週五再抄週末（週末電腦沒開）"""
+    days = [now]
+    if now.hour >= 17:
+        days += [now + timedelta(days=i) for i in range(1, (2 if now.weekday() == 4 else 1) + 1)]
+    return days
+
+
+def read_account(page, bs_id: str, today: datetime) -> tuple[list[dict], set[str]]:
+    """回傳（卡片, 週曆上看得到的日期）。TikTok 週曆是週日～週六、沒有翻頁鈕，週五看不到下週日"""
     cards: list[dict] = []
     # ① 排好還沒發的：首頁週曆的綠色卡片。這週什麼都沒排時週曆是空白（「Schedule your post」），不是錯誤
     page.goto(f"https://business-suite.tiktok.com/?org_id={ORG_ID}&bs_id={bs_id}")
@@ -109,6 +118,7 @@ def read_account(page, bs_id: str, today: datetime) -> list[dict]:
     if "login" in page.url:
         raise RuntimeError("TikTok 登入過期")
     data = page.evaluate(EXTRACT_JS)
+    visible = {card_date(h["day"], today) for h in data["heads"]}
     for c in data["cards"]:
         if c["day"] and c["scheduled"]:
             cards.append({"date": card_date(c["day"], today), "time": to_hhmm(c["time"]), "platform": "TikTok",
@@ -126,15 +136,18 @@ def read_account(page, bs_id: str, today: datetime) -> list[dict]:
         cards.append({"date": r["date"], "time": r["time"], "platform": "TikTok", "cover": r["cover"][:600],
                       "status": "published", "caption": r["caption"]})
     uniq = {(c["date"], c["time"], c["status"], c["cover"][:120]): c for c in cards}
-    return list(uniq.values())
+    return list(uniq.values()), visible
 
 
 def main() -> None:
     login = "--login" in sys.argv
     dry = "--dry-run" in sys.argv
     headless = "--headless" in sys.argv and not login
-    now = datetime.now(TPE)
+    # RPA_NOW＝測試用（例：2026-11-06T17:30+08:00）
+    now = datetime.fromisoformat(os.environ["RPA_NOW"]) if os.environ.get("RPA_NOW") else datetime.now(TPE)
     today_key = now.strftime("%Y-%m-%d")
+    extra_keys = [d.strftime("%Y-%m-%d") for d in target_days(now)[1:]]
+    extra: dict = {k: {} for k in extra_keys}  # 明天／週末：只放排好還沒發的卡片
 
     import firebase_admin
     from firebase_admin import credentials, firestore
@@ -164,8 +177,11 @@ def main() -> None:
             print("✅ 登入完成")
         for v in vendors:
             try:
-                cards = read_account(page, v["bs"], now)
+                cards, visible = read_account(page, v["bs"], now)
                 result[v["id"]] = {"ok": True, "name": v["name"], "cards": cards}
+                for k in extra_keys:
+                    if k in visible:  # 週曆上看不到的那天不寫，免得畫面誤以為「沒排」
+                        extra[k][v["id"]] = {"ok": True, "name": v["name"], "cards": [c for c in cards if c["date"] == k and c["status"] == "scheduled"]}
                 show = "、".join(f"{c['date'][5:]} {c['time']}{'(排)' if c['status'] == 'scheduled' else ''}" for c in sorted(cards, key=lambda c: (c['date'], c['time'])))
                 print(f"✅ {v['name']}：{len(cards)} 則 {show}")
             except Exception as e:
@@ -174,7 +190,7 @@ def main() -> None:
         browser.close()
 
     if dry:
-        print("（--dry-run：沒有寫入）")
+        print("（--dry-run：沒有寫入）", {k: {x["name"]: len(y["cards"]) for x, y in ((e, e) for e in extra[k].values())} for k in extra_keys})
         return
     db.collection("publishPrechecks").document(today_key).set({
         "day": today_key,
@@ -182,6 +198,10 @@ def main() -> None:
         "tiktok": result,
     }, merge=True)
     print(f"已寫入 publishPrechecks/{today_key}.tiktok")
+    for k in extra_keys:
+        if extra[k]:
+            db.collection("publishPrechecks").document(k).set({"day": k, "tiktokFetchedAt": datetime.now(timezone.utc).isoformat(), "tiktok": extra[k]}, merge=True)
+            print(f"已寫入 publishPrechecks/{k}.tiktok（{len(extra[k])} 家）")
 
 
 if __name__ == "__main__":

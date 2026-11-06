@@ -100,27 +100,62 @@ def to_hhmm(t: str) -> str:
     return f"{h:02d}:{m.group(3)}"
 
 
-def read_calendar(page, business_id: str, asset_id: str, today: datetime) -> list[dict]:
+WAIT_HEADS = "() => [...document.querySelectorAll('*')].some(e => e.childElementCount===0 && /^週.\\s*\\d{1,2}日$/.test((e.textContent||'').trim()))"
+
+
+def target_days(now: datetime) -> list[datetime]:
+    """要抄哪幾天：平常只抄今天；下班前（17:00 後）順便抄明天，週五再加週六、週日
+    （11-06 使用者：週末電腦沒開，週末的片沒有發布前檢查；下班前先看到明天排了沒）"""
+    days = [now]
+    if now.hour >= 17:
+        extra = 2 if now.weekday() == 4 else 1
+        days += [now + timedelta(days=i) for i in range(1, extra + 1)]
+    return days
+
+
+def read_calendar(page, business_id: str, asset_id: str, days: list[datetime]) -> tuple[list[dict], set[str]]:
+    """回傳（卡片, 實際看得到的日期）。週曆一次一週（週日～週六），要的日子在下一週就按「Right」翻一頁。"""
     page.goto(f"https://business.facebook.com/latest/content_calendar/?business_id={business_id}&asset_id={asset_id}")
     # 等日曆的「週X N日」表頭出現，比等固定秒數穩
-    page.wait_for_function("() => [...document.querySelectorAll('*')].some(e => e.childElementCount===0 && /^週.\\s*\\d{1,2}日$/.test((e.textContent||'').trim()))", timeout=30_000)
+    page.wait_for_function(WAIT_HEADS, timeout=30_000)
     page.wait_for_timeout(2500)  # 表頭出來後卡片還會再補幾張
     if "login" in page.url:
         raise RuntimeError("Meta 登入過期")
     data = page.evaluate(EXTRACT_JS)
+    today = days[0]
     if data.get("month") and data["month"] != today.month and today.day > 7:
         raise RuntimeError(f"日曆停在 {data['month']} 月，不是這個月")
+    by_day = {d.day: d for d in days}
+    out: list[dict] = []
+    seen: set[str] = set()
+    pages = [data]
+    if any(d.day not in {h["day"] for h in data["heads"]} for d in days):
+        # 要的日子不在這一週 → 翻到下一週再抄一次（只翻一頁，最多就是週五看週日）
+        page.get_by_role("button", name="Right").first.click()
+        page.wait_for_timeout(3000)
+        pages.append(page.evaluate(EXTRACT_JS))
+    for data in pages:
+        heads = {h["day"] for h in data["heads"]}
+        for d in days:
+            if d.day in heads:
+                seen.add(d.strftime("%Y-%m-%d"))
+        out += cards_of(data, by_day, asset_id)
+    return out, seen
+
+
+def cards_of(data: dict, by_day: dict, asset_id: str) -> list[dict]:
     out = []
     for c in data["cards"]:
-        if c["day"] != today.day:
-            continue  # 只要今天（週曆上其他天的卡片不管）
+        day = by_day.get(c["day"])
+        if not day:
+            continue  # 只要要抄的那幾天（週曆上其他天的卡片不管）
         # Meta 自己放的「建議發文時段」格子（「本週你的 Instagram 粉絲在這個時段最為活躍。排定時間」），不是排程。
         # 11-05 曾被誤認成 CWORKS 20:00 有排 IG。特徵：封面是 Meta 的插圖、文字有「最為活躍」
         if "最為活躍" in (c["status"] or "") or "assets_DO_NOT_HARDCODE" in (c["cover"] or "")                 or not re.search(r"(fbcdn|cdninstagram)\.", c["cover"] or ""):
             continue
         for pf in c["platforms"] or [""]:
             out.append({
-                "date": today.strftime("%Y-%m-%d"),
+                "date": day.strftime("%Y-%m-%d"),
                 "time": to_hhmm(c["time"]),
                 "platform": {"Facebook": "FB", "Instagram": "IG"}.get(pf, ""),
                 "cover": c["cover"][:600],
@@ -134,8 +169,10 @@ def main() -> None:
     login = "--login" in sys.argv
     dry = "--dry-run" in sys.argv
     headless = "--headless" in sys.argv and not login
-    now = datetime.now(TPE)
-    today_key = now.strftime("%Y-%m-%d")
+    # RPA_NOW＝測試用（例：2026-11-06T17:30+08:00 模擬週五下班前）
+    now = datetime.fromisoformat(os.environ["RPA_NOW"]) if os.environ.get("RPA_NOW") else datetime.now(TPE)
+    days = target_days(now)
+    day_keys = [d.strftime("%Y-%m-%d") for d in days]
 
     import firebase_admin
     from firebase_admin import credentials, firestore
@@ -152,7 +189,7 @@ def main() -> None:
             vendors.append({"id": d.id, "name": v.get("name", d.id), "assets": assets})
 
     PROFILE.mkdir(parents=True, exist_ok=True)
-    result: dict = {}
+    result: dict = {k: {} for k in day_keys}  # 日期 → 每家 IP 的結果
     with sync_playwright() as p:
         browser = p.chromium.launch_persistent_context(
             str(PROFILE), headless=headless, locale="zh-TW", timezone_id="Asia/Taipei",
@@ -167,30 +204,36 @@ def main() -> None:
 
         for v in vendors:
             cards: list[dict] = []
+            seen: set[str] | None = None
             try:
                 for asset in v["assets"]:
                     biz = business_id_of(asset, token)
                     if not biz:
                         raise RuntimeError(f"查不到粉專 {asset} 的商家帳號")
-                    cards += read_calendar(page, biz, asset, now)
-                # 同一個商家底下 FB 粉專與 IG 在兩個日曆都會出現 → 去重
-                uniq = {(c["time"], c["platform"], c["cover"][:120]): c for c in cards}
-                result[v["id"]] = {"ok": True, "name": v["name"], "cards": list(uniq.values())}
-                print(f"✅ {v['name']}：今天 {len(uniq)} 則", "、".join(f"{c['time']} {c['platform']}" for c in uniq.values()))
+                    got, s = read_calendar(page, biz, asset, days)
+                    cards += got
+                    seen = s if seen is None else (seen & s)
+                for k in day_keys:
+                    if k not in (seen or set()):
+                        result[k][v["id"]] = {"ok": False, "name": v["name"], "error": "日曆翻不到這一天"}
+                        continue
+                    # 同一個商家底下 FB 粉專與 IG 在兩個日曆都會出現 → 去重
+                    uniq = {(c["time"], c["platform"], c["cover"][:120]): c for c in cards if c["date"] == k}
+                    result[k][v["id"]] = {"ok": True, "name": v["name"], "cards": list(uniq.values())}
+                    print(f"✅ {v['name']} {k[5:]}：{len(uniq)} 則", "、".join(f"{c['time']} {c['platform']}" for c in uniq.values()))
             except Exception as e:  # 一家讀不到不影響其他家；讀不到要回報，不能當成「沒排」
-                result[v["id"]] = {"ok": False, "name": v["name"], "error": str(e)[:300]}
+                for k in day_keys:
+                    result[k][v["id"]] = {"ok": False, "name": v["name"], "error": str(e)[:300]}
                 print(f"❌ {v['name']}：{e}")
         browser.close()
 
     if dry:
         print("（--dry-run：沒有寫入）")
         return
-    db.collection("publishPrechecks").document(today_key).set({
-        "day": today_key,
-        "fetchedAt": datetime.now(timezone.utc).isoformat(),
-        "vendors": result,
-    }, merge=True)
-    print(f"已寫入 publishPrechecks/{today_key}")
+    fetched = datetime.now(timezone.utc).isoformat()
+    for k in day_keys:
+        db.collection("publishPrechecks").document(k).set({"day": k, "fetchedAt": fetched, "vendors": result[k]}, merge=True)
+        print(f"已寫入 publishPrechecks/{k}")
 
 
 if __name__ == "__main__":
