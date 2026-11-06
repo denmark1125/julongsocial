@@ -54,7 +54,9 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
   const precheckExtra = useMemo(() => {
     if ((!precheckDoc?.vendors && !precheckDoc?.tiktok) || !(precheckDoc.fetchedAt || precheckDoc.tiktokFetchedAt)) return [];
     const strictPosts = posts.filter(p => vmap.get(p.vendorId)?.strictTiming);
-    return unmatchedCards(strictPosts as any, mergeCalendars(precheckDoc.vendors, precheckDoc.tiktok), day,
+    // 只比準時 IP：TikTok 機器人抄所有帳號，非準時 IP 的卡片不該被當成「系統沒排」（11-06 大發誤報）
+    const strictCals = Object.fromEntries(Object.entries(mergeCalendars(precheckDoc.vendors, precheckDoc.tiktok)).filter(([vid]) => vmap.get(vid)?.strictTiming));
+    return unmatchedCards(strictPosts as any, strictCals, day,
       format(parseISO((precheckDoc.fetchedAt || precheckDoc.tiktokFetchedAt)!), 'HH:mm'));
   }, [precheckDoc, posts, vmap, day]);
   const vendorName = (id: string) => vmap.get(id)?.name || id;

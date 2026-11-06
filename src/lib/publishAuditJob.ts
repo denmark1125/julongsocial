@@ -400,13 +400,24 @@ async function evaluatePrecheck(db: any, vmap: Map<string, VendorInfo>, now: Dat
     .filter((p: any) => vmap.get(p.vendorId)?.strict && (vmap.get(p.vendorId)?.fbPageId || vmap.get(p.vendorId)?.tiktokBsId));
   const posts = dayPosts.filter((p: any) => p.scheduledAt > nowStamp); // 已過時間的交給發布後稽核
   const rows = precheckAll(posts, calendars);
-  const extra = unmatchedCards(dayPosts, calendars, day, taipeiTime(now));
+  // 「後台排了、系統沒有」只比準時 IP：TikTok 機器人會抄所有帳號，非準時 IP（例 大發）的貼文根本沒放進 dayPosts，
+  // 不濾掉就會每張卡都被當成「系統沒排」（11-06 誤報）
+  const strictCalendars = Object.fromEntries(Object.entries(calendars).filter(([vid]) => vmap.get(vid)?.strict));
+  // Meta 跟 TikTok 是兩個機器人、前後差幾分鐘寫入。先寫完的那個一觸發比對，另一邊還是上一輪（例 12:12）的舊資料，
+  // 會把「中午還沒排、下午已經排了」誤報成沒排（11-06 紅茶造咖 TikTok）。兩邊時間差超過 30 分鐘，舊的那邊不報「沒排」
+  const metaMs = doc.fetchedAt ? new Date(doc.fetchedAt).getTime() : 0;
+  const ttMs = doc.tiktokFetchedAt ? new Date(doc.tiktokFetchedAt).getTime() : 0;
+  const newestMs = Math.max(metaMs, ttMs);
+  const STALE_MS = 30 * 60 * 1000;
+  const staleOf = (platform: string) => (platform === 'TikTok' ? ttMs : metaMs) < newestMs - STALE_MS;
+  const extra = unmatchedCards(dayPosts, strictCalendars, day, taipeiTime(now)).filter(x => !staleOf(x.card.platform));
 
   const titleOf = new Map(posts.map((p: any) => [p.id, p]));
   const lines: string[] = [];
   const grouped = new Map<string, string[]>();
   for (const r of rows) {
     if (r.result.status === 'scheduled') continue;
+    if (staleOf(r.platform)) continue; // 這個平台的抄本是上一輪的，等它自己那一輪抄完再判斷
     const p: any = titleOf.get(r.postId);
     const k = `${r.postId}|${PRECHECK_ICON[r.result.status]} ${vmap.get(r.vendorId)?.name || ''} {PF}「${(p?.title || '').slice(0, 16)}」${describePrecheck(r.result, p.scheduledAt)}`;
     grouped.set(k, [...(grouped.get(k) || []), r.platform]);
