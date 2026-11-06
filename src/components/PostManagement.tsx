@@ -391,7 +391,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
 
   const getStatusBadge = (status: PostStatus, onClick?: () => void) => {
     // ⚠️ whitespace-nowrap 不能拿掉：這是 rounded-full 的標籤，字一換行就變成一顆圓球裝著直排的字
-    const baseClasses = "px-3 py-1 rounded-full text-sm font-bold flex items-center w-fit whitespace-nowrap cursor-pointer transition-all hover:shadow-sm active:scale-95 border";
+    const baseClasses = "px-2.5 md:px-3 py-0.5 md:py-1 rounded-full text-[13px] md:text-sm font-bold flex items-center w-fit whitespace-nowrap cursor-pointer transition-all hover:shadow-sm active:scale-95 border";
     switch (status) {
       case 'published': return <button type="button" onClick={onClick} className={cn(baseClasses, "bg-green-100 text-green-700 border-green-200")}><CheckCircle2 size={12} className="mr-1" /> 已發布 <ChevronDown size={10} className="ml-1 opacity-50" /></button>;
       case 'scheduled': return <button type="button" onClick={onClick} className={cn(baseClasses, "bg-blue-100 text-blue-700 border-blue-200")}><Clock size={12} className="mr-1" /> 已排程 <ChevronDown size={10} className="ml-1 opacity-50" /></button>;
@@ -567,7 +567,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
               });
               setIsModalOpen(true);
             }}
-            className="order-1 md:order-none flex-1 md:flex-none flex items-center justify-center px-6 py-2 bg-[#5A5A40] text-white rounded-xl shadow-lg hover:bg-[#4a4a35] transition-all text-base font-bold"
+            className="order-1 md:order-none flex-1 md:flex-none flex items-center justify-center px-6 py-2 bg-[#5A5A40] text-white rounded-xl shadow-lg hover:bg-[#4a4a35] transition-all text-[15px] md:text-base font-bold"
           >
             <Plus size={18} className="mr-2" /> 新增貼文
           </button>
@@ -616,7 +616,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
       </div>
 
       {/* Status Filter Bar */}
-      <div className="flex items-center space-x-2 overflow-x-auto pb-2 scrollbar-hide">
+      <div className="flex items-center space-x-2 overflow-x-auto pb-1 md:pb-2 scrollbar-hide no-scrollbar">
         {[
           { id: 'all', label: '全部狀態' },
           { id: 'draft', label: '草稿' },
@@ -628,7 +628,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
             key={status.id}
             onClick={() => setSelectedStatus(status.id)}
             className={cn(
-              "px-4 py-1.5 rounded-full text-sm font-bold transition-all whitespace-nowrap border flex items-center",
+              "px-3 md:px-4 py-1 md:py-1.5 rounded-full text-[13px] md:text-sm font-bold transition-all whitespace-nowrap border flex items-center",
               selectedStatus === status.id 
                 ? "bg-[#5A5A40] text-white border-[#5A5A40]" 
                 : "bg-white text-gray-500 border-black/5 hover:border-gray-300"
@@ -653,11 +653,11 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
       </div>
 
       {/* Vendor Filter Bar */}
-      <div className="flex items-center space-x-2 overflow-x-auto pb-2 scrollbar-hide">
+      <div className="flex items-center space-x-2 overflow-x-auto pb-1 md:pb-2 scrollbar-hide no-scrollbar">
         <button
           onClick={() => setSelectedVendorId('all')}
           className={cn(
-            "px-4 py-1.5 rounded-full text-sm font-bold transition-all whitespace-nowrap border",
+            "px-3 md:px-4 py-1 md:py-1.5 rounded-full text-[13px] md:text-sm font-bold transition-all whitespace-nowrap border",
             selectedVendorId === 'all' 
               ? "bg-[#5A5A40] text-white border-[#5A5A40]" 
               : "bg-white text-gray-500 border-black/5 hover:border-gray-300"
@@ -670,7 +670,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
             key={vendor.id}
             onClick={() => setSelectedVendorId(vendor.id!)}
             className={cn(
-              "px-4 py-1.5 rounded-full text-sm font-bold transition-all whitespace-nowrap border",
+              "px-3 md:px-4 py-1 md:py-1.5 rounded-full text-[13px] md:text-sm font-bold transition-all whitespace-nowrap border",
               selectedVendorId === vendor.id 
                 ? "bg-[#5A5A40] text-white border-[#5A5A40]" 
                 : "bg-white text-gray-500 border-black/5 hover:border-gray-300"
@@ -928,9 +928,9 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                 { label: '業主', ok: !!post.clientConfirmed, onClick: () => toggleConfirmation(post, 'clientConfirmed') },
               ];
               return (
-                <div key={post.id} className="px-4 py-3 space-y-2">
+                <div key={post.id} className="px-4 py-2.5 space-y-1.5">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-[15px] font-bold tabular-nums shrink-0">{post.scheduledAt ? post.scheduledAt.slice(11, 16) : '--:--'}</span>
+                    <span className="text-[14px] font-bold tabular-nums shrink-0">{post.scheduledAt ? post.scheduledAt.slice(11, 16) : '--:--'}</span>
                     <span className="text-[14px] font-bold text-[#5A5A40] truncate">{vendor?.name}</span>
                     <span className="text-[12px] text-gray-400 shrink-0">{post.platforms.join('/')}</span>
                     <div className="relative ml-auto shrink-0">
@@ -954,13 +954,13 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
                     </div>
                   </div>
                   <button type="button" onClick={() => { setEditingPost(post); setFormData(post); setIsModalOpen(true); }} className="block w-full text-left">
-                    <span className="block text-[15px] font-bold leading-snug line-clamp-2">{post.title}</span>
+                    <span className="block text-[14px] font-bold leading-snug line-clamp-2">{post.title}</span>
                     {boundAssetLabel(post, assets) && <span className="block text-[13px] text-blue-700 truncate mt-0.5">{boundAssetLabel(post, assets)}</span>}
                   </button>
                   <div className="flex items-center gap-1.5">
                     {checks.map(c => (
                       <button key={c.label} type="button" onClick={c.onClick} disabled={!c.onClick}
-                        className={cn('flex items-center gap-1 px-2 py-1 rounded-lg text-[13px] font-bold border',
+                        className={cn('flex items-center gap-1 px-2 py-0.5 rounded-lg text-[12px] font-bold border',
                           c.ok ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-white border-black/10 text-gray-500')}>
                         <span className={cn('w-2 h-2 rounded-full', c.ok ? 'bg-emerald-500' : 'bg-rose-500')} />{c.label}
                       </button>

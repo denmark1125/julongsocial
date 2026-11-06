@@ -105,6 +105,9 @@ export default function AssetDatabase() {
   const [newPostPick, setNewPostPick] = useState<string | null>(null);
   // 手機版：導出剪輯清單／庫存總覽收進「⋯」選單（11-06 使用者：手機一打開滿滿不能操作的資訊）
   const [moreOpen, setMoreOpen] = useState(false);
+  // 手機：篩選收進一張底部面板；認領／上傳／上架等動作收進右下角「＋」（11-06 使用者：一打開還是一堆按鈕）
+  const [filterSheet, setFilterSheet] = useState(false);
+  const [actionSheet, setActionSheet] = useState(false);
   // 手機版素材卡預設收成一小張（11-06 使用者：一張卡佔一整個版面）；點「更多」才展開成完整卡片
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches);
   useEffect(() => {
@@ -824,13 +827,64 @@ ${after}`)) return;
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6">
+      {/* ── 手機：篩選面板＋右下角「＋」動作 ── */}
+      <button onClick={() => setActionSheet(true)} aria-label="新增／上傳"
+        className="md:hidden fixed right-4 bottom-[84px] z-30 w-12 h-12 rounded-full bg-[#5A5A40] text-white shadow-xl flex items-center justify-center">
+        <Plus size={24} />
+      </button>
+      {(filterSheet || actionSheet) && (
+        <div className="md:hidden fixed inset-0 z-50 flex flex-col justify-end" onClick={() => { setFilterSheet(false); setActionSheet(false); }}>
+          <div className="absolute inset-0 bg-black/30" />
+          <div className="relative bg-white rounded-t-3xl p-4 pb-8 space-y-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="mx-auto w-10 h-1 rounded-full bg-gray-200" />
+            {filterSheet ? (
+              <>
+                {([
+                  ['類型', [['video', '影片'], ['post', '貼文']], activeTab, (v: string) => setActiveTab(v as AssetType)],
+                  ['階段', [['raw', '待剪毛片'], ['finished', '成片']], filterStage, (v: string) => { setFilterStage(v as any); setFilterStatus('all'); }],
+                  ['狀態', [...(filterStage === 'finished' ? [['available', '可使用'], ['used', '已使用'], ['manual', '手動認列']] : []), ['voided', '作廢'], ['archived', '回收站'], ['all', '全部']], filterStatus, (v: string) => setFilterStatus(v as any)],
+                ] as [string, string[][], string, (v: string) => void][]).map(([label, opts, cur, set]) => (
+                  <div key={label} className="space-y-1.5">
+                    <p className="text-[12px] font-bold text-gray-400">{label}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {opts.map(([v, t]) => (
+                        <button key={v} onClick={() => set(v)}
+                          className={cn('px-4 py-2 rounded-full text-[14px] font-bold border', cur === v ? 'bg-[#5A5A40] border-[#5A5A40] text-white' : 'bg-white border-black/10 text-gray-600')}>
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <button onClick={() => setFilterSheet(false)} className="w-full py-3 rounded-2xl bg-[#5A5A40] text-white font-bold">完成</button>
+              </>
+            ) : (
+              <>
+                <p className="text-[13px] text-gray-500">待審核 <b className="text-amber-600">{assets.filter(a => !isClientApproved(a) && a.status !== 'archived').length}</b> 件・可用影片 <b>{videoInventory}</b>・可用貼文 <b>{postInventory}</b></p>
+                <div className="grid grid-cols-2 gap-2">
+                  {me?.role && me.role !== 'editor' && isPickerConfigured() && (
+                    <>
+                      <button onClick={() => { setActionSheet(false); setIsClaiming(true); }} className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-[#5A5A40] text-white font-bold"><FolderOpen size={18} />從雲端認領</button>
+                      <button onClick={() => { setActionSheet(false); setIsUploadingRaw(true); }} className="flex items-center justify-center gap-2 py-3 rounded-2xl border border-black/10 text-[#5A5A40] font-bold"><UploadCloud size={18} />上傳毛片</button>
+                    </>
+                  )}
+                  <button onClick={() => { setActionSheet(false); setNewAsset({ ...newAsset, type: activeTab, stage: filterStage }); setIsAdding(true); }} className="flex items-center justify-center gap-2 py-3 rounded-2xl border border-black/10 text-[#5A5A40] font-bold"><Plus size={18} />上架素材</button>
+                  <button onClick={() => { setActionSheet(false); setIsTaskListOpen(true); }} className="flex items-center justify-center gap-2 py-3 rounded-2xl border border-black/10 text-[#5A5A40] font-bold"><ClipboardList size={18} />導出剪輯清單</button>
+                  <button onClick={() => { setActionSheet(false); setIsSummaryOpen(true); }} className="flex items-center justify-center gap-2 py-3 rounded-2xl border border-black/10 text-[#5A5A40] font-bold"><BarChart3 size={18} />庫存總覽</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 md:gap-4">
         <div className="space-y-1 hidden md:block">
           <h2 className="text-2xl font-bold serif text-[#5A5A40]">素材資料庫</h2>
           <p className="text-sm text-gray-500">管理各廠商的影片與貼文素材庫存</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 md:gap-4 w-full sm:w-auto relative">
+        <div className="hidden md:flex flex-wrap items-center gap-2 md:gap-4 w-full sm:w-auto relative">
           {/* 同事（employee）也要能上傳毛片 —— 他們才是這個功能的主要使用者。
               只有剪輯師不行：那顆 Drive token 看得到我們建立的所有檔案，對外包權限太大，
               後端也會再擋一次。
@@ -942,7 +996,7 @@ ${after}`)) return;
       </div>
 
       {/* 手機：五個數字收成一行小字，可左右滑 */}
-      <div className="md:hidden flex gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
+      <div className="hidden">
         {([
           ['待審核', assets.filter(a => !isClientApproved(a) && a.status !== 'archived').length, '件', 'text-amber-600'],
           ['可用影片', videoInventory, '隻', 'text-[#1a1a1a]'],
@@ -957,7 +1011,7 @@ ${after}`)) return;
       </div>
 
       {/* Tabs */}
-      <div className="flex flex-row flex-wrap gap-2 md:gap-4 items-center justify-between">
+      <div className="hidden md:flex flex-row flex-wrap gap-2 md:gap-4 items-center justify-between">
         <div className="flex space-x-1 bg-white p-1 rounded-2xl border border-black/5 w-fit shadow-sm">
           <button 
             onClick={() => setActiveTab('video')}
@@ -1110,7 +1164,7 @@ ${after}`)) return;
 
         {/* Right Content: Asset Grid */}
         <div className="flex-1 space-y-6">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 md:gap-4">
+          <div className="flex flex-row justify-between items-center gap-2 md:gap-4">
             <div className="flex-1 w-full relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
               <input 
@@ -1121,7 +1175,11 @@ ${after}`)) return;
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <div className="flex items-center gap-2 w-full md:w-auto">
+            <button onClick={() => setFilterSheet(true)} className="md:hidden shrink-0 flex items-center gap-1 px-3 py-2 rounded-xl bg-white border border-black/5 shadow-sm text-[13px] font-bold text-[#5A5A40] whitespace-nowrap">
+              <Filter size={15} />
+              {activeTab === 'video' ? '影片' : '貼文'}・{filterStage === 'raw' ? '待剪' : '成片'}・{({ available: '可使用', used: '已使用', manual: '手動認列', voided: '作廢', archived: '回收站', all: '全部' } as Record<string, string>)[filterStatus] || '全部'}
+            </button>
+            <div className="hidden md:flex items-center gap-2 w-full md:w-auto">
               {/* 手機：篩選可左右滑，不要擠成一個字一行 */}
               <div className="flex items-center bg-white rounded-xl border border-black/5 p-1 shadow-sm min-w-0 overflow-x-auto no-scrollbar">
                 {filterStage === 'finished' && (

@@ -50,10 +50,12 @@
    無差別套的後果實測：IG／FB／YT／LINE 這種行內小標籤被撐成 44×44 的灰色正方形、
    狀態標籤變成 98×44 的大藥丸、月份鈕 57×44 —— 整排框框的比例就跑掉了。
    桌面是滑鼠操作，WCAG 2.5.8 的門檻是 24px，那個尺寸標籤才會長回標籤的樣子。 */
+/* 11-06 使用者：手機上每顆按鈕都被撐到 44px，整頁「好像有點巨大」。降到 36px：
+   仍遠高於 WCAG 2.5.8 的 24px 門檻，手指點得到，標籤也不會變成大藥丸 */
 @media (max-width: 767px) {
   .readability-surface :where(button, a) {
-    min-height: 44px;
-    min-width: 44px;
+    min-height: 36px;
+    min-width: 36px;
   }
 }
 
