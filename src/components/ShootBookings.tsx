@@ -52,8 +52,9 @@ export default function ShootBookings({ onOpenTool }: { onOpenTool?: (tab: 'airD
   useEffect(() => {
     const m = window.matchMedia('(max-width: 767px)');
     const on = () => setIsMobile(m.matches);
-    m.addEventListener('change', on);
-    return () => m.removeEventListener('change', on);
+    // 舊版 iOS Safari（13 以前）沒有 addEventListener，只有 addListener；沒防會整頁白畫面
+    if (m.addEventListener) m.addEventListener('change', on); else m.addListener(on);
+    return () => { if (m.removeEventListener) m.removeEventListener('change', on); else m.removeListener(on); };
   }, []);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const toggleExpanded = (id: string) => setExpandedIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });

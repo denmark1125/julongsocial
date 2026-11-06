@@ -323,6 +323,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
     if (movingPost && isPostLocked(movingPost)) { toast.error(`「${movingPost.title}」已經排好了，要換先按「解鎖」`); return; }
     if (a && isLocked(a)) { toast.error(`「${a.title}」已經排好了，要換先按「解鎖」`); return; }
     const dayStr = format(d, 'yyyy-MM-dd');
+    const md0 = (day: string) => format(parseISO(day), 'M/d');
     if (movingPost && postDay(movingPost) === dayStr) return;
     const postOf = (x: Asset) => (x.plannedPostId ? postById.get(x.plannedPostId) : undefined);
     const items = [
@@ -342,6 +343,8 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
     const openPost = (day: string) => myVideoPosts.find(p => postDay(p) === day && isWaitingVideoPost(p, today)
       && !pending.some(x => x.plannedPostId === p.id));
     const blocked = new Set(myVideoPosts.map(postDay).filter(day => day > dayStr && openPost(day)));
+    // 已掛片的貼文搬到「小編已經有一篇在等片」的那天＝同一天會有兩篇貼文，請改到貼文管理處理
+    if (movingPost && openPost(dayStr)) { toast.error(`${md0(dayStr)} 已經有一篇小編貼文在等片，要換請到貼文管理處理`); return; }
     const plan = planInsert(dayStr, items, slotDays, blocked);
     if (plan.ok === false) { toast.error(plan.reason); return; }
     const md = (day: string) => format(parseISO(day), 'M/d');
