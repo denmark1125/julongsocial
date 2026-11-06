@@ -562,9 +562,13 @@ export function publishMarkUpdate(p: any, v: { fbPageId?: string; tiktokBsId?: s
   const merged = [...new Set([...before, ...posted])];
   const upd: Record<string, any> = {};
   if (merged.length !== before.length) upd.publishedPlatforms = merged;
-  if (p.status !== 'published' && checkable.every(pf => posted.includes(pf))) {
+  // 改綠色只看 IG/FB（11-06 使用者：TikTok 要等隔天機器人，週末沒人開電腦會一直卡藍色）。
+  // TikTok 照樣檢查、有問題照推，只是不擋綠色；只發 TikTok 的 IP（祥濱）才由 TikTok 決定。
+  const meta = checkable.filter(pf => pf === 'IG' || pf === 'FB');
+  const required = meta.length ? meta : checkable;
+  if (p.status !== 'published' && required.every(pf => posted.includes(pf))) {
     upd.status = 'published';
-    upd.autoPublished = { at: now.toISOString(), platforms: checkable, missingConfirm: !p.internalConfirmed || !p.clientConfirmed };
+    upd.autoPublished = { at: now.toISOString(), platforms: required, missingConfirm: !p.internalConfirmed || !p.clientConfirmed };
   }
   return Object.keys(upd).length ? upd : null;
 }

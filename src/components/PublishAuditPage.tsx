@@ -397,7 +397,10 @@ function auditProgress(
 ): { current: number; note: string } {
   const today = format(new Date(), 'yyyy-MM-dd');
   const base = videoProgress(p, asset, today, () => '', internal);
-  const checked = cells.filter(c => c.configured && c.status !== 'unsupported');
+  // 跟自動改綠色同一個規則：有 IG/FB 就只看 IG/FB，TikTok 不擋
+  const all = cells.filter(c => c.configured && c.status !== 'unsupported');
+  const metaCells = all.filter(c => c.pf === 'IG' || c.pf === 'FB');
+  const checked = metaCells.length ? metaCells : all;
   if (base.current < 5 && checked.length && checked.every(c => c.status === 'ok' || c.status === 'time_mismatch')) {
     return { current: 5, note: '各平台都確認發出去了' };
   }

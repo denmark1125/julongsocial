@@ -15,15 +15,20 @@ describe('發布成功自動改已發布', () => {
     expect(u.autoPublished.missingConfirm).toBe(false);
   });
 
-  it('IG/FB 確認了、TikTok 要等隔天機器人 → 先勾 IG/FB，狀態維持藍色', () => {
+  it('IG/FB 確認了、TikTok 還沒查 → 當晚就改綠色（TikTok 不擋，週末也能變綠）', () => {
     const u = publishMarkUpdate(post({ platforms: ['IG', 'TikTok', 'FB'] }), both, { IG: ok(), FB: ok() }, now)!;
     expect(u.publishedPlatforms).toEqual(['IG', 'FB']);
-    expect(u.status).toBeUndefined();
+    expect(u.status).toBe('published');
   });
 
-  it('隔天 TikTok 也確認 → 改綠色', () => {
-    const p = post({ platforms: ['IG', 'TikTok', 'FB'], publishedPlatforms: ['IG', 'FB'], publishAudit: { IG: ok(), FB: ok() } });
-    expect(publishMarkUpdate(p, both, { TikTok: ok() }, now)!.status).toBe('published');
+  it('隔天 TikTok 確認 → 只補勾 TikTok', () => {
+    const p = post({ status: 'published', platforms: ['IG', 'TikTok', 'FB'], publishedPlatforms: ['IG', 'FB'], publishAudit: { IG: ok(), FB: ok() } });
+    expect(publishMarkUpdate(p, both, { TikTok: ok() }, now)).toEqual({ publishedPlatforms: ['IG', 'FB', 'TikTok'] });
+  });
+
+  it('只發 TikTok 的 IP（祥濱）→ TikTok 確認才改綠色', () => {
+    expect(publishMarkUpdate(post({ platforms: ['TikTok'] }), { tiktokBsId: 'y' }, {}, now)).toBeNull();
+    expect(publishMarkUpdate(post({ platforms: ['TikTok'] }), { tiktokBsId: 'y' }, { TikTok: ok() }, now)!.status).toBe('published');
   });
 
   it('YouTube 查不到不擋（廣信）', () => {
