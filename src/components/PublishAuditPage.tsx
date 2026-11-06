@@ -219,7 +219,18 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                 </div>
                 <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 py-1">
                   <div className="w-full max-w-[400px]"><VideoSteps current={prog.current} /></div>
-                  <p className={`text-[13px] font-bold ${prog.current >= 5 ? 'text-[#5A5A40]' : 'text-orange-700'}`}>{prog.note}</p>
+                  <div className="space-y-1">
+                    <p className={`text-[13px] font-bold ${prog.current >= 5 ? 'text-[#5A5A40]' : 'text-orange-700'}`}>{prog.note}</p>
+                    {prog.current < 5 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {captionChecks(p).map(c => (
+                          <span key={c.label} className={`text-[12px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap ${c.ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                            {c.ok ? '✓' : '✗'} {c.label}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 {cells.some(c => precheck.has(`${p.id}|${c.pf}`)) && (
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-gray-500">
@@ -408,5 +419,19 @@ function auditProgress(
   if (base.current < 4 && pre.length && pre.every(r => r.status === 'scheduled')) {
     return { current: 4, note: `後台已排好，${p.scheduledAt.slice(11, 16)} 發布` };
   }
+  // 片好了不一定是小編沒排：常常卡在文案還沒寫、內部還沒檢核、業主還沒審文案（11-06 使用者）。照順序講第一個卡住的
+  if (base.current === 3) {
+    const stuck = captionChecks(p).find(c => !c.ok);
+    return { current: 3, note: stuck ? `片已完成，卡在：${stuck.wait}` : '片和文案都審過了，等小編到後台排程' };
+  }
   return base;
+}
+
+/** 貼文本身的三個關卡（貼文詳細頁的「內部檢核」「業主審核」兩個勾選＋文案有沒有寫） */
+function captionChecks(p: Post): { label: string; ok: boolean; wait: string }[] {
+  return [
+    { label: '文案已寫', ok: !!(p.content || '').trim(), wait: '系統還沒填文案' },
+    { label: '內部檢核', ok: !!p.internalConfirmed, wait: '內部還沒檢核文案' },
+    { label: '業主審文案', ok: !!p.clientConfirmed, wait: '業主還沒審文案' },
+  ];
 }
