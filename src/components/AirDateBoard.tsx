@@ -3,7 +3,7 @@ import {
   addMonths, differenceInCalendarDays, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameDay,
   isSameMonth, startOfDay, startOfMonth, startOfWeek, addDays, parseISO,
 } from 'date-fns';
-import { addDoc, collection, deleteField, doc, writeBatch } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, deleteField, doc, writeBatch } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { AUTO_POST_SOURCE, buildAutoPost, buildTitledPost, isUntouchedAutoPost, movedSchedule } from '../lib/boardPosts';
 import { Asset, DismissedHabit, ExtraSlot, PlannedSlotMove, Post, Vendor, deriveFlowStage } from '../types';
@@ -191,14 +191,16 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
       // 小編寫過的貼文要到貼文管理處理，免得把別人的文案一起刪掉
       const p = postById.get(assetId.slice(POST_KEY.length));
       if (!p || !postMovable(p) || isPostLocked(p)) { if (p && isPostLocked(p) && postMovable(p)) toast.error('要撤銷先按「解鎖」'); return; }
-      if (p.createdFrom !== AUTO_POST_SOURCE || (p.content || '').trim()) { toast('這篇貼文小編已經動過了，要拿下來請到貼文管理'); return; }
+      if (p.createdFrom !== AUTO_POST_SOURCE || (p.content || '').trim() || p.title !== p.autoTitle) { toast('這篇貼文小編已經動過了，要拿下來請到貼文管理'); return; }
       if (!window.confirm(`把「${p.title}」退回待排？
 
 這篇系統建的待補貼文會刪掉，片放回左邊。`)) return;
       setBusyId(assetId);
       try {
+        // ⚠️ 分兩步：規則只准一般同事刪「待補中、沒掛片」的系統貼文（firestore.rules posts delete）。
+        //    先把貼文退回待補中＋拿掉片、片放回可用，再刪那篇；第二步就算失敗也只剩一篇空的待補中，不會壞資料
         const batch = writeBatch(db);
-        batch.delete(doc(db, 'posts', p.id!));
+        batch.update(doc(db, 'posts', p.id!), { status: 'pending', assetId: 'to_be_added' });
         if (p.assetId && p.assetId !== 'to_be_added' && assets.some(x => x.id === p.assetId)) {
           batch.update(doc(db, 'assets', p.assetId), {
             status: 'available', usedInPostId: deleteField(),
@@ -206,6 +208,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
           });
         }
         await batch.commit();
+        await deleteDoc(doc(db, 'posts', p.id!));
         toast.success('已退回待排');
       } catch (error) {
         console.error('退回失敗:', error);

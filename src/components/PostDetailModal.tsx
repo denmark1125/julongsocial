@@ -285,16 +285,31 @@ export default function PostDetailModal({ post, vendor, asset, onClose, assets, 
             <User size={12} className="mr-1" />
             建立於 {format(parseISO(post.createdAt), 'yyyy/MM/dd')}
           </div>
-          {post.postUrl && (
-            <a
-              href={post.postUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="bg-[#5A5A40] text-white px-6 py-2 rounded-xl text-base font-bold flex items-center shadow-lg hover:bg-[#4a4a35] transition-all"
-            >
-              <ExternalLink size={16} className="mr-2" /> 前往貼文
-            </a>
-          )}
+          {(() => {
+            // 「前往貼文」要到真正發出去的那則貼文（11-06 使用者：點了跑到雲端，跟上面看成片重複）。
+            // 優先用發布稽核查到的 IG／FB 網址；手填的「貼文位置連結」是雲端資料夾的不算貼文，不顯示
+            const links = (['IG', 'FB'] as const)
+              .map(pf => ({ pf, url: post.publishAudit?.[pf]?.forScheduledAt === post.scheduledAt ? post.publishAudit?.[pf]?.permalink : undefined }))
+              .filter((x): x is { pf: 'IG' | 'FB'; url: string } => !!x.url);
+            const manual = post.postUrl && !/drive\.google\.com|docs\.google\.com/.test(post.postUrl) ? post.postUrl : undefined;
+            if (!links.length && !manual) return null;
+            return (
+              <div className="flex flex-wrap gap-2">
+                {links.map(l => (
+                  <a key={l.pf} href={l.url} target="_blank" rel="noopener noreferrer"
+                    className="bg-[#5A5A40] text-white px-4 py-2 rounded-xl text-[15px] font-bold flex items-center shadow-lg hover:bg-[#4a4a35] transition-all">
+                    <ExternalLink size={16} className="mr-2" /> {l.pf} 貼文
+                  </a>
+                ))}
+                {!links.length && manual && (
+                  <a href={manual} target="_blank" rel="noopener noreferrer"
+                    className="bg-[#5A5A40] text-white px-6 py-2 rounded-xl text-base font-bold flex items-center shadow-lg hover:bg-[#4a4a35] transition-all">
+                    <ExternalLink size={16} className="mr-2" /> 前往貼文
+                  </a>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

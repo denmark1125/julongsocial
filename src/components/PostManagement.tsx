@@ -16,6 +16,7 @@ import { listPlannedSlots } from '../lib/plannedSlots';
 import { Post, Vendor, PostStatus, Asset, PlannedSlotMove, ShootBooking, getVendorDefaultPlatforms, platformOptionsFor } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import { boundAssetLabel } from '../lib/boundPosts';
+import { publishedPostUrl } from '../lib/postLinks';
 import type { PostPrefill } from './CalendarView';
 import { 
   Plus, 
@@ -982,7 +983,7 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
                     ))}
                     <div className="ml-auto flex items-center">
                       <button onClick={() => handleCopyContent(post.content)} className="p-2 text-emerald-600 rounded-lg" title="複製文案" aria-label="複製文案"><Copy size={17} /></button>
-                      {post.postUrl && <a href={post.postUrl} target="_blank" rel="noopener noreferrer" className="p-2 text-blue-500" aria-label="打開貼文"><ExternalLink size={17} /></a>}
+                      {publishedPostUrl(post) && <a href={publishedPostUrl(post)} target="_blank" rel="noopener noreferrer" className="p-2 text-blue-500" aria-label="打開貼文"><ExternalLink size={17} /></a>}
                       <button onClick={() => setDeletingPostId(post.id!)} aria-label="刪除貼文" className="p-2 text-gray-300 rounded-lg"><Trash2 size={17} /></button>
                     </div>
                   </div>
