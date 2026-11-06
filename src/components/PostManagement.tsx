@@ -449,7 +449,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
   return (
     <div className="readability-surface space-y-6 min-w-0">
       {/* Statistics Section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
+      <div className="hidden md:grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
         {vendorStats.map(stat => (
           <div key={stat.id} className="bg-white p-4 rounded-3xl border border-black/5 shadow-sm">
             <div className="flex justify-between items-start mb-2">
@@ -530,18 +530,20 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
           <h2 className="text-2xl font-bold serif text-[#5A5A40]">貼文管理</h2>
           <p className="text-base text-gray-500">追蹤所有貼文的發布狀態與成效</p>
         </div>
-        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+        <div className="flex gap-2 w-full sm:w-auto">
           <button 
             onClick={() => setIsTrackingModalOpen(true)}
-            className="flex-1 basis-[140px] sm:basis-auto sm:flex-none flex items-center justify-center px-4 py-2 bg-orange-50 text-orange-600 rounded-xl shadow-sm border border-orange-100 hover:bg-orange-100 transition-all text-base font-bold"
+            className="order-2 md:order-none shrink-0 md:flex-none flex items-center justify-center px-3 md:px-4 py-2 bg-orange-50 text-orange-600 rounded-xl shadow-sm border border-orange-100 hover:bg-orange-100 transition-all text-base font-bold"
+            title="上片排程表"
           >
-            <BellRing size={18} className="mr-2" /> 上片排程表
+            <BellRing size={18} className="md:mr-2" /><span className="hidden md:inline">上片排程表</span>
           </button>
           <button 
             onClick={exportToExcel}
-            className="flex-1 basis-[140px] sm:basis-auto sm:flex-none flex items-center justify-center px-4 py-2 bg-white text-gray-600 rounded-xl shadow-sm border border-black/5 hover:bg-gray-50 transition-all text-base"
+            className="order-3 md:order-none shrink-0 md:flex-none flex items-center justify-center px-3 md:px-4 py-2 bg-white text-gray-600 rounded-xl shadow-sm border border-black/5 hover:bg-gray-50 transition-all text-base"
+            title="匯出 Excel"
           >
-            <Download size={18} className="mr-2" /> 匯出 Excel
+            <Download size={18} className="md:mr-2" /><span className="hidden md:inline">匯出 Excel</span>
           </button>
           <button 
             onClick={() => {
@@ -565,7 +567,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
               });
               setIsModalOpen(true);
             }}
-            className="flex-1 basis-[140px] sm:basis-auto sm:flex-none flex items-center justify-center px-6 py-2 bg-[#5A5A40] text-white rounded-xl shadow-lg hover:bg-[#4a4a35] transition-all text-base font-bold"
+            className="order-1 md:order-none flex-1 md:flex-none flex items-center justify-center px-6 py-2 bg-[#5A5A40] text-white rounded-xl shadow-lg hover:bg-[#4a4a35] transition-all text-base font-bold"
           >
             <Plus size={18} className="mr-2" /> 新增貼文
           </button>
@@ -573,7 +575,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
       </div>
 
       {/* Month Selector */}
-      <div className="flex flex-col sm:flex-row items-center justify-between bg-white p-4 rounded-2xl border border-black/5 shadow-sm gap-4">
+      <div className="flex flex-col sm:flex-row items-center justify-between bg-white p-2 md:p-4 rounded-2xl border border-black/5 shadow-sm gap-4">
         <div className="flex items-center space-x-4 w-full sm:w-auto justify-between sm:justify-start">
           <button 
             onClick={() => {
@@ -597,7 +599,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
             <ChevronRight size={20} />
           </button>
         </div>
-        <div className="flex space-x-1 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0 scrollbar-hide">
+        <div className="hidden sm:flex space-x-1 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0 scrollbar-hide">
           {months.map(m => (
             <button
               key={m}
@@ -675,6 +677,13 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
             )}
           >
             {vendor.name}
+            {(() => {
+              // 手機上面的各 IP 進度卡收掉了，進度改寫在小籤上
+              const st = vendorStats.find(x => x.id === vendor.id);
+              return st && st.target > 0 ? (
+                <span className={cn('md:hidden ml-1.5 text-[12px]', selectedVendorId === vendor.id ? 'text-white/70' : st.count >= st.target ? 'text-green-600' : 'text-orange-600')}>{st.count}/{st.target}</span>
+              ) : null;
+            })()}
           </button>
         ))}
       </div>
@@ -891,137 +900,102 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
           </table>
         </div>
 
-        {/* Mobile Card View */}
-        <div className="md:hidden divide-y divide-black/5">
+        {/* 手機（11-06 改版）：小編要的是「哪天要發什麼、文案好了沒、排了沒」——照日期分組，今天以後在前，
+            已經過去的收在最下面。狀態點一下就能改，文案三關用小燈號，複製文案一鍵。 */}
+        <div className="md:hidden">
           {sortedPosts.length === 0 ? (
             <div className="p-8 text-center text-gray-500 italic">本月尚無貼文</div>
-          ) : (
-            sortedPosts.map((post, index) => {
+          ) : (() => {
+            const todayStr = format(new Date(), 'yyyy-MM-dd');
+            const byTime = [...sortedPosts].sort((a, b) => (a.scheduledAt || '').localeCompare(b.scheduledAt || ''));
+            const upcoming = byTime.filter(p => !p.scheduledAt || p.scheduledAt.slice(0, 10) >= todayStr);
+            const past = byTime.filter(p => p.scheduledAt && p.scheduledAt.slice(0, 10) < todayStr).reverse();
+            const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
+            const dayLabel = (d: string) => d === todayStr ? '今天' : `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+            const group = (list: Post[]) => {
+              const out: { day: string; posts: Post[] }[] = [];
+              for (const p of list) {
+                const d = (p.scheduledAt || '').slice(0, 10) || '未定';
+                if (out.length && out[out.length - 1].day === d) out[out.length - 1].posts.push(p); else out.push({ day: d, posts: [p] });
+              }
+              return out;
+            };
+            const card = (post: Post) => {
               const vendor = vendors.find(v => v.id === post.vendorId);
-              const isNearTop = index < 2 && sortedPosts.length > 2;
-
+              const checks = [
+                { label: '文案', ok: !!(post.content || '').trim(), onClick: undefined as undefined | (() => void) },
+                { label: '內部', ok: !!post.internalConfirmed, onClick: () => toggleConfirmation(post, 'internalConfirmed') },
+                { label: '業主', ok: !!post.clientConfirmed, onClick: () => toggleConfirmation(post, 'clientConfirmed') },
+              ];
               return (
-                <div key={post.id} className="p-4 space-y-3">
-                  <div className="flex flex-col gap-2">
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-bold text-gray-500">{vendor?.name}</span>
-                        <div className="flex flex-wrap gap-1">
-                          {post.platforms.map(p => (
-                            <span key={p} className="bg-gray-100 text-[13px] px-1 py-0.5 rounded font-bold">{p}</span>
-                          ))}
-                        </div>
-                      </div>
-                      <h4 className="font-bold text-base line-clamp-2">{post.title}</h4>
-                      {boundAssetLabel(post, assets) && <p className="text-sm text-blue-700 truncate mt-1">{boundAssetLabel(post, assets)}</p>}
+                <div key={post.id} className="px-4 py-3 space-y-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-[15px] font-bold tabular-nums shrink-0">{post.scheduledAt ? post.scheduledAt.slice(11, 16) : '--:--'}</span>
+                    <span className="text-[14px] font-bold text-[#5A5A40] truncate">{vendor?.name}</span>
+                    <span className="text-[12px] text-gray-400 shrink-0">{post.platforms.join('/')}</span>
+                    <div className="relative ml-auto shrink-0">
+                      {getStatusBadge(post.status, () => setOpenStatusId(openStatusId === post.id ? null : post.id!))}
+                      {openStatusId === post.id && (
+                        <>
+                          <div className="fixed inset-0 z-10" onClick={() => setOpenStatusId(null)} />
+                          <div className="absolute right-0 top-full mt-1 bg-white shadow-2xl rounded-2xl border border-black/5 py-2 z-20 min-w-[130px]">
+                            {(['draft', 'scheduled', 'published', 'pending'] as PostStatus[]).map(s => (
+                              <button
+                                key={s}
+                                onClick={() => { toggleStatus(post, s); setOpenStatusId(null); }}
+                                className={cn('block w-full text-left px-4 py-3 text-[15px]', post.status === s ? 'font-bold text-[#5A5A40] bg-[#F5F5F0]' : 'text-gray-600')}
+                              >
+                                {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : s === 'published' ? '已發布' : '待補中'}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
-
-                  <div className="flex flex-wrap gap-2 items-center justify-between text-sm pt-2 border-t border-black/5">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <div className="flex items-center text-gray-500">
-                        <CalendarIcon size={12} className="mr-1" />
-                        {post.scheduledAt ? format(parseISO(post.scheduledAt), 'MM/dd HH:mm') : '-'}
-                      </div>
-                      <div className="relative">
-                        {getStatusBadge(post.status, () => setOpenStatusId(openStatusId === post.id ? null : post.id!))}
-                        {openStatusId === post.id && (
-                          <>
-                            <div className="fixed inset-0 z-10" onClick={() => setOpenStatusId(null)} />
-                            <div className={cn(
-                              "absolute left-0 bg-white shadow-2xl rounded-2xl border border-black/5 py-2 z-20 min-w-[120px] animate-in fade-in duration-200",
-                              isNearTop
-                                ? "top-full mt-1 slide-in-from-top-2"
-                                : "bottom-full mb-1 slide-in-from-bottom-2"
-                            )}>
-                              <div className="px-3 py-1 text-[13px] font-bold text-gray-500 uppercase tracking-widest border-b border-black/5 mb-1">變更狀態</div>
-                              {(['draft', 'scheduled', 'published', 'pending'] as PostStatus[]).map(s => (
-                                <button 
-                                  key={s}
-                                  onClick={() => {
-                                    toggleStatus(post, s);
-                                    setOpenStatusId(null);
-                                  }}
-                                  className={cn(
-                                    "block w-full text-left px-4 py-2.5 text-sm hover:bg-[#F5F5F0] transition-colors",
-                                    post.status === s ? "font-bold text-[#5A5A40] bg-[#F5F5F0]" : "text-gray-600"
-                                  )}
-                                >
-                                  {s === 'draft' ? '草稿' : s === 'scheduled' ? '已排程' : s === 'published' ? '已發布' : '待補中'}
-                                </button>
-                              ))}
-                            </div>
-                          </>
-                        )}
-                      </div>
+                  <button type="button" onClick={() => { setEditingPost(post); setFormData(post); setIsModalOpen(true); }} className="block w-full text-left">
+                    <span className="block text-[15px] font-bold leading-snug line-clamp-2">{post.title}</span>
+                    {boundAssetLabel(post, assets) && <span className="block text-[13px] text-blue-700 truncate mt-0.5">{boundAssetLabel(post, assets)}</span>}
+                  </button>
+                  <div className="flex items-center gap-1.5">
+                    {checks.map(c => (
+                      <button key={c.label} type="button" onClick={c.onClick} disabled={!c.onClick}
+                        className={cn('flex items-center gap-1 px-2 py-1 rounded-lg text-[13px] font-bold border',
+                          c.ok ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-white border-black/10 text-gray-500')}>
+                        <span className={cn('w-2 h-2 rounded-full', c.ok ? 'bg-emerald-500' : 'bg-rose-500')} />{c.label}
+                      </button>
+                    ))}
+                    <div className="ml-auto flex items-center">
+                      <button onClick={() => handleCopyContent(post.content)} className="p-2 text-emerald-600 rounded-lg" title="複製文案" aria-label="複製文案"><Copy size={17} /></button>
+                      {post.postUrl && <a href={post.postUrl} target="_blank" rel="noopener noreferrer" className="p-2 text-blue-500" aria-label="打開貼文"><ExternalLink size={17} /></a>}
+                      <button onClick={() => setDeletingPostId(post.id!)} aria-label="刪除貼文" className="p-2 text-gray-300 rounded-lg"><Trash2 size={17} /></button>
                     </div>
-                    {/* 這裡原本還有一組「客:／內:」勾選，跟卡片最下面那排「業主／內部」是同一個
-                        toggleConfirmation，完全重複。以前字只有 9px 看不出來，放大之後兩排並存很怪，
-                        留下面那排（有完整字＋連結），這裡改放操作鈕，順便把原本自己佔一整排、
-                        左邊整片空白的圖示收進來。 */}
-                    {/* ml-auto：這排是 flex-wrap，窄螢幕放不下時圖示會被擠到第二行，
-                        沒有它就會變成靠左的一排孤兒圖示 */}
-                    <div className="flex items-center gap-1 ml-auto">
-                      <button
-                        onClick={() => handleCopyContent(post.content)}
-                        className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg"
-                        title="複製文案"
-                      >
-                        <Copy size={16} />
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditingPost(post);
-                          setFormData(post);
-                          setIsModalOpen(true);
-                        }}
-                        aria-label="編輯貼文"
-                        className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg"
-                      >
-                        <FileEdit size={16} />
-                      </button>
-                      <button
-                        onClick={() => setDeletingPostId(post.id!)}
-                        aria-label="刪除貼文"
-                        className="p-2 text-red-500 hover:bg-red-50 rounded-lg"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-black/5">
-                    <div className="flex space-x-4">
-                      <button 
-                        onClick={() => toggleConfirmation(post, 'clientConfirmed')}
-                        className="flex items-center space-x-1"
-                      >
-                        {post.clientConfirmed ? <CheckSquare className="text-green-500" size={16} /> : <Square className="text-gray-300" size={16} />}
-                        <span className="text-[13px] text-gray-500">業主</span>
-                      </button>
-                      <button 
-                        onClick={() => toggleConfirmation(post, 'internalConfirmed')}
-                        className="flex items-center space-x-1"
-                      >
-                        {post.internalConfirmed ? <CheckSquare className="text-green-500" size={16} /> : <Square className="text-gray-300" size={16} />}
-                        <span className="text-[13px] text-gray-500">內部</span>
-                      </button>
-                    </div>
-                    {post.postUrl && (
-                      <a 
-                        href={post.postUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="text-blue-500 font-bold text-[13px] flex items-center"
-                      >
-                        <ExternalLink size={12} className="mr-1" /> 連結
-                      </a>
-                    )}
                   </div>
                 </div>
               );
-            })
-          )}
+            };
+            const section = (g: { day: string; posts: Post[] }) => (
+              <div key={g.day}>
+                <div className={cn('sticky top-0 z-[1] px-4 py-1.5 text-[13px] font-bold border-b border-black/5', g.day === todayStr ? 'bg-[#5A5A40] text-white' : 'bg-[#F5F5F0] text-gray-600')}>
+                  {g.day === '未定' ? '日期未定' : `${dayLabel(g.day)}（${WEEK[parseISO(g.day).getDay()]}）`}
+                  <span className={cn('ml-2 font-normal', g.day === todayStr ? 'text-white/70' : 'text-gray-400')}>{g.posts.length} 篇</span>
+                </div>
+                <div className="divide-y divide-black/5">{g.posts.map(card)}</div>
+              </div>
+            );
+            return (
+              <>
+                {upcoming.length === 0 && <p className="p-6 text-center text-[14px] text-gray-400">這個月接下來沒有排程</p>}
+                {group(upcoming).map(section)}
+                {past.length > 0 && (
+                  <details className="border-t border-black/5">
+                    <summary className="px-4 py-3 text-[14px] font-bold text-gray-500 cursor-pointer">本月已過的 {past.length} 篇</summary>
+                    {group(past).map(section)}
+                  </details>
+                )}
+              </>
+            );
+          })()}
         </div>
       </div>
 
