@@ -296,7 +296,7 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
           <div className="grid grid-cols-1 sm:grid-cols-7 gap-2">
             {days.map((d, i) => {
               const dayPosts = posts.filter(p => (p.scheduledAt || '').slice(0, 10) === d && vmap.has(p.vendorId)).sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
-              const dayShoots = bookings.filter(b => b.status === 'booked' && b.scheduledDate === d);
+              const dayShoots = bookings.filter(b => b.status === 'booked' && b.scheduledDate === d).sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
               const dayMissing = missing.filter(m => m.date === d);
               return (
                 <div key={d} className={cn('rounded-2xl p-2 min-w-0 space-y-1', i === 0 ? 'bg-[#5A5A40]/[0.07] ring-1 ring-[#5A5A40]/20' : 'bg-[#F5F5F0]')}>
@@ -382,15 +382,21 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
 /** 五站縮小版：小圓點＋線，目前這站橘色呼吸燈（完整版在發布稽核頁） */
 function MiniSteps({ current }: { current: number }) {
   return (
-    <div className="flex items-center shrink-0" title={VIDEO_STEPS.map((s, i) => `${i < current ? '✓' : i === current ? '▶' : '・'}${s}`).join(' ')}>
+    // 點下面寫站名（11-06 使用者：只有點看不懂每個點的意思）
+    <div className="flex items-start shrink-0">
       {VIDEO_STEPS.map((s, i) => (
         <React.Fragment key={s}>
-          <span className="relative flex w-3 h-3">
-            {i === current && <span className="absolute inline-flex w-full h-full rounded-full bg-orange-400 opacity-50 animate-ping" />}
-            <span className={cn('relative inline-flex w-3 h-3 rounded-full border-2',
-              i < current ? 'bg-[#5A5A40] border-[#5A5A40]' : i === current ? 'bg-orange-500 border-orange-500' : 'bg-white border-gray-200')} />
-          </span>
-          {i < VIDEO_STEPS.length - 1 && <span className={cn('w-4 h-[2px]', i < current ? 'bg-[#5A5A40]' : 'bg-gray-200')} />}
+          <div className="relative flex flex-col items-center w-[52px] shrink-0">
+            {/* 連到下一站的線：從這個點的中心畫到下一個點的中心，壓在點下面 */}
+            {i < VIDEO_STEPS.length - 1 && <span className={cn('absolute top-[5px] left-1/2 w-full h-[2px]', i < current ? 'bg-[#5A5A40]' : 'bg-gray-200')} />}
+            <span className="relative flex w-3 h-3">
+              {i === current && <span className="absolute inline-flex w-full h-full rounded-full bg-orange-400 opacity-50 animate-ping" />}
+              <span className={cn('relative inline-flex w-3 h-3 rounded-full border-2',
+                i < current ? 'bg-[#5A5A40] border-[#5A5A40]' : i === current ? 'bg-orange-500 border-orange-500' : 'bg-white border-gray-200')} />
+            </span>
+            <span className={cn('mt-1 text-[11px] font-bold whitespace-nowrap',
+              i === current ? 'text-orange-700' : i < current ? 'text-[#5A5A40]' : 'text-gray-400')}>{s}</span>
+          </div>
         </React.Fragment>
       ))}
     </div>
