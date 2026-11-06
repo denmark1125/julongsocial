@@ -220,15 +220,15 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                 <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 py-1">
                   <div className="w-full max-w-[400px]"><VideoSteps current={prog.current} /></div>
                   <div className="space-y-1">
-                    <p className={`text-[13px] font-bold ${prog.current >= 5 ? 'text-[#5A5A40]' : 'text-orange-700'}`}>{prog.note}</p>
+                    <p className={`text-[15px] font-bold tracking-wide ${prog.current >= 5 ? 'text-[#5A5A40]' : 'text-[#3d3d2c]'}`}>{prog.note}</p>
                     {prog.current < 5 && (
                       // 文案三關：小燈號就好（11-06 使用者：標籤太複雜）。綠＝過了，紅色呼吸燈＝還沒
                       <div className="flex flex-wrap items-center gap-3">
                         {captionChecks(p).map(c => (
-                          <span key={c.label} className="flex items-center gap-1 text-[12px] text-gray-400 whitespace-nowrap" title={c.ok ? `${c.label}：已完成` : c.wait}>
-                            <span className="relative flex w-2 h-2">
-                              {!c.ok && <span className="absolute inline-flex w-full h-full rounded-full bg-red-400 opacity-60 animate-ping" />}
-                              <span className={`relative inline-flex w-2 h-2 rounded-full ${c.ok ? 'bg-green-500' : 'bg-red-500'}`} />
+                          <span key={c.label} className="flex items-center gap-1.5 text-[13px] text-gray-500 whitespace-nowrap" title={c.ok ? `${c.label}：已完成` : c.wait}>
+                            <span className="relative flex w-2.5 h-2.5">
+                              {!c.ok && <span className="absolute inline-flex w-full h-full rounded-full bg-rose-400 opacity-50 animate-ping" />}
+                              <span className={`relative inline-flex w-2.5 h-2.5 rounded-full ${c.ok ? 'bg-emerald-500' : 'bg-rose-500'}`} />
                             </span>
                             {c.label}
                           </span>
