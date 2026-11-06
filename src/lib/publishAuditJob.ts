@@ -6,6 +6,7 @@ import {
 import { fetchFacebookPosts, fetchInstagramPosts, listMetaPages, type MetaPage } from './metaGraph.js';
 import { describePrecheck, mergeCalendars, PRECHECK_ICON, precheckAll, unmatchedCards, type VendorCalendar } from './publishPrecheck.js';
 import { chaseTimeFor } from './notify/reviewChase.js';
+import type { FlexOptions, FlexProgress } from './notify/flexCard.js';
 
 /**
  * 發布稽核的排程工作（伺服器用，2026-11-05）。由 /api/cron/publish-audit 每分鐘呼叫一次。
@@ -22,7 +23,7 @@ import { chaseTimeFor } from './notify/reviewChase.js';
 export interface JobDeps {
   db: any;                                  // firebase-admin Firestore
   metaToken: string;
-  push: (text: string) => Promise<number>;  // 推 LINE，回傳推給幾個人
+  push: (text: string, opts?: FlexOptions) => Promise<number>;  // 推 LINE（排成卡片），回傳推給幾個人
   now?: Date;
   dryRun?: boolean;                         // 只算不寫、不推（本機預覽／手動測試用）
   appUrl?: string;
@@ -222,10 +223,10 @@ export async function runPublishAudit(deps: JobDeps): Promise<JobResult> {
     const meta = (await ref.get()).data() || {};
     if (hhmm < REPORT_AT && (!meta.noonSentAt || dryRun)) {
       const brief = await buildNoonBrief(db, await getVendors(), now);
-      result.reminder = brief || undefined;
+      result.reminder = brief?.text || undefined;
       if (!dryRun) {
         await ref.set({ day, noonSentAt: now.toISOString() }, { merge: true });
-        if (brief) await push(brief);
+        if (brief) await push(brief.text, { progress: brief.progress });
       }
     }
     if (hhmm >= REPORT_AT && (!meta.reportSentAt || dryRun)) {
@@ -234,7 +235,7 @@ export async function runPublishAudit(deps: JobDeps): Promise<JobResult> {
       result.report = report.text;
       if (!dryRun) {
         await ref.set({ day, reportSentAt: now.toISOString(), text: report.text, unscheduled: report.unscheduled }, { merge: true });
-        await push(report.text);
+        await push(report.text, { progress: report.progress });
       }
     }
   }
@@ -253,7 +254,7 @@ async function upcomingReadiness(db: any, vmap: Map<string, VendorInfo>, now: Da
   const posts = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }))
     .filter((p: any) => vmap.has(p.vendorId) && (allVendors || (p.contentType !== 'post' && vmap.get(p.vendorId)?.strict)))
     .sort((a: any, b: any) => a.scheduledAt.localeCompare(b.scheduledAt));
-  const out: { post: any; vendor: VendorInfo; ready: boolean; label: string }[] = [];
+  const out: { post: any; vendor: VendorInfo; ready: boolean; label: string; noCaption: boolean }[] = [];
   for (const p of posts) {
     let ready = false; let label = '還沒有片';
     // 片可能直接掛在貼文上，也可能是「排上片日」指到這篇（asset.plannedPostId），兩邊都要找（11-05 康青龍）
@@ -272,7 +273,9 @@ async function upcomingReadiness(db: any, vmap: Map<string, VendorInfo>, now: Da
         else { label = '還在剪'; }
       }
     }
-    out.push({ post: p, vendor: vmap.get(p.vendorId)!, ready, label });
+    // 系統沒填文案＝小編發的時候很可能也忘了貼（11-05 好正點），發之前就先提醒
+    const noCaption = !(p.content || '').trim();
+    out.push({ post: p, vendor: vmap.get(p.vendorId)!, ready, label, noCaption });
   }
   return out;
 }
@@ -281,7 +284,7 @@ async function upcomingReadiness(db: any, vmap: Map<string, VendorInfo>, now: Da
  * 12:00「今天要發哪些片」：今天還沒到時間的所有排程（每個 IP 都列，準時 IP 加標記），
  * 片子好了沒、Meta 上排了沒（機器人 11:55 看過的話）。沒有排程就不推。
  */
-async function buildNoonBrief(db: any, vmap: Map<string, VendorInfo>, now: Date): Promise<string | null> {
+async function buildNoonBrief(db: any, vmap: Map<string, VendorInfo>, now: Date): Promise<{ text: string; progress: FlexProgress[] } | null> {
   const items = await upcomingReadiness(db, vmap, now, true);
   if (!items.length) return null;
   const day = taipeiDay(now);
@@ -295,11 +298,15 @@ async function buildNoonBrief(db: any, vmap: Map<string, VendorInfo>, now: Date)
     const metaBits = (p.platforms || []).map((pf: string) => meta.get(`${p.id}|${pf}`)).filter(Boolean);
     const metaText = !metaBits.length ? '' : metaBits.every((r: any) => r.status === 'scheduled') ? '｜Meta 已排好 ✓'
       : `｜Meta ${metaBits.some((r: any) => r.status === 'unreadable') ? '讀不到' : '還沒排好'} ⚠️`;
-    return `・${p.scheduledAt.slice(11, 16)} ${x.vendor.name}${x.vendor.strict ? '（準時）' : ''}「${(p.title || '').slice(0, 16)}」${pfs}｜${x.ready ? '成片已好 ✓' : `${x.label} ⚠️`}${metaText}`;
+    return `・${p.scheduledAt.slice(11, 16)} ${x.vendor.name}${x.vendor.strict ? '（準時）' : ''}「${(p.title || '').slice(0, 16)}」${pfs}｜${x.ready ? '成片已好 ✓' : `${x.label} ⚠️`}${metaText}${x.noCaption ? '｜系統還沒填文案 ⚠️' : ''}`;
   });
+  const progress: FlexProgress[] = [
+    { label: '成片已好', done: items.filter(x => x.ready).length, total: items.length },
+    { label: '系統已填文案', done: items.filter(x => !x.noCaption).length, total: items.length },
+  ];
   const extra = unmatchedCards(items.filter(x => x.vendor.strict).map(x => x.post), calendars, day, taipeiTime(now))
     .map(x => `❓ ${vmap.get(x.vendorId)?.name || ''} ${x.card.platform} Meta 排了 ${x.card.time}，系統今天沒有對應的排程 → 請確認`);
-  return [`☀️ ${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))} 今天要發的片（${items.length} 支）`, ...lines, ...extra].join('\n');
+  return { text: [`☀️ ${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))} 今天要發的片（${items.length} 支）`, ...lines, ...extra].join('\n'), progress };
 }
 
 /**
@@ -366,10 +373,12 @@ export async function buildDailyReport(
     okCount ? `✅ 其他 ${okCount} 支正確` : '',
     unscheduled.length ? `❓ 準時 IP 有 ${unscheduled.length} 則系統沒排的貼文（可能是業主自己發的）` : '',
     upcoming.length ? '🌙 今晚待發' : '',
-    ...upcoming.map(x => `・${x.vendor.name} ${x.post.scheduledAt.slice(11, 16)}「${(x.post.title || '').slice(0, 16)}」${x.ready ? '成片已好 ✓' : `${x.label} ⚠️`}`),
+    ...upcoming.map(x => `・${x.vendor.name} ${x.post.scheduledAt.slice(11, 16)}「${(x.post.title || '').slice(0, 16)}」｜${x.ready ? '成片已好 ✓' : `${x.label} ⚠️`}${x.noCaption ? '｜系統還沒填文案 ⚠️' : ''}`),
     appUrl ? `詳情：${appUrl}/?tab=publishAudit` : '',
   ].filter(Boolean).join('\n');
-  return { text, unscheduled };
+  // 卡片上的進度條：昨天到今天排的片，確認發對了幾支
+  const progress: FlexProgress[] = (okCount + lines.length) ? [{ label: '確認發布正確', done: okCount, total: okCount + lines.length }] : [];
+  return { text, unscheduled, progress };
 }
 
 /**

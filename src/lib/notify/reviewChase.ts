@@ -88,7 +88,7 @@ export function chaseMessage(vendorName: string, items: ChaseItem[]): string {
   const head = urgent ? `🚨 催片：${vendorName} 剩不到 24 小時就要上片` : `⏰ 催片：${vendorName} 2 天內要上片`;
   const lines = items.map(i => {
     const d = i.scheduledAt;
-    return `・${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))} ${d.slice(11, 16)}「${i.title.slice(0, 20)}」${i.stage}`;
+    return `・${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))} ${d.slice(11, 16)}「${i.title.slice(0, 20)}」｜${i.stage} ⚠️`;
   });
   return [head, ...lines, '請藏鏡人跟客戶確認，PM 幫忙盯'].join('\n');
 }

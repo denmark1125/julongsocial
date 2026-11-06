@@ -19,13 +19,14 @@ type Report = { text?: string; reportSentAt?: string; unscheduled?: { vendorId: 
 
 // 問題排前面，眼睛先看到要處理的
 const SEVERITY: Record<AuditStatus, number> = {
-  wrong_account: 0, missing: 1, not_seen: 2, content_mismatch: 3, time_mismatch: 4, pending: 5, ok: 6, skipped: 7, unsupported: 8,
+  wrong_account: 0, no_caption: 0, missing: 1, not_seen: 2, content_mismatch: 3, time_mismatch: 4, pending: 5, ok: 6, skipped: 7, unsupported: 8,
 };
 const TONE: Record<AuditStatus, string> = {
   wrong_account: 'bg-red-50 text-red-700 border-red-100',
   missing: 'bg-red-50 text-red-700 border-red-100',
   not_seen: 'bg-amber-50 text-amber-700 border-amber-100',
   content_mismatch: 'bg-amber-50 text-amber-700 border-amber-100',
+  no_caption: 'bg-red-50 text-red-700 border-red-100',
   time_mismatch: 'bg-amber-50 text-amber-700 border-amber-100',
   pending: 'bg-gray-50 text-gray-500 border-black/5',
   ok: 'bg-green-50 text-green-700 border-green-100',
@@ -77,7 +78,9 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
   const rows = useMemo(() => posts
     .map(p => {
       const v = vmap.get(p.vendorId);
-      const cells = (p.platforms || []).map(pf => {
+      // 平台順序固定 IG → FB → TikTok → 其他（資料裡的順序是小編點選的順序，每列不一樣很難對照）
+      const order = (pf: string) => { const i = ['IG', 'FB', 'TikTok'].indexOf(pf); return i < 0 ? 9 : i; };
+      const cells = [...(p.platforms || [])].sort((a, b) => order(a) - order(b)).map(pf => {
         const fresh = preview[`${p.id}|${pf}`];
         const saved = p.publishAudit?.[pf];
         const a = fresh || (saved && saved.forScheduledAt === p.scheduledAt ? saved : undefined);
@@ -160,6 +163,9 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
         ))}
       </div>
 
+      {counts.problem + counts.ok === 0 && counts.pending > 0 && (
+        <p className="text-[13px] text-gray-500 -mt-3">這天的片都還沒到發布時間；時間一到系統會自動去查，有問題會推 LINE。</p>
+      )}
       <p className="text-[13px] text-gray-400 -mt-3">
         發布前檢查：{precheckDoc?.fetchedAt ? `機器人 ${format(parseISO(precheckDoc.fetchedAt), 'HH:mm')} 看過 Meta 排程` : '這天機器人還沒看過 Meta 排程（每天 09:35、11:55、17:30、18:00 自動看，電腦要開著）'}
         {(() => {
@@ -198,6 +204,7 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                   {p.status === 'draft' && <span className="text-[12px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-bold whitespace-nowrap" title="系統裡這則還是草稿，一樣會稽核">草稿</span>}
                   {p.autoPublished && <span className="text-[12px] px-2 py-0.5 rounded-full bg-green-50 text-green-700 font-bold whitespace-nowrap" title="各平台都確認發出去，系統自動改成已發布">系統確認已發布</span>}
                   {p.autoPublished?.missingConfirm && <span className="text-[12px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-bold whitespace-nowrap" title="影片已經上線，但系統裡內部檢核或業主審核沒有勾">發了但沒勾審核</span>}
+                  {!(p.content || '').trim() && p.status !== 'published' && <span className="text-[12px] px-2 py-0.5 rounded-full bg-red-50 text-red-600 font-bold whitespace-nowrap" title="系統裡這則還沒有文案，發的時候很容易忘了貼（11-05 好正點）">系統還沒填文案</span>}
                   <span className="text-[14px] text-gray-500 truncate min-w-0">{p.title}</span>
                 </div>
                 {cells.some(c => precheck.has(`${p.id}|${c.pf}`)) && (

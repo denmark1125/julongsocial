@@ -149,3 +149,37 @@ describe('TikTok 發布後（只比時間）', () => {
     expect(r.status).toBe('missing');
   });
 });
+
+describe('沒有文案（11-05 好正點忘了貼文案）', () => {
+  const now = new Date('2026-11-05T12:06:00Z');
+  const liveNoCap: LivePost[] = [
+    { platform: 'IG', id: 'hz-nocap', vendorId: 'hozen', publishedAt: '2026-11-05T12:00:30Z', caption: '' },
+    { platform: 'FB', id: 'hz-fb-emoji', vendorId: 'hozen', publishedAt: '2026-11-05T12:00:40Z', caption: '🔥' },
+    { platform: 'TikTok', id: 'hz-tt', vendorId: 'hozen', publishedAt: '2026-11-05T12:00:00Z' },
+  ];
+  const p = post({ scheduledAt: '2026-11-05T20:00', content: '在家做西米露總是結塊又軟爛？ 好正點不藏私' });
+
+  it('IG 時間帳號都對、但沒文案 → no_caption，立刻推', () => {
+    const r = auditOne({ post: p, platform: 'IG', strictTiming: true, live: liveNoCap, now });
+    expect(r.status).toBe('no_caption');
+    expect(shouldAlert(r)).toBe(true);
+    expect(isSettled(r, now, p.scheduledAt)).toBe(false); // 補上文案後要能轉回正確
+  });
+
+  it('FB 只有一個 emoji 也算沒文案', () => {
+    expect(auditOne({ post: p, platform: 'FB', strictTiming: true, live: liveNoCap, now }).status).toBe('no_caption');
+  });
+
+  it('系統也沒填文案，平台上也沒有 → 一樣提醒（業主貼文幾乎不會沒文案）', () => {
+    expect(auditOne({ post: { ...p, content: '' }, platform: 'IG', strictTiming: false, live: liveNoCap, now }).status).toBe('no_caption');
+  });
+
+  it('TikTok 文案是機器人抄的、不可靠 → 不判斷文案', () => {
+    expect(auditOne({ post: p, platform: 'TikTok', strictTiming: true, live: liveNoCap, now, allowTikTok: true }).status).toBe('ok');
+  });
+
+  it('補上文案後重查 → 正確', () => {
+    const fixed: LivePost[] = [{ ...liveNoCap[0], caption: '在家做西米露總是結塊又軟爛？ 好正點不藏私，教你兩招' }];
+    expect(auditOne({ post: p, platform: 'IG', strictTiming: true, live: fixed, now }).status).toBe('ok');
+  });
+});

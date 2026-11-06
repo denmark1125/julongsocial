@@ -38,6 +38,7 @@ export type AuditStatus =
   | 'skipped'        // 彈性 IP 過了時間沒發 → 不算錯
   | 'wrong_account'  // 自己帳號找不到，但在別的 IP 帳號上找到很像的 → 疑似發錯 IP
   | 'content_mismatch' // 排定時間前後有發一則，但文案跟系統不同 → 可能發錯片、也可能只是系統沒更新／手機另寫文案（廣信 FB）
+  | 'no_caption'     // 有發，但平台上沒有文案（11-05 好正點忘了貼文案，被客戶抓到）→ 馬上推 LINE
   | 'unsupported';   // 這個平台還沒接（TikTok/YT/LINE）
 
 export interface PlatformAudit {
@@ -66,6 +67,11 @@ export const CAPTION_MATCH = 0.5;
 export const WRONG_ACCOUNT_MATCH = 0.7;
 /** 文案比不出來時，只認排定時間前後這麼多分鐘內的貼文 */
 export const TIME_ONLY_WINDOW_MIN = 90; // 紅茶造咖常排 19:00 實際 20:01，60 分鐘會漏
+/** 平台上的文案少於幾個字算「沒有文案」（只剩一兩個 emoji 也算） */
+export const MIN_CAPTION_CHARS = 5;
+/** IG/FB 讀得到完整文案；TikTok 是機器人抄清單，文案欄不可靠，不判斷 */
+const CAPTION_CHECK_PLATFORMS: AuditPlatform[] = ['IG', 'FB'];
+
 /** 只在排程時間前後這段時間內找對應的貼文 */
 export const SEARCH_WINDOW_HOURS = 18;
 
@@ -200,8 +206,10 @@ function auditCore({ post, platform, strictTiming, live, now, claimed, previous,
     const diffMinutes = Math.round((new Date(own.publishedAt).getTime() - at.getTime()) / 60_000);
     const late = strictTiming && Math.abs(diffMinutes) > TIME_TOLERANCE_MIN;
     const mismatch = !!byTime?.textComparable;
+    // 有文案才可能用文案配到（byText），所以「沒文案」只會出現在用時間配到的那條路
+    const noCaption = CAPTION_CHECK_PLATFORMS.includes(p) && (own.caption || '').trim().length < MIN_CAPTION_CHARS;
     return {
-      status: mismatch ? 'content_mismatch' : late ? 'time_mismatch' : 'ok',
+      status: noCaption ? 'no_caption' : mismatch ? 'content_mismatch' : late ? 'time_mismatch' : 'ok',
       livePostId: own.id, permalink: own.permalink, actualAt: own.publishedAt, diffMinutes,
       thumbnailUrl: own.thumbnailUrl, checkedAt, ...keep,
     };
@@ -229,7 +237,7 @@ function auditCore({ post, platform, strictTiming, live, now, claimed, previous,
 /** 這個結果要不要推 LINE。同一筆同一平台只推一次；之後補出現只改頁面、不再推 */
 export function shouldAlert(a: PlatformAudit): boolean {
   if (a.alertedAt) return false;
-  return a.status === 'not_seen' || a.status === 'wrong_account' || a.status === 'time_mismatch';
+  return a.status === 'not_seen' || a.status === 'wrong_account' || a.status === 'time_mismatch' || a.status === 'no_caption';
 }
 
 /** 結果還會不會變（不會變就不用每分鐘再查） */
@@ -261,12 +269,13 @@ export const AUDIT_STATUS_LABEL: Record<AuditStatus, string> = {
   skipped: '沒發（彈性）',
   wrong_account: '疑似發到別的帳號',
   content_mismatch: '文案跟系統不同',
+  no_caption: '沒有文案',
   unsupported: '尚未支援',
 };
 
 export const AUDIT_STATUS_ICON: Record<AuditStatus, string> = {
   pending: '⏳', ok: '✅', time_mismatch: '⏰', not_seen: '⚠️', missing: '❌',
-  skipped: '➖', wrong_account: '❌', content_mismatch: '⚠️', unsupported: '—',
+  skipped: '➖', wrong_account: '❌', content_mismatch: '⚠️', no_caption: '❌', unsupported: '—',
 };
 
 /** 一行人看得懂的說明（LINE 與頁面共用） */
@@ -281,6 +290,7 @@ export function describeAudit(a: PlatformAudit, scheduledAt: string, vendorName:
     case 'skipped': return `排 ${plan}，沒發（彈性 IP 不算錯）`;
     case 'wrong_account': return `自己帳號找不到，在「${vendorName(a.foundOnVendorId || '')}」帳號看到很像的一則`;
     case 'content_mismatch': return `${actual} 有發一則，但文案跟系統排的不同 → 請確認是不是發錯片`;
+    case 'no_caption': return `${actual} 有發，但貼文沒有文案 → 請馬上補上`;
     case 'pending': return `排 ${plan}`;
     case 'unsupported': return '這個平台還沒接稽核';
   }

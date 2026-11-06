@@ -54,7 +54,7 @@ describe('催片', () => {
   it('訊息：剩不到 24 小時用緊急標題', () => {
     const items = pickChases([post({})], assetOf, new Date('2026-11-06T00:00:00+08:00'));
     expect(chaseMessage('好正點', items)).toContain('🚨 催片：好正點 剩不到 24 小時');
-    expect(chaseMessage('好正點', items)).toContain('11/6 20:00「客戶服務最貼心」客戶還沒審');
+    expect(chaseMessage('好正點', items)).toContain('11/6 20:00「客戶服務最貼心」｜客戶還沒審');
   });
 });
 

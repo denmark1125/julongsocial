@@ -23,6 +23,7 @@ import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.j
 import { isBookingChange, planShootSync, toCalendarEvent, type TimetreeShootChange } from "./src/lib/shootSync.js";
 import { buildCheckPlan, runPublishAudit } from "./src/lib/publishAuditJob.js";
 import { NOTIFY_KIND_MAP, resolveNotifyMode, type NotifyMode, type NotifyRules } from "./src/lib/notify/kinds.js";
+import { textToFlex, finalizeMessages, type FlexOptions } from "./src/lib/notify/flexCard.js";
 import { chaseMessage, chaseTimeFor, directAssetId, pickChases, type ChaseItem, type ChasePost } from "./src/lib/notify/reviewChase.js";
 import { taipeiDay, taipeiTime } from "./src/lib/publishAudit.js";
 import { listMetaPages } from "./src/lib/metaGraph.js";
@@ -2381,9 +2382,17 @@ async function notify(kind: string, targets: NotifyTarget[], messages: any[], su
   for (const t of actual) {
     const units = t.type === "group" ? await groupMemberCount(t.id) : 1;
     try {
-      await sendLinePushMessages(t.id, msgs);
+      await sendLinePushMessages(t.id, finalizeMessages(msgs));
       results.push({ type: t.type, label: t.label, ok: true, units });
     } catch (e: any) {
+      // 卡片格式被 LINE 拒絕（400）→ 改發純文字，通知不能因為版面漏掉
+      if (msgs.some((m) => m?.type === "flex") && /\(400\)/.test(String(e?.message))) {
+        try {
+          await sendLinePushMessages(t.id, finalizeMessages(msgs, true));
+          results.push({ type: t.type, label: t.label, ok: true, units, note: "卡片被拒，改發文字", error: String(e?.message || e).slice(0, 300) });
+          continue;
+        } catch (e2: any) { e = e2; }
+      }
       results.push({ type: t.type, label: t.label, ok: false, units: 0, error: String(e?.message || e).slice(0, 300) });
     }
   }
@@ -3052,9 +3061,9 @@ async function runReviewChase(now = new Date()): Promise<number> {
     const { bound, names } = await userTargetsByUids([...(v.assignedUserIds || []), ...(v.pmUserIds || [])]);
     // 藏鏡人／PM 都沒綁 LINE（或沒設定）→ 改推管理者，訊息裡寫明原本該給誰
     const targets = bound.length ? bound : await ownerTargets();
-    const note = bound.length ? "" : `\n（這個 IP 的藏鏡人／PM ${names.length ? names.join("、") : "還沒設定"}，先通知管理者）`;
+    const note = bound.length ? "" : `這個 IP 的藏鏡人／PM ${names.length ? names.join("、") : "還沒設定"}，先通知管理者`;
     const r = await notify("review_chase", bound.length ? bound : targets.map((t) => ({ ...t, label: names.join("、") || "管理者" })),
-      [{ type: "text", text: chaseMessage(v.name || "", list) + note }], `${v.name || ""} ${list.length} 支還沒審完`);
+      [textToFlex(chaseMessage(v.name || "", list), { footnote: note || undefined })], `${v.name || ""} ${list.length} 支還沒審完`);
     if (r.mode !== "off") sent += r.sent;
     if (r.mode !== "off") {
       for (const it of list) {
@@ -3068,10 +3077,10 @@ async function runReviewChase(now = new Date()): Promise<number> {
 }
 
 /** 發布稽核推給老闆（11-05 使用者決定），開關在通知中心「發布稽核」 */
-async function pushPublishAudit(text: string): Promise<number> {
+async function pushPublishAudit(text: string, opts?: FlexOptions): Promise<number> {
   if (process.env.PUBLISH_AUDIT_PUSH === "off") return 0; // 緊急關閉用的環境變數，保留
-  // LINE 文字訊息上限 5000 字
-  const r = await notify("publish_audit", await ownerTargets(), [{ type: "text", text: text.slice(0, 4900) }], text.split("\n")[0].slice(0, 120));
+  // 排成卡片（11-06）；卡片被拒時 notify 會退回純文字（上限 5000 字）
+  const r = await notify("publish_audit", await ownerTargets(), [textToFlex(text.slice(0, 4900), opts)], text.split("\n")[0].slice(0, 120));
   return r.sent;
 }
 
