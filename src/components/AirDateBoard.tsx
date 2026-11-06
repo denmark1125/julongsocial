@@ -432,6 +432,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
           ))}
         </div>
         <div className="text-[13px] font-bold truncate">{p.title}</div>
+        <StageDots {...videoStage(assets.find(x => x.id === p.assetId), p)} />
       </div>
     );
   };
@@ -521,6 +522,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
           )}
           {dashed && <span className="text-gray-400">系統補</span>}
         </div>
+        <StageDots {...videoStage(a, placed === 'post' ? boundPost(a) : undefined)} />
       </div>
     );
   };
@@ -545,7 +547,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                       onDrop={past ? undefined : e => { const id = dragged(e); if (id) placeOnDay(id, d); }}
                       onClick={() => { if (selectedId && !past) placeOnDay(selectedId, d); }}
                       className={[
-                        list ? `group/day border-b border-black/5 px-3 py-2 min-w-0 transition-colors ${dayPosts.length || loose.length || slotRows.length ? 'space-y-1.5' : 'flex flex-wrap items-center gap-x-3'}` : 'group/day border-r border-b border-black/5 p-1.5 min-w-0 space-y-1 transition-colors',
+                        list ? `group/day border-b border-black/5 px-3 py-2 min-w-0 transition-colors ${dayPosts.length || loose.length || slotRows.length ? 'space-y-1.5' : 'flex flex-wrap items-center gap-x-3'}` : 'group/day border-r border-b border-black/5 p-1.5 min-w-0 min-h-[104px] space-y-1 transition-colors',
                         isSameMonth(d, monthCursor) ? '' : 'bg-gray-50/50',
                         past ? 'bg-gray-50/80 opacity-50' : isSlotDay ? 'bg-orange-50/60' : '',
                         hoverKey === dateStr ? '!bg-[#5A5A40]/10' : '',
@@ -773,7 +775,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                 ))}
               </div>
               {/* 每週一樣高（使用者 10-20：過去的週壓矮很醜，要統一） */}
-              <div className="hidden md:grid grid-cols-7 auto-rows-[minmax(104px,1fr)] flex-1 lg:min-h-0 lg:overflow-y-auto">
+              <div className="hidden md:grid grid-cols-7 auto-rows-max content-start flex-1 lg:min-h-0 lg:overflow-y-auto">
                 {gridDays.map(d => renderDay(d))}
               </div>
               {/* 手機：月曆 7 欄擠到每格只剩「小…」，改成一天一列（只列今天以後；整個月都過去了就全列）。
@@ -785,6 +787,41 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * 影片走到哪一站（11-06 使用者：排上片日只看得到小編，看不到片剪到哪）。
+ * 五站跟董事／稽核頁同一組字：素材 → 剪輯 → 審片 → 排程 → 發布。
+ */
+const STAGES = ['素材', '剪輯', '審片', '排程', '發布'];
+function videoStage(a: Asset | undefined, post?: Post): { current: number; label: string } {
+  if (post?.status === 'published') return { current: 5, label: '已發布' };
+  if (post?.status === 'scheduled') return { current: 4, label: '小編已排程' };
+  if (!a) return { current: 0, label: '等素材' };
+  if (a.stage === 'raw') return { current: 1, label: '剪輯中' };
+  switch (deriveFlowStage(a)) {
+    case 'to_edit': return { current: 1, label: '剪輯中' };
+    case 'revising': return { current: 1, label: '業主要改・修改中' };
+    case 'client_review': return { current: 2, label: '等業主審片' };
+    default: return { current: 3, label: '片好了・等小編排程' };
+  }
+}
+
+/** 五個小點：做完的實心、目前這站橘色呼吸燈、還沒到的空心；旁邊一行字講目前這站 */
+function StageDots({ current, label }: { current: number; label: string }) {
+  return (
+    <div className="flex items-center gap-1.5 mt-0.5 min-w-0" title={STAGES.map((st, i) => `${i < current ? '✓' : i === current ? '▶' : '・'}${st}`).join(' ')}>
+      <span className="flex items-center gap-[3px] shrink-0">
+        {STAGES.map((st, i) => (
+          <span key={st} className="relative flex w-1.5 h-1.5">
+            {i === current && <span className="absolute inset-0 rounded-full bg-orange-400 opacity-60 animate-ping" />}
+            <span className={`relative w-1.5 h-1.5 rounded-full ${i < current ? 'bg-[#5A5A40]' : i === current ? 'bg-orange-500' : 'bg-white ring-1 ring-inset ring-gray-400/70'}`} />
+          </span>
+        ))}
+      </span>
+      <span className={`text-[11px] truncate ${current >= 5 ? 'text-gray-400' : current >= 4 ? 'text-blue-700' : 'text-orange-700'}`}>{label}</span>
     </div>
   );
 }
