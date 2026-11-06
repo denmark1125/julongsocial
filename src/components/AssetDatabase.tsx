@@ -61,7 +61,8 @@ import {
   Flame,
   UploadCloud,
   FolderOpen,
-  Pencil
+  Pencil,
+  MoreHorizontal
 } from 'lucide-react';
 import { toJpeg } from 'html-to-image';
 import download from 'downloadjs';
@@ -102,6 +103,8 @@ export default function AssetDatabase() {
   const posts = useLiveCollection<Post>('posts');
   /** 手動建檔時「這支是拍哪一篇小編貼文」。null＝沒動過（用猜的），''＝不屬於任何一篇 */
   const [newPostPick, setNewPostPick] = useState<string | null>(null);
+  // 手機版：導出剪輯清單／庫存總覽收進「⋯」選單（11-06 使用者：手機一打開滿滿不能操作的資訊）
+  const [moreOpen, setMoreOpen] = useState(false);
   const [reviewNotes, setReviewNotes] = useState<Record<string, { text: string; updatedAt: string; updatedByName: string }>>({});
   const [noteAsset, setNoteAsset] = useState<Asset | null>(null);
   // 改片名。走後端 API：雲端那一組毛片資料夾要跟著改名，前端沒有 Drive 權限。
@@ -761,12 +764,12 @@ ${after}`)) return;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div className="space-y-1">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 md:gap-4">
+        <div className="space-y-1 hidden md:block">
           <h2 className="text-2xl font-bold serif text-[#5A5A40]">素材資料庫</h2>
           <p className="text-sm text-gray-500">管理各廠商的影片與貼文素材庫存</p>
         </div>
-        <div className="flex flex-wrap gap-4 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2 md:gap-4 w-full sm:w-auto relative">
           {/* 同事（employee）也要能上傳毛片 —— 他們才是這個功能的主要使用者。
               只有剪輯師不行：那顆 Drive token 看得到我們建立的所有檔案，對外包權限太大，
               後端也會再擋一次。
@@ -779,35 +782,57 @@ ${after}`)) return;
                   2026-09 第一週就是這樣讓人棄坑的。主路徑必須是「弄完回來收一次」。 */}
               <button
                 onClick={() => setIsClaiming(true)}
-                className="bg-[#5A5A40] text-white px-4 py-2 rounded-2xl shadow-sm font-bold flex items-center space-x-2 hover:bg-[#4a4a35] transition-colors"
+                className="bg-[#5A5A40] text-white px-3 md:px-4 py-2 rounded-2xl shadow-sm font-bold text-[14px] md:text-base flex items-center space-x-2 hover:bg-[#4a4a35] transition-colors"
               >
                 <FolderOpen size={18} />
                 <span>從雲端認領</span>
               </button>
               <button
                 onClick={() => setIsUploadingRaw(true)}
-                className="bg-white text-[#5A5A40] px-4 py-2 rounded-2xl border border-black/5 shadow-sm font-bold flex items-center space-x-2 hover:bg-gray-50 transition-colors"
+                className="bg-white text-[#5A5A40] px-3 md:px-4 py-2 rounded-2xl border border-black/5 shadow-sm font-bold text-[14px] md:text-base flex items-center space-x-2 hover:bg-gray-50 transition-colors"
               >
                 <UploadCloud size={18} />
                 <span>上傳毛片</span>
               </button>
             </>
           )}
+          <div className="md:hidden">
+            <button
+              onClick={() => setMoreOpen(o => !o)}
+              className="bg-white text-[#5A5A40] p-2.5 rounded-2xl border border-black/5 shadow-sm"
+              aria-label="更多功能"
+            >
+              <MoreHorizontal size={18} />
+            </button>
+            {moreOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setMoreOpen(false)} />
+                <div className="absolute right-0 top-full mt-2 z-40 w-48 bg-white rounded-2xl border border-black/5 shadow-xl p-1.5">
+                  <button onClick={() => { setMoreOpen(false); setIsTaskListOpen(true); }} className="w-full flex items-center gap-2 px-3 py-3 rounded-xl text-[15px] font-bold text-[#5A5A40] hover:bg-gray-50">
+                    <ClipboardList size={18} /> 導出剪輯清單
+                  </button>
+                  <button onClick={() => { setMoreOpen(false); setIsSummaryOpen(true); }} className="w-full flex items-center gap-2 px-3 py-3 rounded-xl text-[15px] font-bold text-[#5A5A40] hover:bg-gray-50">
+                    <BarChart3 size={18} /> 庫存總覽
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
           <button
             onClick={() => setIsTaskListOpen(true)}
-            className="bg-white text-[#5A5A40] px-4 py-2 rounded-2xl border border-black/5 shadow-sm font-bold flex items-center space-x-2 hover:bg-gray-50 transition-colors"
+            className="hidden md:flex bg-white text-[#5A5A40] px-4 py-2 rounded-2xl border border-black/5 shadow-sm font-bold items-center space-x-2 hover:bg-gray-50 transition-colors"
           >
             <ClipboardList size={18} />
             <span>導出剪輯清單</span>
           </button>
           <button 
             onClick={() => setIsSummaryOpen(true)}
-            className="bg-white text-[#5A5A40] px-4 py-2 rounded-2xl border border-black/5 shadow-sm font-bold flex items-center space-x-2 hover:bg-gray-50 transition-colors"
+            className="hidden md:flex bg-white text-[#5A5A40] px-4 py-2 rounded-2xl border border-black/5 shadow-sm font-bold items-center space-x-2 hover:bg-gray-50 transition-colors"
           >
             <BarChart3 size={18} />
             <span>庫存總覽</span>
           </button>
-          <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm flex items-center space-x-3">
+          <div className="hidden md:flex bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm items-center space-x-3">
             <div className="bg-amber-50 p-2 rounded-lg text-amber-600">
               <Clock size={18} />
             </div>
@@ -816,7 +841,7 @@ ${after}`)) return;
               <p className="text-lg font-bold leading-none">{assets.filter(a => !isClientApproved(a) && a.status !== 'archived').length} <span className="text-xs font-normal text-gray-400">件</span></p>
             </div>
           </div>
-          <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm flex items-center space-x-3">
+          <div className="hidden md:flex bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm items-center space-x-3">
             <div className="bg-blue-50 p-2 rounded-lg text-blue-600">
               <Video size={18} />
             </div>
@@ -825,7 +850,7 @@ ${after}`)) return;
               <p className="text-lg font-bold leading-none">{videoInventory} <span className="text-xs font-normal text-gray-400">隻</span></p>
             </div>
           </div>
-          <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm flex items-center space-x-3">
+          <div className="hidden md:flex bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm items-center space-x-3">
             <div className="bg-purple-50 p-2 rounded-lg text-purple-600">
               <FileText size={18} />
             </div>
@@ -834,7 +859,7 @@ ${after}`)) return;
               <p className="text-lg font-bold leading-none">{postInventory} <span className="text-xs font-normal text-gray-400">篇</span></p>
             </div>
           </div>
-          <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm flex items-center space-x-3">
+          <div className="hidden md:flex bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm items-center space-x-3">
             <div className="bg-orange-50 p-2 rounded-lg text-orange-600">
               <Clock size={18} />
             </div>
@@ -843,7 +868,7 @@ ${after}`)) return;
               <p className="text-lg font-bold leading-none">{scheduledVideoInventory} <span className="text-xs font-normal text-gray-400">隻</span></p>
             </div>
           </div>
-          <div className="bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm flex items-center space-x-3">
+          <div className="hidden md:flex bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm items-center space-x-3">
             <div className="bg-amber-50 p-2 rounded-lg text-amber-600">
               <Clock size={18} />
             </div>
@@ -855,26 +880,41 @@ ${after}`)) return;
         </div>
       </div>
 
+      {/* 手機：五個數字收成一行小字，可左右滑 */}
+      <div className="md:hidden flex gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
+        {([
+          ['待審核', assets.filter(a => !isClientApproved(a) && a.status !== 'archived').length, '件', 'text-amber-600'],
+          ['可用影片', videoInventory, '隻', 'text-[#1a1a1a]'],
+          ['可用貼文', postInventory, '篇', 'text-[#1a1a1a]'],
+          ['已排程影片', scheduledVideoInventory, '隻', 'text-[#1a1a1a]'],
+          ['已排程貼文', scheduledPostInventory, '篇', 'text-[#1a1a1a]'],
+        ] as const).map(([label, n, unit, tone]) => (
+          <span key={label} className="shrink-0 bg-white rounded-xl border border-black/5 px-3 py-1.5 text-[13px] text-gray-500 whitespace-nowrap">
+            {label} <b className={cn('text-[15px] tabular-nums', tone)}>{n}</b> {unit}
+          </span>
+        ))}
+      </div>
+
       {/* Tabs */}
-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+      <div className="flex flex-row flex-wrap gap-2 md:gap-4 items-center justify-between">
         <div className="flex space-x-1 bg-white p-1 rounded-2xl border border-black/5 w-fit shadow-sm">
           <button 
             onClick={() => setActiveTab('video')}
-            className={`flex items-center space-x-2 px-6 py-2 rounded-xl text-sm font-bold transition-all ${
+            className={`flex items-center space-x-1.5 md:space-x-2 px-3 md:px-6 py-2 rounded-xl text-[13px] md:text-sm font-bold whitespace-nowrap transition-all ${
               activeTab === 'video' ? 'bg-[#5A5A40] text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'
             }`}
           >
             <Video size={16} />
-            <span>短素材 (影片)</span>
+            <span><span className="md:hidden">影片</span><span className="hidden md:inline">短素材 (影片)</span></span>
           </button>
           <button 
             onClick={() => setActiveTab('post')}
-            className={`flex items-center space-x-2 px-6 py-2 rounded-xl text-sm font-bold transition-all ${
+            className={`flex items-center space-x-1.5 md:space-x-2 px-3 md:px-6 py-2 rounded-xl text-[13px] md:text-sm font-bold whitespace-nowrap transition-all ${
               activeTab === 'post' ? 'bg-[#5A5A40] text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'
             }`}
           >
             <FileText size={16} />
-            <span>貼文素材</span>
+            <span><span className="md:hidden">貼文</span><span className="hidden md:inline">貼文素材</span></span>
           </button>
         </div>
 
@@ -884,29 +924,47 @@ ${after}`)) return;
               setFilterStage('raw');
               setFilterStatus('all');
             }}
-            className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${
+            className={`px-3 md:px-6 py-2 rounded-xl text-[13px] md:text-sm font-bold whitespace-nowrap transition-all ${
               filterStage === 'raw' ? 'bg-[#8B7355] text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'
             }`}
           >
-            原始素材 (Raw)
+            <span className="md:hidden">待剪毛片</span><span className="hidden md:inline">原始素材 (Raw)</span>
           </button>
           <button 
             onClick={() => {
               setFilterStage('finished');
               setFilterStatus('all');
             }}
-            className={`px-6 py-2 rounded-xl text-sm font-bold transition-all ${
+            className={`px-3 md:px-6 py-2 rounded-xl text-[13px] md:text-sm font-bold whitespace-nowrap transition-all ${
               filterStage === 'finished' ? 'bg-[#5A5A40] text-white shadow-md' : 'text-gray-500 hover:bg-gray-50'
             }`}
           >
-            成片 (Finished)
+            <span className="md:hidden">成片</span><span className="hidden md:inline">成片 (Finished)</span>
           </button>
         </div>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-8">
+      {/* 手機／平板：IP 改成一排可左右滑的小籤（側欄在手機會佔掉三個螢幕） */}
+      <div className="lg:hidden flex gap-2 overflow-x-auto no-scrollbar -mx-1 px-1">
+        {[{ id: 'all', name: '所有廠商' }, ...visibleVendors(vendors)].map(v => {
+          const active = filterVendor === v.id;
+          const count = assets.filter(a => (v.id === 'all' || a.vendorId === v.id) && a.type === activeTab && effStatus(a) === 'available' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
+          const pending = v.id === 'all' ? 0 : assets.filter(a => a.vendorId === v.id && a.type === activeTab && !isClientApproved(a) && a.status !== 'archived' && (a.stage === filterStage || (!a.stage && filterStage === 'finished'))).length;
+          return (
+            <button key={v.id} onClick={() => setFilterVendor(v.id!)}
+              className={cn('shrink-0 flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-full border text-[14px] font-bold whitespace-nowrap',
+                active ? 'bg-[#5A5A40] border-[#5A5A40] text-white' : 'bg-white border-black/10 text-gray-600')}>
+              {v.name}
+              <span className={cn('text-[12px] px-1.5 rounded-full', active ? 'bg-white/20' : count === 0 ? 'bg-red-50 text-red-400' : 'bg-gray-100')}>{count}</span>
+              {pending > 0 && <span className={cn('w-1.5 h-1.5 rounded-full', active ? 'bg-amber-200' : 'bg-amber-500')} title={`${pending} 件待審核`} />}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-col lg:flex-row gap-4 lg:gap-8">
         {/* Left Sidebar: Vendor Stock Overview */}
-        <div className="lg:w-72 flex-shrink-0 space-y-4">
+        <div className="hidden lg:block lg:w-72 flex-shrink-0 space-y-4">
           <div className="bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden">
             <div className="p-6 border-b border-black/5 bg-[#F5F5F0]/30 space-y-3">
               <h3 className="font-bold serif text-[#5A5A40] flex items-center">
@@ -991,7 +1049,7 @@ ${after}`)) return;
 
         {/* Right Content: Asset Grid */}
         <div className="flex-1 space-y-6">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 md:gap-4">
             <div className="flex-1 w-full relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
               <input 
@@ -1003,13 +1061,14 @@ ${after}`)) return;
               />
             </div>
             <div className="flex items-center gap-2 w-full md:w-auto">
-              <div className="flex items-center bg-white rounded-xl border border-black/5 p-1 shadow-sm">
+              {/* 手機：篩選可左右滑，不要擠成一個字一行 */}
+              <div className="flex items-center bg-white rounded-xl border border-black/5 p-1 shadow-sm min-w-0 overflow-x-auto no-scrollbar">
                 {filterStage === 'finished' && (
                   <>
                     <button
                       onClick={() => setFilterStatus('available')}
                       className={cn(
-                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                        "shrink-0 whitespace-nowrap px-3 md:px-4 py-1.5 rounded-lg text-[13px] md:text-xs font-bold transition-all",
                         filterStatus === 'available' ? "bg-[#5A5A40] text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"
                       )}
                     >
@@ -1018,7 +1077,7 @@ ${after}`)) return;
                     <button
                       onClick={() => setFilterStatus('used')}
                       className={cn(
-                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                        "shrink-0 whitespace-nowrap px-3 md:px-4 py-1.5 rounded-lg text-[13px] md:text-xs font-bold transition-all",
                         filterStatus === 'used' ? "bg-[#5A5A40] text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"
                       )}
                     >
@@ -1028,7 +1087,7 @@ ${after}`)) return;
                     <button
                       onClick={() => setFilterStatus('manual')}
                       className={cn(
-                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                        "shrink-0 whitespace-nowrap px-3 md:px-4 py-1.5 rounded-lg text-[13px] md:text-xs font-bold transition-all",
                         filterStatus === 'manual' ? "bg-emerald-600 text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"
                       )}
                     >
@@ -1039,7 +1098,7 @@ ${after}`)) return;
                 <button
                   onClick={() => setFilterStatus('voided')}
                   className={cn(
-                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                    "shrink-0 whitespace-nowrap px-3 md:px-4 py-1.5 rounded-lg text-[13px] md:text-xs font-bold transition-all",
                     filterStatus === 'voided' ? "bg-red-500 text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"
                   )}
                 >
@@ -1048,7 +1107,7 @@ ${after}`)) return;
                 <button
                   onClick={() => setFilterStatus('archived')}
                   className={cn(
-                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                    "shrink-0 whitespace-nowrap px-3 md:px-4 py-1.5 rounded-lg text-[13px] md:text-xs font-bold transition-all",
                     filterStatus === 'archived' ? "bg-[#5A5A40] text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"
                   )}
                 >
@@ -1057,7 +1116,7 @@ ${after}`)) return;
                 <button
                   onClick={() => setFilterStatus('all')}
                   className={cn(
-                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                    "shrink-0 whitespace-nowrap px-3 md:px-4 py-1.5 rounded-lg text-[13px] md:text-xs font-bold transition-all",
                     filterStatus === 'all' ? "bg-[#5A5A40] text-white shadow-sm" : "text-gray-500 hover:bg-gray-50"
                   )}
                 >
@@ -1073,21 +1132,22 @@ ${after}`)) return;
                   });
                   setIsAdding(true);
                 }}
-                className="flex-1 md:flex-none bg-[#5A5A40] text-white px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-[#4a4a35] transition-all flex items-center justify-center space-x-2 whitespace-nowrap"
+                className="shrink-0 md:flex-none bg-[#5A5A40] text-white px-3 md:px-6 py-2 rounded-xl font-bold shadow-lg hover:bg-[#4a4a35] transition-all flex items-center justify-center space-x-1 md:space-x-2 whitespace-nowrap"
+                title="上架素材"
               >
                 <Plus size={20} />
-                <span>上架素材</span>
+                <span className="hidden sm:inline">上架素材</span><span className="sm:hidden">上架</span>
               </button>
             </div>
           </div>
 
           {/* Asset Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-6">
             {filteredAssets.map((asset) => (
           <div 
             key={asset.id} 
             className={cn(
-              "bg-white rounded-[32px] overflow-hidden border border-black/5 shadow-sm transition-all group",
+              "bg-white rounded-3xl md:rounded-[32px] overflow-hidden border border-black/5 shadow-sm transition-all group",
               effStatus(asset) === 'used' 
                 ? "opacity-50 scale-[0.96] grayscale-[0.5] hover:opacity-80" 
                 : "hover:shadow-md hover:scale-[1.01]"
@@ -1095,12 +1155,13 @@ ${after}`)) return;
           >
             <div className={cn(
               "bg-[#F5F5F0] relative flex items-center justify-center overflow-hidden transition-all",
-              effStatus(asset) === 'used' ? "aspect-[21/9]" : "aspect-video"
+              // 沒有縮圖、只有一個灰色圖示：手機上壓成一條，只留兩個標籤（不然一張卡佔半個螢幕）
+              effStatus(asset) === 'used' ? "h-12 md:h-auto md:aspect-[21/9]" : "h-12 md:h-auto md:aspect-video"
             )}>
               {asset.type === 'video' ? (
-                <Video size={effStatus(asset) === 'used' ? 32 : 48} className="text-[#5A5A40] opacity-20" />
+                <Video size={effStatus(asset) === 'used' ? 32 : 48} className="hidden md:block text-[#5A5A40] opacity-20" />
               ) : (
-                <FileText size={effStatus(asset) === 'used' ? 32 : 48} className="text-[#5A5A40] opacity-20" />
+                <FileText size={effStatus(asset) === 'used' ? 32 : 48} className="hidden md:block text-[#5A5A40] opacity-20" />
               )}
               {asset.url && (
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -1117,7 +1178,7 @@ ${after}`)) return;
                   </a>
                 </div>
               )}
-              <div className="absolute top-4 left-4">
+              <div className="absolute top-1/2 -translate-y-1/2 md:translate-y-0 md:top-4 left-4">
                 <span className={cn(
                   "px-3 py-1 rounded-full text-[13px] font-bold text-white uppercase tracking-wider",
                   asset.stage === 'raw' ? "bg-[#8B7355]" : effStatus(asset) === 'used' ? "bg-gray-400" : "bg-[#5A5A40]"
@@ -1127,7 +1188,7 @@ ${after}`)) return;
                   {asset.category || (asset.stage === 'raw' ? '原始素材' : '未分類')}
                 </span>
               </div>
-              <div className="absolute top-4 right-4">
+              <div className="absolute top-1/2 -translate-y-1/2 md:translate-y-0 md:top-4 right-4">
                 <span className={cn(
                   "px-3 py-1 rounded-full text-[13px] font-bold uppercase tracking-wider",
                   asset.stage === 'raw' ? "bg-[#8B7355]/10 text-[#8B7355] border border-[#8B7355]/20" : 
@@ -1138,7 +1199,7 @@ ${after}`)) return;
                 </span>
               </div>
             </div>
-            <div className={cn("p-6 space-y-4", effStatus(asset) === 'used' && "py-3")}>
+            <div className={cn("p-4 md:p-6 space-y-3 md:space-y-4", effStatus(asset) === 'used' && "py-3")}>
               <div>
                 <div className="flex justify-between items-start mb-1">
                   <div className="space-y-0.5">
