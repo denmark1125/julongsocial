@@ -231,8 +231,9 @@ export default function Layout({ children, activeTab, setActiveTab, user, userPr
   const menuItems = [
     { id: 'dashboard', label: '儀表板', icon: LayoutDashboard, roles: ['engineer', 'manager', 'employee'] },
     // 拍攝＋剪輯交棒合併成一條產線；原本的「剪輯排序」只是一份清單，不值得單獨佔一個主分頁
-    { id: 'shootBookings', label: '製作進度', icon: Film, roles: ['engineer', 'manager', 'employee'], group: '製作' },
+    // 素材資料庫比較常用，排在製作進度前面（11-06 使用者）
     { id: 'videos', label: '素材資料庫', icon: Video, roles: ['engineer', 'manager', 'employee'], group: '製作' },
+    { id: 'shootBookings', label: '製作進度', icon: Film, roles: ['engineer', 'manager', 'employee'], group: '製作' },
     { id: 'calendar', label: '社群日曆', icon: CalendarIcon, roles: ['engineer', 'manager', 'employee'], group: '發布' },
     { id: 'posts', label: '貼文管理', icon: FileText, roles: ['engineer', 'manager', 'employee'], group: '發布' },
     // 發布稽核（2026-11-05）：排程 vs IG/FB 實際發布，見 PublishAuditPage.tsx
