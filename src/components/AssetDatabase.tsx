@@ -1108,7 +1108,7 @@ ${after}`)) return;
               <button
                 onClick={() => setFilterVendor('all')}
                 className={cn(
-                  "w-full flex items-center justify-between px-4 py-2.5 rounded-xl transition-all text-left mb-0.5",
+                  "w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-all text-left mb-1",
                   filterVendor === 'all' ? "bg-[#5A5A40] text-white shadow-md" : "hover:bg-gray-50 text-gray-600"
                 )}
               >
@@ -1131,7 +1131,7 @@ ${after}`)) return;
                     key={vendor.id}
                     onClick={() => setFilterVendor(vendor.id)}
                     className={cn(
-                      "w-full flex flex-col px-4 py-2 rounded-xl transition-all text-left mb-0.5 group",
+                      "w-full flex flex-col px-4 py-3 rounded-2xl transition-all text-left mb-1 group",
                       filterVendor === vendor.id ? "bg-[#5A5A40] text-white shadow-md" : "hover:bg-gray-50 text-gray-600"
                     )}
                   >
@@ -1289,53 +1289,38 @@ ${after}`)) return;
                 : "hover:shadow-md hover:scale-[1.01]"
             )}
           >
-            <div className={cn(
-              "bg-[#F5F5F0] relative flex items-center justify-center overflow-hidden transition-all",
-              // 沒有縮圖、只有一個灰色圖示：手機上壓成一條，只留兩個標籤（不然一張卡佔半個螢幕）
-              "h-12"
-            )}>
-              {asset.type === 'video' ? (
-                <Video size={20} className="text-[#5A5A40] opacity-20" />
-              ) : (
-                <FileText size={20} className="text-[#5A5A40] opacity-20" />
+            {/* 卡片頂端：以前是一大塊只有灰色圖示的空白框，壓扁又醜（11-06 使用者）。
+                改成乾淨的一列：分類＋目前進度在左，狀態＋打開連結在右 */}
+            <div className="flex items-center gap-2 px-4 md:px-6 pt-4 md:pt-5 min-w-0">
+              <span className={cn(
+                "shrink-0 px-2.5 py-0.5 rounded-full text-[12px] font-bold text-white",
+                asset.stage === 'raw' ? "bg-[#8B7355]" : effStatus(asset) === 'used' ? "bg-gray-400" : "bg-[#5A5A40]"
+              )}>
+                {/* 原始素材本來一律顯示「原始素材」，但上傳毛片時已經可以選分類了，
+                    選了卻看不到會讓人以為沒生效。有分類就顯示分類。 */}
+                {asset.category || (asset.stage === 'raw' ? '原始素材' : '未分類')}
+              </span>
+              {asset.type === 'video' && !asset.voidedAt && FLOW_LABEL[deriveFlowStage(asset)] && (
+                <span className={cn('shrink-0 px-2.5 py-0.5 rounded-full text-[12px] font-bold', FLOW_LABEL[deriveFlowStage(asset)].tone)}>
+                  {FLOW_LABEL[deriveFlowStage(asset)].text}
+                </span>
               )}
+              <span className={cn(
+                "ml-auto shrink-0 px-2.5 py-0.5 rounded-full text-[12px] font-bold",
+                asset.stage === 'raw' ? "bg-[#8B7355]/10 text-[#8B7355]" :
+                effStatus(asset) === 'available' ? "bg-[#8A8A6A]/10 text-[#8A8A6A]" :
+                "bg-gray-100 text-gray-500"
+              )}>
+                {asset.voidedAt ? '已作廢' : asset.stage === 'raw' ? '待剪輯' : effStatus(asset) === 'available' ? '可使用' : '已使用'}
+              </span>
               {asset.url && (
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                  <a 
-                    href={asset.url} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className={cn(
-                      "bg-white text-[#5A5A40] rounded-full hover:scale-110 transition-transform",
-                      effStatus(asset) === 'used' ? "p-2" : "p-3"
-                    )}
-                  >
-                    <ExternalLink size={effStatus(asset) === 'used' ? 18 : 24} />
-                  </a>
-                </div>
+                <a href={asset.url} target="_blank" rel="noopener noreferrer" title="打開雲端"
+                  className="shrink-0 p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-[#5A5A40] hover:bg-gray-50">
+                  <ExternalLink size={16} />
+                </a>
               )}
-              <div className="absolute top-1/2 -translate-y-1/2 left-4">
-                <span className={cn(
-                  "px-3 py-1 rounded-full text-[13px] font-bold text-white uppercase tracking-wider",
-                  asset.stage === 'raw' ? "bg-[#8B7355]" : effStatus(asset) === 'used' ? "bg-gray-400" : "bg-[#5A5A40]"
-                )}>
-                  {/* 原始素材本來一律顯示「原始素材」，但上傳毛片時已經可以選分類了，
-                      選了卻看不到會讓人以為沒生效。有分類就顯示分類。 */}
-                  {asset.category || (asset.stage === 'raw' ? '原始素材' : '未分類')}
-                </span>
-              </div>
-              <div className="absolute top-1/2 -translate-y-1/2 right-4">
-                <span className={cn(
-                  "px-3 py-1 rounded-full text-[13px] font-bold uppercase tracking-wider",
-                  asset.stage === 'raw' ? "bg-[#8B7355]/10 text-[#8B7355] border border-[#8B7355]/20" : 
-                  effStatus(asset) === 'available' ? "bg-[#8A8A6A]/10 text-[#8A8A6A] border border-[#8A8A6A]/20" : 
-                  "bg-gray-100 text-gray-500 border border-gray-200"
-                )}>
-                  {asset.voidedAt ? '已作廢' : asset.stage === 'raw' ? '待剪輯' : effStatus(asset) === 'available' ? '可使用' : '已使用'}
-                </span>
-              </div>
             </div>
-            <div className={cn("p-4 md:p-6 space-y-3 md:space-y-4", effStatus(asset) === 'used' && "py-3")}>
+            <div className={cn("px-4 md:px-6 pt-3 pb-4 md:pb-6 space-y-3 md:space-y-4", effStatus(asset) === 'used' && "pb-3")}>
               <div>
                 <div className="flex justify-between items-start mb-1">
                   <div className="space-y-0.5">

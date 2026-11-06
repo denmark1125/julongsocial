@@ -464,8 +464,9 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
 
   return (
     <div className="readability-surface space-y-6 min-w-0">
-      {/* 各 IP 本月進度：一張小卡一行（11-06 使用者：原本卡片太大，要滑很久才到貼文）。點卡片＝篩這個 IP */}
-      <div className="hidden md:grid grid-cols-2 lg:grid-cols-4 2xl:grid-cols-6 gap-2">
+      {/* 各 IP 本月進度（11-06）：原本的大卡要滑很久；縮成一行又太小不習慣。取中間：
+          保留大數字跟百分比，砍掉重複的進度條和留白。點卡片＝只看這個 IP，再點一次回全部 */}
+      <div className="hidden md:grid grid-cols-2 lg:grid-cols-4 2xl:grid-cols-5 gap-3">
         {vendorStats.map(stat => {
           const adj = stat.monthAdjustments.reduce((s, a) => s + a.videoDelta, 0);
           const done = stat.count >= stat.target;
@@ -473,25 +474,29 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
           return (
             <div key={stat.id}
               onClick={() => setSelectedVendorId(active ? 'all' : stat.id!)}
-              className={cn('cursor-pointer bg-white px-3 py-2 rounded-xl border shadow-sm transition-colors',
-                active ? 'border-[#5A5A40] ring-1 ring-[#5A5A40]' : 'border-black/5 hover:border-[#5A5A40]/30')}>
+              className={cn('cursor-pointer bg-white px-4 py-3 rounded-2xl border shadow-sm transition-all',
+                active ? 'border-[#5A5A40] ring-2 ring-[#5A5A40]/20' : 'border-black/5 hover:border-[#5A5A40]/30 hover:shadow-md')}>
               <div className="flex items-center gap-1.5 min-w-0">
-                <span className="font-bold text-[14px] truncate" title={stat.name}>{stat.name}</span>
-                {adj !== 0 && <span className="text-[11px] font-bold text-amber-600 bg-amber-50 px-1 rounded-full">{adj > 0 ? '+' : ''}{adj}</span>}
+                <span className="font-bold text-base truncate" title={stat.name}>{stat.name}</span>
+                {adj !== 0 && <span className="text-[12px] font-bold text-amber-600 bg-amber-50 px-1.5 rounded-full border border-amber-100">{adj > 0 ? '+' : ''}{adj}</span>}
                 <button type="button" onClick={e => { e.stopPropagation(); openAdjustModal(stat.vendor); }}
-                  className="p-0.5 text-gray-300 hover:text-amber-600 rounded shrink-0" title="本月加贈／扣片調整">
-                  <Gift size={12} />
+                  className="p-1 text-gray-300 hover:text-amber-600 hover:bg-amber-50 rounded-lg shrink-0" title="本月加贈／扣片調整">
+                  <Gift size={13} />
                 </button>
-                <span className={cn('ml-auto text-[13px] font-bold tabular-nums shrink-0', done ? 'text-green-700' : 'text-orange-600')}>
-                  {stat.count}<span className="text-gray-400 font-normal">/{stat.target}</span>
+                <span className={cn('ml-auto shrink-0 text-[12px] font-bold px-2 py-0.5 rounded-full', done ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700')}>
+                  {stat.percentage}%
                 </span>
               </div>
-              <div className="mt-1.5 w-full h-1 bg-gray-100 rounded-full overflow-hidden">
-                <div className={cn('h-full', done ? 'bg-green-500' : 'bg-orange-400')} style={{ width: `${stat.percentage}%` }} />
+              <div className="flex items-end justify-between mt-1">
+                <div className="text-2xl font-bold serif leading-none">{stat.count}<span className="text-sm text-gray-400 font-sans"> / {stat.target}</span></div>
+                <div className="text-[12px] font-bold text-gray-400 text-right leading-tight">
+                  {stat.hasPosts && <div className="text-blue-400">圖文 {stat.postCount}/{stat.targetPosts}</div>}
+                  {stat.hasVideos && <div className="text-orange-400">影音 {stat.videoCount}/{stat.targetVideos}</div>}
+                </div>
               </div>
-              {stat.hasPosts && stat.hasVideos && (
-                <p className="mt-1 text-[11px] text-gray-400">圖文 {stat.postCount}/{stat.targetPosts}・影音 {stat.videoCount}/{stat.targetVideos}</p>
-              )}
+              <div className="mt-2 w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div className={cn('h-full transition-all duration-500', done ? 'bg-green-500' : 'bg-[#5A5A40]')} style={{ width: `${stat.percentage}%` }} />
+              </div>
             </div>
           );
         })}
