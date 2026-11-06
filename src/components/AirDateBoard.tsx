@@ -1,7 +1,7 @@
 import { useMemo, useState, type DragEvent } from 'react';
 import {
   addMonths, differenceInCalendarDays, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameDay,
-  isSameMonth, startOfDay, startOfMonth, startOfWeek,
+  isSameMonth, startOfDay, startOfMonth, startOfWeek, addDays, parseISO,
 } from 'date-fns';
 import { addDoc, collection, deleteField, doc, writeBatch } from 'firebase/firestore';
 import { auth, db } from '../firebase';
@@ -18,6 +18,7 @@ import { isWaitingVideoPost } from '../lib/postMatch';
 import toast from 'react-hot-toast';
 import { CalendarDays, ChevronLeft, ChevronRight, Flame, Info, Lock, Plus, Unlock, X } from 'lucide-react';
 import { addExtraSlot, dismissPlannedSlot, removeExtraSlot } from '../lib/extraSlots';
+import { planInsert } from '../lib/airInsert';
 
 /**
  * 排上片日：左邊是這個 IP 還沒排上片日的毛片，拖到右邊月曆的某一天＝這支預計那天上。
@@ -193,7 +194,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
     if (isLocked(a)) { toast.error(`「${a.title}」已經排好了，要換先按「解鎖」`); return; }
     // 那篇貼文已經綁了別支、而且那支還鎖著：不能直接擠掉
     const holder = nextPost ? pending.find(x => x.id !== assetId && x.plannedPostId === nextPost) : undefined;
-    if (holder && isLocked(holder)) { toast.error(`那篇已經排了「${holder.title}」，要換先把它解鎖`); return; }
+    if (holder && isLocked(holder) && target) { void insertAt(assetId, target.date); return; }
 
     setBusyId(assetId);
     try {
@@ -243,10 +244,85 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
   /** 放到某一天（不是某篇貼文上）：那天有還沒配片的小編貼文就綁最早那篇，否則只記日子 */
   const placeOnDay = (assetId: string, d: Date) => {
     const dayStr = format(d, 'yyyy-MM-dd');
+    // 那天已經排了別支片＝插隊：後面的片連同貼文往後順延（11-06 使用者）
+    if (mine.some(x => x.id !== assetId && placedDay(x) === dayStr)) { void insertAt(assetId, d); return; }
     const open = myVideoPosts
       .filter(p => postDay(p) === dayStr && isWaitingVideoPost(p, today) && !pending.some(x => x.id !== assetId && x.plannedPostId === p.id))
       .sort((x, y) => x.scheduledAt.localeCompare(y.scheduledAt));
     void place(assetId, { date: d, postId: open[0]?.id ?? null });
+  };
+
+
+  /**
+   * 插隊：把這支排到 d，那天（以及被擠到的後面幾天）原本的片連同它的貼文往後順延到下一個發片日。
+   * 算法在 lib/airInsert.ts（有測試）；這裡只負責確認＋一次寫入。
+   * 小編已經在後台排好／已發布的貼文不搬（那天跳過）。
+   */
+  const insertAt = async (assetId: string, d: Date) => {
+    setSelectedId(null);
+    setHoverKey(null);
+    const a = pending.find(x => x.id === assetId);
+    if (!a || !vendor || a.vendorId !== vendorId || d < today) return;
+    if (isLocked(a)) { toast.error(`「${a.title}」已經排好了，要換先按「解鎖」`); return; }
+    const dayStr = format(d, 'yyyy-MM-dd');
+    const postOf = (x: Asset) => (x.plannedPostId ? postById.get(x.plannedPostId) : undefined);
+    const items = mine
+      .filter(x => x.id !== assetId && (placedDay(x) || '') >= dayStr)
+      .map(x => { const p = postOf(x); return { id: x.id!, day: placedDay(x)!, movable: !p || !['scheduled', 'published'].includes(p.status) }; });
+    // 發片日：用空的 posts 算，才不會因為那天已經有貼文就被藏起來
+    const slotDays = listPlannedSlots({
+      vendors: slotVendors([vendor]), moves: slotMoves, dismissed: dismissedHabits, extras: extraSlots, posts: [],
+      rangeStart: d, rangeEnd: addDays(d, 120), contentType: 'video',
+    }).map(s => s.toDate);
+    // 有小編貼文在等片、還沒綁片的日子跳過
+    const openPost = (day: string) => myVideoPosts.find(p => postDay(p) === day && isWaitingVideoPost(p, today)
+      && !pending.some(x => x.plannedPostId === p.id));
+    const blocked = new Set(myVideoPosts.map(postDay).filter(day => day > dayStr && openPost(day)));
+    const plan = planInsert(dayStr, items, slotDays, blocked);
+    if (plan.ok === false) { toast.error(plan.reason); return; }
+    const title = (id: string) => pending.find(x => x.id === id)?.title || '';
+    const md = (day: string) => format(parseISO(day), 'M/d');
+    if (plan.moves.length && !window.confirm(
+      `「${a.title}」插在 ${md(dayStr)}，後面的片連同貼文往後順延：\n\n` +
+      plan.moves.map(m => `・${title(m.id)}：${md(m.from)} → ${md(m.to)}`).join('\n') +
+      '\n\n小編已經在後台排好的貼文不會動。確定嗎？')) return;
+
+    setBusyId(assetId);
+    try {
+      const batch = writeBatch(db);
+      const nowIso = new Date().toISOString();
+      for (const m of plan.moves) {
+        const x = pending.find(y => y.id === m.id)!;
+        const p = postOf(x);
+        if (p && p.status !== 'published' && p.status !== 'scheduled') batch.update(doc(db, 'posts', p.id!), movedSchedule(p, parseISO(m.to)));
+        batch.update(doc(db, 'assets', m.id), { plannedAirDate: m.to, plannedAirSetAt: nowIso });
+      }
+      // 插進來的這支：跟 place() 一樣——那天有小編貼文在等片就綁它，否則搬／建一篇系統貼文
+      const oldPost = postOf(a);
+      const oldAuto = isUntouchedAutoPost(oldPost) ? oldPost : undefined;
+      let nextPost = openPost(dayStr)?.id ?? null;
+      if (!nextPost) {
+        if (oldAuto) {
+          batch.update(doc(db, 'posts', oldAuto.id!), movedSchedule(oldAuto, d));
+          nextPost = oldAuto.id!;
+        } else {
+          const ref = doc(collection(db, 'posts'));
+          batch.set(ref, buildAutoPost(a, vendor, d, auth.currentUser?.uid || ''));
+          nextPost = ref.id;
+        }
+      } else if (oldAuto) {
+        batch.delete(doc(db, 'posts', oldAuto.id!));
+      }
+      batch.update(doc(db, 'assets', assetId), { plannedAirDate: dayStr, plannedPostId: nextPost, plannedAirSetAt: nowIso });
+      await batch.commit();
+      toast.success(plan.moves.length ? `已插在 ${md(dayStr)}，後面 ${plan.moves.length} 支往後順延` : `已排在 ${md(dayStr)}`);
+      setUnlockedIds(prev => { const next = new Set(prev); next.delete(assetId); return next; });
+    } catch (error) {
+      console.error('插隊失敗:', error);
+      toast.error('沒有存到，請再試一次');
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const onDragStart = (e: DragEvent, assetId: string) => {
@@ -488,7 +564,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
               <CalendarDays size={18} /> 排上片日
             </h3>
             <p className="text-[13px] text-gray-500 truncate">
-              把左邊的片拖到那一天或小編的貼文上＝預計那天上，拖回左邊＝取消。剪輯師送審日＝上片日前 {EDIT_LEAD_DAYS} 天。
+              把左邊的片拖到那一天或小編的貼文上＝預計那天上，拖回左邊＝取消；拖到已經排了片的日子＝插隊，後面的片連同貼文往後順延。剪輯師送審日＝上片日前 {EDIT_LEAD_DAYS} 天。
             </p>
           </div>
           {onClose && (
@@ -519,7 +595,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
           {embedded && (
             <span
               className="ml-auto shrink-0 flex items-center gap-1 text-[12px] text-gray-400 whitespace-nowrap cursor-help"
-              title={`把左邊的片拖到那一天或小編的貼文上＝預計那天上，拖回左邊＝取消。剪輯師送審日＝上片日前 ${EDIT_LEAD_DAYS} 天。`}
+              title={`把左邊的片拖到那一天或小編的貼文上＝預計那天上，拖回左邊＝取消；拖到已經排了片的日子＝插隊，後面的片連同貼文往後順延。剪輯師送審日＝上片日前 ${EDIT_LEAD_DAYS} 天。`}
             >
               <Info size={13} /> 怎麼用
             </span>
