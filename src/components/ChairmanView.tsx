@@ -15,7 +15,7 @@ import {
 import { groupRowsByVendor } from './EditorStatementPdf';
 import EditorPayables from './EditorPayables';
 import BillingProgress from './BillingProgress';
-import { VideoSteps, videoProgress } from './VideoProgressSteps';
+import { progressStatus, StatusPill, VideoSteps, videoProgress } from './VideoProgressSteps';
 import { Asset, DURATION_TIER_LABEL, Editor, EditorInvoice, Post, ShootBooking, Vendor, deriveFlowStage } from '../types';
 
 function cn(...inputs: ClassValue[]) {
@@ -666,7 +666,7 @@ function CalendarTab({ roomy = false }: { roomy?: boolean }) {
                   <div key={p.id} className="rounded-2xl border border-black/5 px-4 py-4 space-y-3">
                     <div>
                       <p className="text-[16px] font-bold truncate">{asset?.title || p.title || '（未命名）'}</p>
-                      <p className={cn('text-[14px] mt-0.5 font-bold', prog.current >= 4 ? 'text-green-700' : 'text-orange-700')}>{prog.note}</p>
+                      <div className="mt-1"><StatusPill {...progressStatus(prog.current, prog.note, p.scheduledAt)} /></div>
                     </div>
                     <VideoSteps current={prog.current} />
                   </div>

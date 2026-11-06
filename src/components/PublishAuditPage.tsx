@@ -6,7 +6,7 @@ import { auth, db } from '../firebase';
 import { Asset, Editor, Post, Vendor } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import { isInternalWork } from '../lib/editorRoster';
-import { VideoSteps } from './VideoProgressSteps';
+import { progressStatus, StatusPill, VideoSteps } from './VideoProgressSteps';
 import { assetOfPost, auditCounts, auditProgress, buildAuditRows, captionChecks, computePrecheck, TONE, tiktokNextCheck, type PrecheckDoc } from '../lib/publishAuditRows';
 import {
   AUDIT_STATUS_ICON, AUDIT_STATUS_LABEL, AUDITABLE_PLATFORMS, describeAudit, type AuditStatus, type PlatformAudit,
@@ -168,7 +168,7 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                 <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 py-1">
                   <div className="w-full max-w-[400px]"><VideoSteps current={prog.current} /></div>
                   <div className="space-y-1">
-                    <p className={`text-[14px] font-bold ${prog.current >= 5 ? 'text-[#5A5A40]' : 'text-orange-700'}`}>{prog.note}</p>
+                    <StatusPill {...progressStatus(prog.current, prog.note, p.scheduledAt)} />
                     {prog.current < 5 && (
                       // 文案三關：小燈號就好（11-06 使用者：標籤太複雜）。綠＝過了，紅色呼吸燈＝還沒
                       <div className="flex flex-wrap items-center gap-3">

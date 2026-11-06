@@ -12,7 +12,7 @@ import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVide
 import { buildDeficitRows } from '../lib/vendorDeficitRows';
 import { AUDIT_STATUS_ICON, AUDIT_STATUS_LABEL } from '../lib/publishAudit';
 import { assetOfPost, auditCounts, auditProgress, buildAuditRows, captionChecks, computePrecheck, type PrecheckDoc } from '../lib/publishAuditRows';
-import { VIDEO_STEPS } from './VideoProgressSteps';
+import { progressStatus, StatusPill, VIDEO_STEPS } from './VideoProgressSteps';
 import EditReminderExportModal from './EditReminderExportModal';
 
 function cn(...inputs: ClassValue[]) {
@@ -217,7 +217,11 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                     <span />
                     <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 min-w-0">
                       <MiniSteps current={prog.current} />
-                      <span className={cn('text-[13px] font-bold truncate min-w-0', bad ? 'text-rose-600' : prog.current >= 5 ? 'text-[#5A5A40]' : 'text-orange-700')}>{prog.note}</span>
+                      {notScheduled.length
+                        ? <StatusPill tone="problem" label="後台還沒排" detail={notScheduled.join('/')} size="sm" />
+                        : bad
+                          ? <StatusPill tone="problem" label="發布有問題" detail="看發布稽核" size="sm" />
+                          : <StatusPill {...progressStatus(prog.current, prog.note, p.scheduledAt)} size="sm" />}
                       <div className="flex gap-1.5 sm:ml-auto shrink-0">
                         {cells.filter(c => c.status !== 'unsupported').map(c => (
                           <span key={c.pf} title={`${c.pf}：${AUDIT_STATUS_LABEL[c.status]}`}
