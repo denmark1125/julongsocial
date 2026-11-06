@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { addDays, format, getDay, isSameMonth, parseISO } from 'date-fns';
-import { ArrowRight, Camera, CheckCircle2, ChevronDown, ChevronUp, ClipboardCheck, Download, Radio } from 'lucide-react';
+import { ArrowRight, Camera, Check, CheckCircle2, ChevronDown, ChevronUp, ClipboardCheck, Download, Radio } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { db } from '../firebase';
@@ -384,21 +384,35 @@ function MiniSteps({ current }: { current: number }) {
   return (
     // 點下面寫站名（11-06 使用者：只有點看不懂每個點的意思）
     <div className="flex items-start shrink-0">
-      {VIDEO_STEPS.map((s, i) => (
-        <React.Fragment key={s}>
-          <div className="relative flex flex-col items-center w-[52px] shrink-0">
-            {/* 連到下一站的線：從這個點的中心畫到下一個點的中心，壓在點下面 */}
-            {i < VIDEO_STEPS.length - 1 && <span className={cn('absolute top-[5px] left-1/2 w-full h-[2px]', i < current ? 'bg-[#5A5A40]' : 'bg-gray-200')} />}
-            <span className="relative flex w-3 h-3">
-              {i === current && <span className="absolute inline-flex w-full h-full rounded-full bg-orange-400 opacity-50 animate-ping" />}
-              <span className={cn('relative inline-flex w-3 h-3 rounded-full border-2',
-                i < current ? 'bg-[#5A5A40] border-[#5A5A40]' : i === current ? 'bg-orange-500 border-orange-500' : 'bg-white border-gray-200')} />
+      {VIDEO_STEPS.map((s, i) => {
+        const done = i < current;
+        const now = i === current;
+        // 線段跟點之間留一點空隙，看起來比較輕；接到目前這站的那段用漸層帶到橘色
+        const seg = i + 1 < current ? 'bg-[#5A5A40]' : i + 1 === current ? 'bg-gradient-to-r from-[#5A5A40] to-orange-400' : 'bg-gray-100';
+        return (
+          <div key={s} className="relative flex flex-col items-center w-[54px] shrink-0">
+            {i < VIDEO_STEPS.length - 1 && (
+              <span className={cn('absolute top-[7px] left-[calc(50%+12px)] w-[calc(100%-24px)] h-[3px] rounded-full', seg)} />
+            )}
+            <span className="relative flex w-4 h-4 items-center justify-center">
+              {now && <span className="absolute inset-0 rounded-full bg-orange-400/40 animate-ping" />}
+              {done ? (
+                <span className="relative w-4 h-4 rounded-full bg-[#5A5A40] flex items-center justify-center shadow-sm">
+                  <Check size={10} strokeWidth={3.5} className="text-white" />
+                </span>
+              ) : now ? (
+                <span className="relative w-4 h-4 rounded-full bg-orange-500 ring-4 ring-orange-100 flex items-center justify-center">
+                  <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                </span>
+              ) : (
+                <span className="relative w-4 h-4 rounded-full bg-white border-2 border-gray-200" />
+              )}
             </span>
-            <span className={cn('mt-1 text-[11px] font-bold whitespace-nowrap',
-              i === current ? 'text-orange-700' : i < current ? 'text-[#5A5A40]' : 'text-gray-400')}>{s}</span>
+            <span className={cn('mt-1.5 text-[11px] font-bold whitespace-nowrap',
+              now ? 'text-orange-600' : done ? 'text-[#5A5A40]' : 'text-gray-300')}>{s}</span>
           </div>
-        </React.Fragment>
-      ))}
+        );
+      })}
     </div>
   );
 }
