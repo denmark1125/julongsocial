@@ -48,8 +48,6 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
   const [precheckDoc, setPrecheckDoc] = useState<{ fetchedAt?: string; tiktokFetchedAt?: string; vendors?: Record<string, VendorCalendar>; tiktok?: Record<string, VendorCalendar> } | null>(null);
   const [running, setRunning] = useState(false);
   const [runMsg, setRunMsg] = useState('');
-  // 預設依時間只顯示該看的那一塊；要對帳時可以全部攤開
-  const [showAll, setShowAll] = useState(false);
   // 「立刻檢查」的結果（不寫資料庫、不推 LINE），蓋在畫面上直到換日期
   const [preview, setPreview] = useState<Record<string, PlatformAudit>>({});
 
@@ -198,13 +196,6 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
         </div>
       )}
 
-      {rows.length > 0 && (
-        <div className="flex justify-start -mb-3">
-          <button onClick={() => setShowAll(x => !x)} className="text-[13px] text-gray-400 hover:text-[#5A5A40] underline underline-offset-2">
-            {showAll ? '只看重點' : '展開全部細節'}
-          </button>
-        </div>
-      )}
       <div className="bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden">
         {rows.length === 0 ? (
           <p className="px-5 py-10 text-center text-sm text-gray-400">這天沒有排程</p>
@@ -214,14 +205,6 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
               const asset = (p.assetId && p.assetId !== 'to_be_added' ? assets.find(a => a.id === p.assetId) : undefined)
                 || assets.find(a => a.plannedPostId === p.id && !a.voidedAt);
               const prog = auditProgress(p, cells, precheck, asset, !!asset && isInternalWork(asset, vendors, editors));
-              // 一列同一時間只放一種資訊（11-06 使用者：資訊太多不知道怎麼看）：
-              // 還沒到發布時間 → 只看進度；過了發布時間 → 只看各平台結果；有問題的 → 全部攤開
-              const aired = p.scheduledAt <= format(new Date(), "yyyy-MM-dd'T'HH:mm");
-              const problem = cells.some(c => !['ok', 'pending', 'skipped', 'unsupported'].includes(c.status))
-                || Object.values<any>(p.coverCheck || {}).some(c => c?.status === 'mismatch')
-                || cells.some(c => precheck.get(`${p.id}|${c.pf}`)?.status === 'time_diff');
-              const showProgress = showAll || !aired || problem;
-              const showResults = showAll || aired || problem;
               return (
               <li key={p.id} className="px-5 py-4 space-y-2">
                 <div className="flex items-baseline gap-3 min-w-0">
@@ -234,7 +217,7 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                   {!(p.content || '').trim() && p.status !== 'published' && <span className="text-[12px] px-2 py-0.5 rounded-full bg-red-50 text-red-600 font-bold whitespace-nowrap" title="系統裡這則還沒有文案，發的時候很容易忘了貼（11-05 好正點）">系統還沒填文案</span>}
                   <span className="text-[14px] text-gray-500 truncate min-w-0">{p.title}</span>
                 </div>
-                {showProgress && <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 py-1">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 py-1">
                   <div className="w-full max-w-[400px]"><VideoSteps current={prog.current} /></div>
                   <div className="space-y-1">
                     <p className={`text-[14px] font-bold ${prog.current >= 5 ? 'text-[#5A5A40]' : 'text-orange-700'}`}>{prog.note}</p>
@@ -253,8 +236,8 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                       </div>
                     )}
                   </div>
-                </div>}
-                {(showAll || problem) && cells.some(c => precheck.has(`${p.id}|${c.pf}`)) && (
+                </div>
+                {cells.some(c => precheck.has(`${p.id}|${c.pf}`)) && (
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-gray-500">
                     <span className="font-bold whitespace-nowrap">發布前（Meta 排程）</span>
                     {cells.map(({ pf }) => {
@@ -264,7 +247,7 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                   </div>
                 )}
                 {/* 封面檢查（rpa/cover_check.py 在電腦上算，正式站沒有 ffmpeg）：發布後隔天早上 09:35 前會補上 */}
-                {showResults && cells.some(c => p.coverCheck?.[c.pf]) && (
+                {cells.some(c => p.coverCheck?.[c.pf]) && (
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-gray-500">
                     <span className="font-bold whitespace-nowrap">封面</span>
                     {cells.map(({ pf }) => {
@@ -284,7 +267,7 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                     })}
                   </div>
                 )}
-                {showResults && <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2">
                   {cells.map(({ pf, a, status, configured }) => {
                     const text = !configured && (pf === 'TikTok' || AUDITABLE_PLATFORMS.includes(pf as any))
                       ? (pf === 'TikTok' ? '這個 IP 還沒設定 TikTok 帳號' : '這個 IP 還沒設定粉專')
@@ -300,7 +283,7 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                       </div>
                     );
                   })}
-                </div>}
+                </div>
               </li>
               );
             })}
