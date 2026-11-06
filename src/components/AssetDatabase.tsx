@@ -785,34 +785,39 @@ ${after}`)) return;
     const used = effStatus(asset) === 'used';
     const flow = asset.type === 'video' && !asset.voidedAt ? FLOW_LABEL[deriveFlowStage(asset)] : undefined;
     return (
-      <div key={asset.id} className={cn('bg-white rounded-2xl border border-black/5 shadow-sm px-4 py-3 space-y-2', used && 'opacity-60')}>
-        <div className="flex items-center gap-2 text-[12px] min-w-0">
+      // 正方形（11-06 使用者：長方形不習慣），手機一排兩張
+      <div key={asset.id} className={cn('aspect-square bg-white rounded-2xl border border-black/5 shadow-sm p-3 flex flex-col gap-1.5 min-w-0', used && 'opacity-60')}>
+        <div className="flex items-center gap-1 text-[12px] min-w-0">
           <span className="font-bold text-[#5A5A40] truncate">{getVendorName(asset.vendorId)}</span>
-          {flow && <span className={cn('shrink-0 px-2 py-0.5 rounded-full font-bold whitespace-nowrap', flow.tone)}>{flow.text}</span>}
-          {asset.voidedAt && <span className="shrink-0 px-2 py-0.5 rounded-full font-bold bg-red-50 text-red-600">已作廢</span>}
-          {used && !asset.voidedAt && <span className="shrink-0 px-2 py-0.5 rounded-full font-bold bg-gray-100 text-gray-500">已使用</span>}
-          {asset.isUrgent && <Flame size={13} className="shrink-0 text-red-500" />}
-          {asset.filmingDate && <span className="ml-auto shrink-0 text-gray-400 tabular-nums">拍 {asset.filmingDate.slice(5).replace('-', '/')}</span>}
+          {asset.isUrgent && <Flame size={12} className="shrink-0 text-red-500" />}
+          {asset.filmingDate && <span className="ml-auto shrink-0 text-gray-400 tabular-nums">{asset.filmingDate.slice(5).replace('-', '/')}</span>}
         </div>
-        <p className="text-[15px] font-bold leading-snug line-clamp-2">{asset.title}</p>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex flex-wrap gap-1">
+          {flow && <span className={cn('px-1.5 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap', flow.tone)}>{flow.text}</span>}
+          {asset.voidedAt && <span className="px-1.5 py-0.5 rounded-full text-[11px] font-bold bg-red-50 text-red-600">已作廢</span>}
+          {used && !asset.voidedAt && <span className="px-1.5 py-0.5 rounded-full text-[11px] font-bold bg-gray-100 text-gray-500">已使用</span>}
+        </div>
+        <p className="text-[14px] font-bold leading-snug line-clamp-3 break-words">{asset.title}</p>
+        <div className="mt-auto space-y-1.5">
+          <div className="flex items-center justify-between gap-1 min-w-0 [&_button]:text-[12px]">
+            <PreviewLinkButton asset={asset} compact />
+            <button onClick={() => toggleExpanded(asset.id!)} className="ml-auto shrink-0 p-1 text-gray-400" aria-label="更多">
+              <MoreHorizontal size={16} />
+            </button>
+          </div>
           {asset.stage === 'raw' ? (
-            <button onClick={() => setConvertingAsset(asset)} className="shrink-0 whitespace-nowrap bg-[#5A5A40] text-white px-3 py-1.5 rounded-lg text-[13px] font-bold">
+            <button onClick={() => setConvertingAsset(asset)} className="w-full whitespace-nowrap bg-[#5A5A40] text-white py-1.5 rounded-lg text-[13px] font-bold">
               轉為成片
             </button>
           ) : (
             <button
               onClick={() => toggleApproval(asset)}
-              className={cn('shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-[13px] font-bold',
+              className={cn('w-full whitespace-nowrap py-1.5 rounded-lg text-[13px] font-bold',
                 isClientApproved(asset) ? 'bg-green-100 text-green-700' : 'bg-orange-50 text-orange-700 border border-orange-200')}
             >
               {isClientApproved(asset) ? '✓ 已審核' : '待審核'}
             </button>
           )}
-          <PreviewLinkButton asset={asset} />
-          <button onClick={() => toggleExpanded(asset.id!)} className="ml-auto shrink-0 flex items-center gap-1 text-[13px] font-bold text-gray-400 px-2 py-1.5">
-            更多 <MoreHorizontal size={15} />
-          </button>
         </div>
       </div>
     );
@@ -1198,12 +1203,12 @@ ${after}`)) return;
           </div>
 
           {/* Asset Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-6">
+          <div className="grid grid-cols-2 md:grid-cols-2 xl:grid-cols-3 gap-2.5 md:gap-6">
             {filteredAssets.map((asset) => isMobile && !expandedIds.has(asset.id!) ? compactCard(asset) : (
           <div 
             key={asset.id} 
             className={cn(
-              "bg-white rounded-3xl md:rounded-[32px] overflow-hidden border border-black/5 shadow-sm transition-all group",
+              "col-span-2 md:col-span-1 bg-white rounded-3xl md:rounded-[32px] overflow-hidden border border-black/5 shadow-sm transition-all group",
               effStatus(asset) === 'used' 
                 ? "opacity-50 scale-[0.96] grayscale-[0.5] hover:opacity-80" 
                 : "hover:shadow-md hover:scale-[1.01]"
