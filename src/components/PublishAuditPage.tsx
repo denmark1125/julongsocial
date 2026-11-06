@@ -3,7 +3,10 @@ import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import { addDays, format, parseISO } from 'date-fns';
 import { ChevronLeft, ChevronRight, ExternalLink, RefreshCw } from 'lucide-react';
 import { auth, db } from '../firebase';
-import { Post, Vendor } from '../types';
+import { Asset, Editor, Post, Vendor } from '../types';
+import { useLiveCollection } from '../lib/liveData';
+import { isInternalWork } from '../lib/editorRoster';
+import { VideoSteps, videoProgress } from './VideoProgressSteps';
 import {
   AUDIT_STATUS_ICON, AUDIT_STATUS_LABEL, AUDITABLE_PLATFORMS, describeAudit, type AuditStatus, type PlatformAudit,
 } from '../lib/publishAudit';
@@ -58,6 +61,9 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
   useEffect(() => onSnapshot(doc(db, 'publishPrechecks', day), s => setPrecheckDoc(s.exists() ? (s.data() as any) : null), () => setPrecheckDoc(null)), [day]);
 
   const vmap = useMemo(() => new Map(vendors.map(v => [v.id!, v])), [vendors]);
+  // 每支片的五站進度（跟董事行事曆同一套圓圈，11-06 使用者要求）
+  const assets = useLiveCollection<Asset>('assets');
+  const editors = useLiveCollection<Editor>('editors');
   // 跟伺服器用同一個 precheckAll 算，畫面不另外寫一套
   const precheck = useMemo(() => {
     if (!precheckDoc?.vendors && !precheckDoc?.tiktok) return new Map<string, PrecheckResult>();
@@ -195,7 +201,11 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
           <p className="px-5 py-10 text-center text-sm text-gray-400">這天沒有排程</p>
         ) : (
           <ul className="divide-y divide-black/5">
-            {rows.map(({ p, v, cells }) => (
+            {rows.map(({ p, v, cells }) => {
+              const asset = (p.assetId && p.assetId !== 'to_be_added' ? assets.find(a => a.id === p.assetId) : undefined)
+                || assets.find(a => a.plannedPostId === p.id && !a.voidedAt);
+              const prog = auditProgress(p, cells, precheck, asset, !!asset && isInternalWork(asset, vendors, editors));
+              return (
               <li key={p.id} className="px-5 py-4 space-y-2">
                 <div className="flex items-baseline gap-3 min-w-0">
                   <span className="text-[15px] font-bold tabular-nums whitespace-nowrap">{p.scheduledAt.slice(11, 16)}</span>
@@ -206,6 +216,10 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                   {p.autoPublished?.missingConfirm && <span className="text-[12px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-bold whitespace-nowrap" title="影片已經上線，但系統裡內部檢核或業主審核沒有勾">發了但沒勾審核</span>}
                   {!(p.content || '').trim() && p.status !== 'published' && <span className="text-[12px] px-2 py-0.5 rounded-full bg-red-50 text-red-600 font-bold whitespace-nowrap" title="系統裡這則還沒有文案，發的時候很容易忘了貼（11-05 好正點）">系統還沒填文案</span>}
                   <span className="text-[14px] text-gray-500 truncate min-w-0">{p.title}</span>
+                </div>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 py-1">
+                  <div className="w-full max-w-[400px]"><VideoSteps current={prog.current} /></div>
+                  <p className={`text-[13px] font-bold ${prog.current >= 5 ? 'text-[#5A5A40]' : 'text-orange-700'}`}>{prog.note}</p>
                 </div>
                 {cells.some(c => precheck.has(`${p.id}|${c.pf}`)) && (
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-gray-500">
@@ -255,7 +269,8 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                   })}
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>
@@ -370,4 +385,25 @@ function tiktokNextCheck(scheduledAt: string): string {
   if (t) return `機器人 ${day === now.slice(0, 10) ? '今天' : `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`} ${t} 確認`;
   const next = format(addDays(parseISO(day), 1), 'yyyy-MM-dd');
   return `機器人 ${next === format(addDays(new Date(), 1), 'yyyy-MM-dd') ? '明天' : `${Number(next.slice(5, 7))}/${Number(next.slice(8, 10))}`} 09:35 確認（18:00 後發的片下班後查不到）`;
+}
+
+/**
+ * 稽核頁的五站進度：跟董事行事曆同一套（videoProgress），再加上稽核頁才有的兩個訊號——
+ * 機器人看到後台各平台都排好了（草稿也算到「小編排程」完成），系統查到各平台都發出去了（就算還沒改綠色也算發布完成）。
+ */
+function auditProgress(
+  p: Post, cells: { pf: string; status: AuditStatus; configured: boolean }[], precheck: Map<string, PrecheckResult>,
+  asset: Asset | undefined, internal: boolean,
+): { current: number; note: string } {
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const base = videoProgress(p, asset, today, () => '', internal);
+  const checked = cells.filter(c => c.configured && c.status !== 'unsupported');
+  if (base.current < 5 && checked.length && checked.every(c => c.status === 'ok' || c.status === 'time_mismatch')) {
+    return { current: 5, note: '各平台都確認發出去了' };
+  }
+  const pre = cells.map(c => precheck.get(`${p.id}|${c.pf}`)).filter(Boolean) as PrecheckResult[];
+  if (base.current < 4 && pre.length && pre.every(r => r.status === 'scheduled')) {
+    return { current: 4, note: `後台已排好，${p.scheduledAt.slice(11, 16)} 發布` };
+  }
+  return base;
 }
