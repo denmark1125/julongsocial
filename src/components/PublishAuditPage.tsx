@@ -242,7 +242,7 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                     const text = !configured && (pf === 'TikTok' || AUDITABLE_PLATFORMS.includes(pf as any))
                       ? (pf === 'TikTok' ? '這個 IP 還沒設定 TikTok 帳號' : '這個 IP 還沒設定粉專')
                       : a ? describeAudit(a, p.scheduledAt, vendorName)
-                      : pf === 'TikTok' && status === 'pending' ? '機器人下一輪確認（晚上的片隔天 09:35）' : AUDIT_STATUS_LABEL[status];
+                      : pf === 'TikTok' && status === 'pending' ? tiktokNextCheck(p.scheduledAt) : AUDIT_STATUS_LABEL[status];
                     return (
                       <div key={pf} className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[13px] ${TONE[status]}`}>
                         <span className="font-bold whitespace-nowrap">{AUDIT_STATUS_ICON[status]} {pf}</span>
@@ -355,4 +355,19 @@ function DailyReportCard({ report, vendorName }: { report: Report; vendorName: (
       )}
     </div>
   );
+}
+
+/**
+ * TikTok 沒有官方讀取管道，靠電腦上的機器人（09:35／11:55／17:30／18:00，見 rpa-profiles/run-meta-precheck.cmd）。
+ * 排定時間之後、現在之後的第一輪就是會確認的時間；18:00 之後發的片要等隔天 09:35（下班關機）。
+ */
+const TIKTOK_ROBOT_TIMES = ['09:35', '11:55', '17:30', '18:00'];
+function tiktokNextCheck(scheduledAt: string): string {
+  const now = format(new Date(), "yyyy-MM-dd'T'HH:mm");
+  const from = scheduledAt > now ? scheduledAt : now;
+  const day = from.slice(0, 10);
+  const t = TIKTOK_ROBOT_TIMES.find(x => `${day}T${x}` > from);
+  if (t) return `機器人 ${day === now.slice(0, 10) ? '今天' : `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`} ${t} 確認`;
+  const next = format(addDays(parseISO(day), 1), 'yyyy-MM-dd');
+  return `機器人 ${next === format(addDays(new Date(), 1), 'yyyy-MM-dd') ? '明天' : `${Number(next.slice(5, 7))}/${Number(next.slice(8, 10))}`} 09:35 確認（18:00 後發的片下班後查不到）`;
 }
