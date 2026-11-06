@@ -67,6 +67,18 @@ EXTRACT_JS = r"""
 
 MONTHS = {m: i for i, m in enumerate("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(), 1)}
 
+# 「Posts」頁（已發布清單）：每列有完整文案、發布時間「2026-10-31 20:00」、封面。
+# 不管用 Business Suite 還是手機發的都列在這裡，比週曆完整，而且有文案可以比（11-05 實測）。
+POSTS_JS = r"""
+() => [...document.querySelectorAll('tr')]
+  .filter(r => /\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(r.innerText))
+  .map(r => {
+    const t = r.innerText;
+    const at = t.match(/(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})/);
+    return { date: at[1], time: at[2], caption: t.split('\n')[0].slice(0, 300), cover: (r.querySelector('img') || {}).src || '' };
+  })
+"""
+
 
 def to_hhmm(t: str) -> str:
     m = re.match(r"(\d{1,2}):(\d{2})\s*(AM|PM)", t)
@@ -87,32 +99,33 @@ def card_date(day: int, today: datetime) -> str:
 
 
 def read_account(page, bs_id: str, today: datetime) -> list[dict]:
+    cards: list[dict] = []
+    # ① 排好還沒發的：首頁週曆的綠色卡片。這週什麼都沒排時週曆是空白（「Schedule your post」），不是錯誤
     page.goto(f"https://business-suite.tiktok.com/?org_id={ORG_ID}&bs_id={bs_id}")
     page.wait_for_function(
-        "() => [...document.querySelectorAll('*')].some(e => e.childElementCount===0 && /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\\s+\\d{1,2}$/.test((e.textContent||'').trim()))",
+        r"() => /Schedule your post/.test(document.body.innerText) || [...document.querySelectorAll('*')].some(e => e.childElementCount===0 && /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+\d{1,2}$/.test((e.textContent||'').trim()))",
         timeout=40_000)
     page.wait_for_timeout(2500)
     if "login" in page.url:
         raise RuntimeError("TikTok 登入過期")
-    cards = []
-    datas = [page.evaluate(EXTRACT_JS)]
-    # 週日：昨天（週六）在上一週，要多看一週才查得到昨晚有沒有發
-    if today.weekday() == 6:
-        try:
-            page.locator("text=Today").first.locator("xpath=preceding-sibling::*[1]").click(timeout=5000)
-            page.wait_for_timeout(2500)
-            datas.append(page.evaluate(EXTRACT_JS))
-        except Exception:
-            pass
-    for data in datas:
-        for c in data["cards"]:
-            if not c["day"]:
-                continue
-            cards.append({
-                "date": card_date(c["day"], today), "time": to_hhmm(c["time"]), "platform": "TikTok",
-                "cover": c["cover"][:600], "status": "scheduled" if c["scheduled"] else "published",
-            })
-    uniq = {(c["date"], c["time"], c["cover"][:120]): c for c in cards}
+    data = page.evaluate(EXTRACT_JS)
+    for c in data["cards"]:
+        if c["day"] and c["scheduled"]:
+            cards.append({"date": card_date(c["day"], today), "time": to_hhmm(c["time"]), "platform": "TikTok",
+                          "cover": c["cover"][:600], "status": "scheduled"})
+    # ② 已經發出去的：Posts 頁的清單（有文案），只留最近 3 天
+    page.goto(f"https://business-suite.tiktok.com/posts/publisher?org_id={ORG_ID}&bs_id={bs_id}")
+    page.wait_for_function(
+        r"() => [...document.querySelectorAll('tr')].some(r => /\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(r.innerText)) || /No (posts|data)|暫無/.test(document.body.innerText)",
+        timeout=40_000)
+    page.wait_for_timeout(1500)
+    since = (today - timedelta(days=3)).strftime("%Y-%m-%d")
+    for r in page.evaluate(POSTS_JS):
+        if r["date"] < since:
+            continue
+        cards.append({"date": r["date"], "time": r["time"], "platform": "TikTok", "cover": r["cover"][:600],
+                      "status": "published", "caption": r["caption"]})
+    uniq = {(c["date"], c["time"], c["status"], c["cover"][:120]): c for c in cards}
     return list(uniq.values())
 
 
