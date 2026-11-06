@@ -48,9 +48,11 @@ export interface PostPrefill {
 interface CalendarViewProps {
   /** 有帶就表示外層接得住「去建立貼文」，橘色預排才會變成可點 */
   onPlanPost?: (prefill: PostPrefill) => void;
+  /** 從貼文詳細跳去貼文管理打開這篇 */
+  onOpenPost?: (postId: string) => void;
 }
 
-export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
+export default function CalendarView({ onPlanPost, onOpenPost }: CalendarViewProps = {}) {
   const [currentDate, setCurrentDate] = useState(new Date());
   // 共用即時資料層：整個 session 只訂閱一次，切分頁不再重讀（見 'lib/liveData'）
   const posts = useLiveCollection<Post>('posts');
@@ -595,11 +597,13 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
           <PostDetailModal
             post={livePost}
             vendor={vendors.find(v => v.id === livePost.vendorId)}
-            asset={assets.find(a => a.id === livePost.assetId)}
+            // 還沒掛上、但排上片日已經預定給這篇的片也要看得到（片還在剪時就是這種）
+            asset={assets.find(a => a.id === livePost.assetId) || assets.find(a => a.plannedPostId === livePost.id && !a.voidedAt)}
             // 帶 assets/vendors 進去＝開啟可編輯模式（改狀態要檢查素材審核、要組 webhook）
             assets={assets}
             vendors={vendors}
             onClose={() => setSelectedPost(null)}
+            onOpenInPosts={onOpenPost ? (id) => { setSelectedPost(null); onOpenPost(id); } : undefined}
           />
         );
       })()}

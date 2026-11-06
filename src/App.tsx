@@ -51,6 +51,8 @@ export default function App() {
   // 從社群日曆點橘色預排帶過去「新增貼文」的預填。放在這裡是因為它要跨分頁存活：
   // 切到 posts 的當下 CalendarView 已經被卸載了，狀態留在它身上會跟著消失。
   const [postPrefill, setPostPrefill] = useState<PostPrefill | null>(null);
+  // 從社群日曆的貼文詳細跳到貼文管理、直接打開那篇（11-06）
+  const [postFocusId, setPostFocusId] = useState<string | null>(null);
   // 剪輯師從「上片排程」點某一格的庫存標籤時，要帶到工作台看那家 IP 的待剪清單。
   // 跟 postPrefill 同一套做法：App 持有、傳下去、收到的人用完回報清掉。
   const [editorJumpVendorId, setEditorJumpVendorId] = useState<string | null>(null);
@@ -310,8 +312,8 @@ export default function App() {
     switch (activeTab) {
       case 'dashboard': return <Dashboard setActiveTab={setActiveTab} currentUserRole={userProfile?.role || 'employee'} />;
       case 'vendors': return <VendorManagement />;
-      case 'posts': return <PostManagement prefill={postPrefill} onPrefillConsumed={() => setPostPrefill(null)} />;
-      case 'calendar': return <CalendarView onPlanPost={(prefill) => { setPostPrefill(prefill); setActiveTab('posts'); }} />;
+      case 'posts': return <PostManagement prefill={postPrefill} onPrefillConsumed={() => setPostPrefill(null)} focusPostId={postFocusId} onFocusConsumed={() => setPostFocusId(null)} />;
+      case 'calendar': return <CalendarView onPlanPost={(prefill) => { setPostPrefill(prefill); setActiveTab('posts'); }} onOpenPost={(id) => { setPostFocusId(id); setActiveTab('posts'); }} />;
       case 'videos':
       case 'airDate':
       case 'editOrder':

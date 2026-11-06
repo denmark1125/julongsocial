@@ -19,6 +19,29 @@ interface PostDetailModalProps {
   // 沒帶就維持原本唯讀，其他地方引用這個 modal 不會被迫改。
   assets?: Asset[];
   vendors?: Vendor[];
+  /** 有帶＝顯示「到貼文管理編輯」，按了跳去貼文管理並打開這篇（11-06） */
+  onOpenInPosts?: (postId: string) => void;
+}
+
+/**
+ * 「關聯素材」要打開的是**成片**，不是毛片資料夾（11-06 使用者：社群日曆點了只到素材）。
+ * 優先序：剪輯師上傳到 IP 成片夾的檔 → 送客戶夾的副本 → 最新一版審片檔 → 預覽頁 → 最後才退回素材連結。
+ */
+function finishedLink(a: Asset): { url: string; label: string } | null {
+  const drive = (id: string) => `https://drive.google.com/file/d/${id}/view`;
+  const fin = a.finishedFiles?.[a.finishedFiles.length - 1];
+  if (fin?.id) return { url: drive(fin.id), label: '看成片' };
+  const copy = a.clientCopies?.[a.clientCopies.length - 1];
+  if (copy?.id) return { url: drive(copy.id), label: '看成片' };
+  const rev = a.reviewFiles?.[a.reviewFiles.length - 1];
+  if (rev?.fileId) return { url: drive(rev.fileId), label: `看成片（審片第 ${rev.version} 版）` };
+  if (rev?.previewToken) return { url: `${window.location.origin}/v/${rev.previewToken}`, label: '看成片（預覽頁）' };
+  // 舊片（系統內上傳成片之前）只有一個雲端連結：是單一檔案就當成片，是資料夾就照實講
+  if (a.url) {
+    if (/drive\.google\.com\/file\//.test(a.url)) return { url: a.url, label: '看成片' };
+    return { url: a.url, label: a.stage === 'raw' ? '素材資料夾（還沒有成片）' : '雲端資料夾' };
+  }
+  return null;
 }
 
 const STATUS_ORDER: PostStatus[] = ['draft', 'pending', 'scheduled', 'published'];
@@ -30,7 +53,7 @@ const STATUS_STYLE: Record<PostStatus, { active: string; idle: string; text: str
   published: { active: 'bg-green-600 text-white border-green-600',     idle: 'bg-white text-gray-500 border-black/10 hover:border-green-300',  text: 'text-green-600' },
 };
 
-export default function PostDetailModal({ post, vendor, asset, onClose, assets, vendors }: PostDetailModalProps) {
+export default function PostDetailModal({ post, vendor, asset, onClose, assets, vendors, onOpenInPosts }: PostDetailModalProps) {
   const editable = !!assets && !!vendors;
   // 舊版是一串三元式，未知的 status 會落到「草稿」樣式而不會爆；改用查表後要自己補回這個保護，
   // 不然萬一哪天寫進非預期的狀態值，整個 modal 會白畫面
@@ -54,6 +77,11 @@ export default function PostDetailModal({ post, vendor, asset, onClose, assets, 
             <div className="min-w-0">
               <h3 className="font-bold text-lg serif leading-normal line-clamp-3 break-words">{post.title}</h3>
               <p className="text-sm text-gray-500 font-medium">{vendor?.name || '未知廠商'}</p>
+              {onOpenInPosts && post.id && (
+                <button type="button" onClick={() => onOpenInPosts(post.id!)} className="mt-1 text-[13px] font-bold text-[#5A5A40] underline underline-offset-2">
+                  到貼文管理編輯 →
+                </button>
+              )}
             </div>
           </div>
           <button
@@ -206,21 +234,24 @@ export default function PostDetailModal({ post, vendor, asset, onClose, assets, 
                     <p className="text-base font-bold line-clamp-2 break-words">{asset.title}</p>
                     <p className="text-[13px] text-gray-500">
                       ID: {asset.id?.slice(-6)}
-                      {editable && <span className={isClientApproved(asset) ? 'text-green-600 ml-1.5' : 'text-orange-500 ml-1.5'}>・{isClientApproved(asset) ? '素材已審核' : '素材未審核'}</span>}
+                      {editable && <span className={isClientApproved(asset) ? 'text-green-600 ml-1.5' : 'text-orange-500 ml-1.5'}>・{asset.stage === 'raw' ? '還在剪' : isClientApproved(asset) ? '成片已審核' : '成片待業主審'}</span>}
                     </p>
                   </div>
                 </div>
-                {asset.url && (
-                  <a
-                    href={asset.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label="開啟關聯素材"
-                    className="p-2 shrink-0 text-[#5A5A40] hover:bg-[#5A5A40]/10 rounded-xl transition-colors"
-                  >
-                    <ExternalLink size={18} />
-                  </a>
-                )}
+                {(() => {
+                  const link = finishedLink(asset);
+                  return link && (
+                    <a
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={link.label}
+                      className="shrink-0 flex items-center gap-1 px-3 py-2 text-[13px] font-bold text-[#5A5A40] bg-white border border-black/10 hover:bg-[#5A5A40]/10 rounded-xl transition-colors whitespace-nowrap"
+                    >
+                      {link.label} <ExternalLink size={14} />
+                    </a>
+                  );
+                })()}
               </div>
             </div>
           )}

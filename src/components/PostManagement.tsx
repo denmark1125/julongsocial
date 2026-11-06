@@ -60,9 +60,12 @@ interface PostManagementProps {
   /** 從社群日曆點橘色預排帶過來的預填；吃掉後要呼叫 onPrefillConsumed 清掉，否則關掉視窗會一直彈回來 */
   prefill?: PostPrefill | null;
   onPrefillConsumed?: () => void;
+  /** 從社群日曆跳過來：打開這篇的編輯視窗（等貼文資料到了才開），開完呼叫 onFocusConsumed */
+  focusPostId?: string | null;
+  onFocusConsumed?: () => void;
 }
 
-export default function PostManagement({ prefill, onPrefillConsumed }: PostManagementProps = {}) {
+export default function PostManagement({ prefill, onPrefillConsumed, focusPostId, onFocusConsumed }: PostManagementProps = {}) {
   // 共用即時資料層：整個 session 只訂閱一次，切分頁不再重讀。
   // ⚠️ posts 原本是 `orderBy('createdAt','desc')`，改成前端排序；
   //    實查過 327 篇貼文全部都有 createdAt（規則裡它是選填的，所以特地查過）。
@@ -178,6 +181,18 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
     setIsModalOpen(true);
     onPrefillConsumed?.();
   }, [prefill, onPrefillConsumed]);
+
+  useEffect(() => {
+    if (!focusPostId) return;
+    const p = posts.find(x => x.id === focusPostId);
+    if (!p) return; // 貼文資料還沒到，等下一次
+    const month = p.targetMonth || (p.scheduledAt ? p.scheduledAt.slice(0, 7) : '');
+    if (month) setSelectedMonth(month);
+    setEditingPost(p);
+    setFormData(p);
+    setIsModalOpen(true);
+    onFocusConsumed?.();
+  }, [focusPostId, posts, onFocusConsumed]);
 
   const postTypes = ['專業', '生活', '促銷', '知識', '活動', '教學'];
 
