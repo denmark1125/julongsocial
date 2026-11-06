@@ -51,13 +51,16 @@ interface ScheduleItem {
 }
 
 /** 一格的狀態，跟「我的剪輯任務」那一列同一個答案 */
-type CellKind = 'attached' | 'stock' | 'to_edit' | 'others' | 'none';
+type CellKind = 'attached' | 'stock' | 'to_edit' | 'internal' | 'others' | 'none';
 const CELL: Record<CellKind, { label: string; tone: 'editor' | 'waiting' | 'alert' | 'idle' }> = {
   attached: { label: '已有成片', tone: 'idle' },
   stock: { label: '有成片等排程', tone: 'idle' },
   to_edit: { label: '待剪', tone: 'editor' },
-  // 那天配到的是別人（內部或其他剪輯師）的片：不是沒片，只是不在他的清單上
-  others: { label: '已安排', tone: 'idle' },
+  // 那天配到的是別人的片：不是沒片，只是不在他的清單上。
+  // ⚠️ 以前兩種都寫「已安排」，剪輯師讀成「片好了、不用剪」（11-06 自然風：其實是內部剪輯、片還沒剪）。
+  //    講清楚是誰在剪，而且片還沒好
+  internal: { label: '內部剪輯中・不用你剪', tone: 'waiting' },
+  others: { label: '其他剪輯師負責', tone: 'idle' },
   none: { label: '還沒有片', tone: 'alert' },
 };
 
@@ -76,7 +79,7 @@ const TONE_CHIP: Record<string, string> = {
 };
 
 function SupplyIcon({ kind, className }: { kind: CellKind; className?: string }) {
-  const Icon = { attached: CheckCircle2, stock: CheckCircle2, to_edit: Scissors, others: CheckCircle2, none: AlertTriangle }[kind];
+  const Icon = { attached: CheckCircle2, stock: CheckCircle2, to_edit: Scissors, internal: Clock, others: Clock, none: AlertTriangle }[kind];
   return <Icon className={className} />;
 }
 
@@ -187,7 +190,10 @@ export default function EditorSchedule({ userProfile, onOpenVendorQueue }: {
     const map = new Map<string, CellKind>();
     queue.settled.forEach(r => map.set(r.key, 'attached'));
     queue.stocked.forEach(r => map.set(r.key, 'stock'));
-    queue.othersKeys.forEach(k => map.set(k, 'others'));
+    queue.othersKeys.forEach(k => {
+      const row = all.rows.find(r => r.key === k);
+      map.set(k, row?.asset?.internalEdit ? 'internal' : 'others');
+    });
     queue.rows.forEach(r => {
       if (r.kind === 'to_edit') map.set(r.key, 'to_edit');
       else if (r.kind === 'no_material') map.set(r.key, 'none');
