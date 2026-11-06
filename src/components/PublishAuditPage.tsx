@@ -260,26 +260,98 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
         )}
       </div>
 
-      {report && (
-        <div className="bg-white rounded-2xl border border-black/5 shadow-sm px-5 py-4 space-y-3">
-          <p className="text-[13px] font-bold text-gray-400">
-            18:00 日報{report.reportSentAt ? `（${format(parseISO(report.reportSentAt), 'HH:mm')} 已推 LINE）` : ''}
-          </p>
-          {report.text && <pre className="whitespace-pre-wrap text-[14px] leading-relaxed font-sans text-gray-700">{report.text}</pre>}
-          {!!report.unscheduled?.length && (
-            <div className="space-y-1.5">
-              <p className="text-[13px] font-bold text-gray-500">❓ 準時 IP 上系統沒排的貼文（可能是業主自己發的）</p>
-              {report.unscheduled.map((u, i) => (
-                <div key={i} className="flex items-center gap-2 text-[13px] text-gray-600 min-w-0">
-                  <span className="font-bold whitespace-nowrap">{vendorName(u.vendorId)} {u.platform}</span>
-                  <span className="tabular-nums whitespace-nowrap text-gray-400">{format(parseISO(u.publishedAt), 'MM/dd HH:mm')}</span>
-                  <span className="truncate min-w-0">{u.caption || '（沒有文案）'}</span>
-                  {u.permalink && <a href={u.permalink} target="_blank" rel="noreferrer" className="shrink-0 text-gray-400 hover:text-[#5A5A40]"><ExternalLink size={13} /></a>}
-                </div>
-              ))}
+      {report && <DailyReportCard report={report} vendorName={vendorName} />}
+    </div>
+  );
+}
+
+/** 日報文字（跟 LINE 同一份）→ 一列一列的小卡。舊格式（沒有「｜」）就把最後一個」後面當狀態 */
+function parseReportLine(line: string) {
+  const m = line.match(/^(\p{Extended_Pictographic}️?|・)\s*/u);
+  const icon = m ? m[1] : '';
+  const body = m ? line.slice(m[0].length) : line;
+  let [main, ...status] = body.split('｜');
+  if (!status.length) {
+    const i = main.lastIndexOf('」');
+    if (i > 0 && i < main.length - 1) { status = [main.slice(i + 1).trim()]; main = main.slice(0, i + 1); }
+  }
+  return { icon, main, status };
+}
+
+function pillTone(s: string) {
+  if (/❌/u.test(s)) return 'bg-red-50 text-red-700';
+  if (/⚠️|⏰|❓/u.test(s)) return 'bg-amber-50 text-amber-700';
+  if (/✓|✅/u.test(s)) return 'bg-green-50 text-green-700';
+  return 'bg-gray-50 text-gray-600';
+}
+
+function DailyReportCard({ report, vendorName }: { report: Report; vendorName: (id: string) => string }) {
+  const lines = (report.text || '').split('\n').map(l => l.trim()).filter(Boolean);
+  const title = lines.shift() || '18:00 日報';
+  const problems: string[] = []; const tonight: string[] = [];
+  let okCount = 0; let inTonight = false;
+  for (const l of lines) {
+    if (l.startsWith('詳情：') || l.startsWith('❓ 準時 IP 有')) continue;
+    if (l.startsWith('🌙')) { inTonight = true; continue; }
+    if (l === '沒有要注意的') continue;
+    const ok = l.match(/^✅ 其他 (\d+) 支正確/);
+    if (ok) { okCount = Number(ok[1]); continue; }
+    (inTonight ? tonight : problems).push(l);
+  }
+  const unscheduled = report.unscheduled || [];
+  const row = (l: string, i: number) => {
+    const r = parseReportLine(l);
+    return (
+      <li key={i} className="flex items-start gap-2 py-2">
+        <span className="w-5 shrink-0 text-center">{r.icon === '・' ? '' : r.icon}</span>
+        <div className="min-w-0 flex-1 space-y-1">
+          <p className="text-[14px] text-gray-800">{r.main}</p>
+          {r.status.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {r.status.map((s, j) => <span key={j} className={`text-[12px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap ${pillTone(s)}`}>{s.trim()}</span>)}
             </div>
           )}
         </div>
+      </li>
+    );
+  };
+  return (
+    <div className="bg-white rounded-2xl border border-black/5 shadow-sm px-5 py-4 space-y-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-[15px] font-bold text-gray-700">{title.replace(/^📋\s*/u, '')}</p>
+        {report.reportSentAt && <span className="text-[12px] text-gray-400 whitespace-nowrap">{format(parseISO(report.reportSentAt), 'HH:mm')} 已推 LINE</span>}
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {([['要注意', problems.length, problems.length ? 'text-red-600' : 'text-gray-300'], ['正確', okCount, 'text-green-700'], ['今晚待發', tonight.length, 'text-gray-600']] as const).map(([l, v, c]) => (
+          <div key={l} className="rounded-xl bg-gray-50 px-3 py-2">
+            <p className="text-[12px] font-bold text-gray-400 whitespace-nowrap">{l}</p>
+            <p className={`text-xl font-bold tabular-nums ${c}`}>{v}</p>
+          </div>
+        ))}
+      </div>
+      {problems.length > 0 && <ul className="divide-y divide-black/5">{problems.map(row)}</ul>}
+      {tonight.length > 0 && (
+        <div>
+          <p className="text-[13px] font-bold text-gray-400">🌙 今晚待發</p>
+          <ul className="divide-y divide-black/5">{tonight.map(row)}</ul>
+        </div>
+      )}
+      {unscheduled.length > 0 && (
+        <details className="rounded-xl bg-gray-50 px-3 py-2">
+          <summary className="cursor-pointer text-[13px] text-gray-500">
+            另外有 {unscheduled.length} 則系統沒排的貼文（多半是業主自己發的，不用處理）— 點開看
+          </summary>
+          <div className="mt-2 space-y-1.5">
+            {unscheduled.map((u, i) => (
+              <div key={i} className="flex items-center gap-2 text-[13px] text-gray-600 min-w-0">
+                <span className="font-bold whitespace-nowrap">{vendorName(u.vendorId)} {u.platform}</span>
+                <span className="tabular-nums whitespace-nowrap text-gray-400">{format(parseISO(u.publishedAt), 'MM/dd HH:mm')}</span>
+                <span className="truncate min-w-0">{u.caption || '（沒有文案）'}</span>
+                {u.permalink && <a href={u.permalink} target="_blank" rel="noreferrer" className="shrink-0 text-gray-400 hover:text-[#5A5A40]"><ExternalLink size={13} /></a>}
+              </div>
+            ))}
+          </div>
+        </details>
       )}
     </div>
   );
