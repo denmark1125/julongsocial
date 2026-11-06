@@ -462,6 +462,8 @@ export interface Post {
   publishAudit?: PublishAudit;
   /** 這支是另外設計的封面（單支特例）→ 不做封面檢查 */
   customCover?: boolean;
+  /** 系統確認各平台都發出去後自動改成已發布（2026-11-05）；missingConfirm＝當時內部檢核或業主審核沒勾 */
+  autoPublished?: { at: string; platforms: string[]; missingConfirm: boolean };
   /**
    * 封面檢查（rpa/cover_check.py 在這台電腦用 ffmpeg 算的，正式站沒有 ffmpeg）。key＝平台。
    * status：ok＝封面是第一幀；mismatch＝不是（推 LINE）；review＝封面另外設計的 IP，請目視；skipped／error

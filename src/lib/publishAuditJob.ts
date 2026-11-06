@@ -146,6 +146,7 @@ export async function runPublishAudit(deps: JobDeps): Promise<JobResult> {
     for (const p of open) {
       const v = vmap.get(p.vendorId);
       if (!v?.fbPageId) continue; // 還沒設定粉專的 IP 不稽核（畫面會提示去設定）
+      const fresh: Record<string, PlatformAudit> = {};
       for (const pf of (p.platforms || []) as string[]) {
         if (!AUDITABLE_PLATFORMS.includes(pf as any)) continue;
         const prev: PlatformAudit | undefined = p.publishAudit?.[pf];
@@ -161,6 +162,7 @@ export async function runPublishAudit(deps: JobDeps): Promise<JobResult> {
           audit = auditOne({ post: p, platform: pf, strictTiming: v.strict, live, now, claimed, previous: prev });
         }
         if (audit.livePostId) claimed.add(audit.livePostId);
+        fresh[pf] = audit;
         result.checked++;
 
         if (shouldAlert(audit)) {
@@ -178,6 +180,7 @@ export async function runPublishAudit(deps: JobDeps): Promise<JobResult> {
           if (!dryRun) await db.collection('posts').doc(p.id).update({ [`publishAudit.${pf}`]: stripUndefined(audit) });
         }
       }
+      await autoMarkPublished(db, p, v, fresh, now, !!dryRun);
     }
 
     if (alertLines.length) {
@@ -459,6 +462,7 @@ async function auditTikTok(db: any, vmap: Map<string, VendorInfo>, tiktok: Recor
     }
     const changed = !prev || prev.status !== audit.status || prev.livePostId !== audit.livePostId || prev.alertedAt !== audit.alertedAt || prev.forScheduledAt !== audit.forScheduledAt;
     if (changed && !dryRun) await p.ref.update({ 'publishAudit.TikTok': stripUndefined(audit) });
+    await autoMarkPublished(db, p, v, { TikTok: audit }, now, dryRun);
   }
   return lines;
 }
@@ -521,4 +525,44 @@ async function coverAlerts(db: any, vmap: Map<string, VendorInfo>, now: Date, dr
   }
   if (!lines.length) return null;
   return ['🖼️ 封面不是影片第一幀', ...lines, '請到 IG／FB 確認並更換封面（另外設計的封面可在貼文標「自訂封面」）'].join('\n');
+}
+
+/**
+ * 發布成功自動改「已發布」（2026-11-05 使用者要求）：隔天上班看到還停在藍色（已排程）的，就是有問題的。
+ * - 平台確認發出去（正確，或有發但時間跟排程不同）→ 勾 publishedPlatforms
+ * - 系統查得到的平台（IG/FB 有設粉專、TikTok 有設帳號）全部確認了 → 狀態改 published（綠色）
+ * - 查不到的平台（YouTube、LINE…）不擋（使用者決定），稽核頁會寫沒檢查
+ * - 沒勾內部檢核／業主審核也照改（影片已經上線，狀態要反映真實），記 autoPublished.missingConfirm 給稽核頁標示
+ * - 文案對不上、疑似發錯帳號 → 不算發成功，留給人處理
+ */
+const POSTED_STATUSES = ['ok', 'time_mismatch'];
+
+export function checkablePlatforms(platforms: string[] | undefined, v: { fbPageId?: string; tiktokBsId?: string }): string[] {
+  return (platforms || []).filter(pf => (pf === 'IG' || pf === 'FB') ? !!v.fbPageId : pf === 'TikTok' ? !!v.tiktokBsId : false);
+}
+
+/** 要寫回貼文的欄位（純函式，給測試用）；不用改回傳 null */
+export function publishMarkUpdate(p: any, v: { fbPageId?: string; tiktokBsId?: string }, fresh: Record<string, PlatformAudit>, now: Date): Record<string, any> | null {
+  const checkable = checkablePlatforms(p.platforms, v);
+  if (!checkable.length) return null;
+  const posted = checkable.filter(pf => {
+    const a: PlatformAudit | undefined = fresh[pf] ?? p.publishAudit?.[pf];
+    return !!a && a.forScheduledAt === p.scheduledAt && POSTED_STATUSES.includes(a.status);
+  });
+  const before: string[] = p.publishedPlatforms || [];
+  const merged = [...new Set([...before, ...posted])];
+  const upd: Record<string, any> = {};
+  if (merged.length !== before.length) upd.publishedPlatforms = merged;
+  if (p.status !== 'published' && checkable.every(pf => posted.includes(pf))) {
+    upd.status = 'published';
+    upd.autoPublished = { at: now.toISOString(), platforms: checkable, missingConfirm: !p.internalConfirmed || !p.clientConfirmed };
+  }
+  return Object.keys(upd).length ? upd : null;
+}
+
+async function autoMarkPublished(db: any, p: any, v: VendorInfo, fresh: Record<string, PlatformAudit>, now: Date, dryRun: boolean): Promise<boolean> {
+  const upd = publishMarkUpdate(p, v, fresh, now);
+  if (!upd) return false;
+  if (!dryRun) await db.collection('posts').doc(p.id).update(upd);
+  return true;
 }

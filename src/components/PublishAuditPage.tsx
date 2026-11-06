@@ -196,6 +196,8 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                   <span className="text-[15px] font-bold whitespace-nowrap">{v?.name || '（未知 IP）'}</span>
                   {v?.strictTiming && <span className="text-[12px] px-2 py-0.5 rounded-full bg-[#5A5A40]/10 text-[#5A5A40] font-bold whitespace-nowrap">準時</span>}
                   {p.status === 'draft' && <span className="text-[12px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 font-bold whitespace-nowrap" title="系統裡這則還是草稿，一樣會稽核">草稿</span>}
+                  {p.autoPublished && <span className="text-[12px] px-2 py-0.5 rounded-full bg-green-50 text-green-700 font-bold whitespace-nowrap" title="各平台都確認發出去，系統自動改成已發布">系統確認已發布</span>}
+                  {p.autoPublished?.missingConfirm && <span className="text-[12px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-bold whitespace-nowrap" title="影片已經上線，但系統裡內部檢核或業主審核沒有勾">發了但沒勾審核</span>}
                   <span className="text-[14px] text-gray-500 truncate min-w-0">{p.title}</span>
                 </div>
                 {cells.some(c => precheck.has(`${p.id}|${c.pf}`)) && (
