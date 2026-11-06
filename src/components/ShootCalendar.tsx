@@ -226,7 +226,7 @@ export default function ShootCalendar() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div className="space-y-1">
+        <div className="hidden md:block space-y-1">
           <h2 className="text-2xl font-bold serif text-[#5A5A40]">拍攝行事曆</h2>
           <p className="text-sm text-gray-500">TimeTree 登記的拍攝會自動出現；也可以點日期直接約</p>
         </div>

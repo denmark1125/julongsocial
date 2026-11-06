@@ -627,7 +627,7 @@ export default function VendorManagement() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div className="space-y-1">
+        <div className="hidden md:block space-y-1">
           <h2 className="text-2xl font-bold serif text-[#5A5A40]">廠商管理</h2>
           <p className="text-sm text-gray-500">管理您的 IP 帳號與客戶廠商資料</p>
         </div>

@@ -385,7 +385,7 @@ export default function UserManagement({ currentUserRole, mode = 'users', onOpen
 
       {activeSubTab === 'users' ? (
         <div className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
-          <table className="w-full text-left border-collapse">
+          <table className="mobile-cards w-full text-left border-collapse">
             <thead>
               <tr className="bg-[#F5F5F0] border-b border-black/5">
                 <th className="p-4 text-xs font-bold text-gray-500 uppercase tracking-wider">使用者</th>
@@ -420,9 +420,9 @@ export default function UserManagement({ currentUserRole, mode = 'users', onOpen
                         <span className="font-medium">{user.displayName || '未設定名稱'}</span>
                       </div>
                     </td>
-                    <td className="p-4 text-sm text-gray-600 font-mono">{user.username}</td>
-                    <td className="p-4 text-sm text-gray-600">{user.email || '-'}</td>
-                    <td className="p-4">
+                    <td data-label="帳號" className="p-4 text-sm text-gray-600 font-mono">{user.username}</td>
+                    <td data-label="電子郵件" className="p-4 text-sm text-gray-600">{user.email || '-'}</td>
+                    <td data-label="LINE" className="p-4">
                       {user.lineUserId ? (
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[13px] font-bold bg-green-100 text-green-700 border border-green-200">
                           已綁定 LINE
@@ -433,7 +433,7 @@ export default function UserManagement({ currentUserRole, mode = 'users', onOpen
                         </span>
                       )}
                     </td>
-                    <td className="p-4">
+                    <td data-label="權限" className="p-4">
                       <select 
                         value={user.role}
                         onChange={(e) => handleUpdateRole(user.uid, e.target.value as UserRole)}
@@ -449,7 +449,7 @@ export default function UserManagement({ currentUserRole, mode = 'users', onOpen
                         <option value="chairman" disabled={currentUserRole !== 'engineer'}>董事</option>
                       </select>
                     </td>
-                    <td className="p-4">
+                    <td data-label="可存取廠商" className="p-4">
                       {user.role === 'editor' ? (
                         <div className="max-w-[240px]">
                           <p className="text-[13px] text-gray-400 mb-1">
@@ -471,7 +471,7 @@ export default function UserManagement({ currentUserRole, mode = 'users', onOpen
                       )}
                     </td>
                     {currentUserRole === 'engineer' && (
-                      <td className="p-4">
+                      <td data-label="校正欠片" className="p-4">
                         {user.role === 'engineer' ? (
                           <span className="text-xs text-gray-300">工程師預設可改</span>
                         ) : (
@@ -488,7 +488,7 @@ export default function UserManagement({ currentUserRole, mode = 'users', onOpen
                       </td>
                     )}
                     {currentUserRole === 'engineer' && (
-                      <td className="p-4">
+                      <td data-label="藏鏡人" className="p-4">
                         <label className="inline-flex items-center cursor-pointer">
                           <input
                             type="checkbox"
@@ -500,7 +500,7 @@ export default function UserManagement({ currentUserRole, mode = 'users', onOpen
                         </label>
                       </td>
                     )}
-                    <td className="p-4">
+                    <td data-label="操作" className="p-4">
                       <div className="flex items-center space-x-2">
                         <button
                           onClick={() => setResettingUid(user.uid)}

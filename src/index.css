@@ -126,3 +126,16 @@
     height: 100dvh !important;
   }
 }
+
+/* 手機：表格改成一列一張卡（11-06）。<table class="mobile-cards">，每格加 data-label 當小標 */
+@media (max-width: 767px) {
+  .mobile-cards thead { display: none; }
+  .mobile-cards, .mobile-cards tbody, .mobile-cards tr, .mobile-cards td { display: block; width: 100%; }
+  .mobile-cards tr { padding: 12px 16px; }
+  .mobile-cards td { padding: 4px 0 !important; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .mobile-cards td[data-label]::before {
+    content: attr(data-label);
+    flex: none; width: 84px;
+    font-size: 12px; font-weight: 700; color: #9ca3af;
+  }
+}

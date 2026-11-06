@@ -93,7 +93,7 @@ export default function LoginActivity() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
-        <div className="space-y-1">
+        <div className="hidden md:block space-y-1">
           <h2 className="text-2xl font-bold serif text-[#5A5A40]">登入紀錄</h2>
           <p className="text-sm text-gray-500">每個帳號登入幾次、什麼時候登入、最近一次使用。只有工程師看得到。</p>
         </div>

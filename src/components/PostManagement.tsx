@@ -526,7 +526,7 @@ export default function PostManagement({ prefill, onPrefillConsumed }: PostManag
       </div>
 
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div className="space-y-1">
+        <div className="hidden md:block space-y-1">
           <h2 className="text-2xl font-bold serif text-[#5A5A40]">貼文管理</h2>
           <p className="text-base text-gray-500">追蹤所有貼文的發布狀態與成效</p>
         </div>

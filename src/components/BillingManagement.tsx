@@ -364,7 +364,7 @@ export default function BillingManagement() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
+        <div className="hidden md:block">
           <h2 className="text-2xl font-bold serif">帳務管理</h2>
           <p className="text-sm text-gray-500">
             {scope === 'receivable' ? '管理廠商合約與每月收款進度' : '剪輯師計件費用的請款與對帳'}

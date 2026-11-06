@@ -90,7 +90,7 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
-        <div className="space-y-1">
+        <div className="hidden md:block space-y-1">
           <h2 className="text-2xl font-bold serif text-[#5A5A40]">發布稽核</h2>
           <p className="text-sm text-gray-500">排定時間一到，系統自動去 IG/FB 看有沒有發、發到哪個帳號、時間對不對；TikTok 由電腦上的機器人檢查（晚上的片隔天早上確認）。</p>
         </div>

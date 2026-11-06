@@ -63,7 +63,14 @@ export default function CalendarView({ onPlanPost }: CalendarViewProps = {}) {
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   // 一律先開月曆。曾經改成「手機自動進清單」，但月曆的價值就是一眼看完整個月，
   // 自動跳掉等於把那個價值拿走；要清單自己切，切換鈕永遠在。
-  const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
+  // 11-06：預設仍是月曆，但記住這台裝置上次選的（手機同事切到清單後，下次打開不用再切）
+  const [viewMode, setViewModeState] = useState<'calendar' | 'list'>(() => {
+    try { return localStorage.getItem('calendarViewMode') === 'list' ? 'list' : 'calendar'; } catch { return 'calendar'; }
+  });
+  const setViewMode = (m: 'calendar' | 'list') => {
+    setViewModeState(m);
+    try { localStorage.setItem('calendarViewMode', m); } catch { /* 私密模式存不了就算了 */ }
+  };
   const [isTrackingModalOpen, setIsTrackingModalOpen] = useState(false);
   const [selectedVendorId, setSelectedVendorId] = useState<string>('all');
 

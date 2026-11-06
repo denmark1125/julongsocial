@@ -105,6 +105,16 @@ export default function AssetDatabase() {
   const [newPostPick, setNewPostPick] = useState<string | null>(null);
   // 手機版：導出剪輯清單／庫存總覽收進「⋯」選單（11-06 使用者：手機一打開滿滿不能操作的資訊）
   const [moreOpen, setMoreOpen] = useState(false);
+  // 手機版素材卡預設收成一小張（11-06 使用者：一張卡佔一整個版面）；點「更多」才展開成完整卡片
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches);
+  useEffect(() => {
+    const m = window.matchMedia('(max-width: 767px)');
+    const on = () => setIsMobile(m.matches);
+    m.addEventListener('change', on);
+    return () => m.removeEventListener('change', on);
+  }, []);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const toggleExpanded = (id: string) => setExpandedIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const [reviewNotes, setReviewNotes] = useState<Record<string, { text: string; updatedAt: string; updatedByName: string }>>({});
   const [noteAsset, setNoteAsset] = useState<Asset | null>(null);
   // 改片名。走後端 API：雲端那一組毛片資料夾要跟著改名，前端沒有 Drive 權限。
@@ -762,6 +772,52 @@ ${after}`)) return;
     }).join(' | ');
   };
 
+
+  /** 手機的精簡素材卡：片名、IP、目前進度、審核鈕、複製預覽；其他功能點「更多」展開完整卡 */
+  const FLOW_LABEL: Record<string, { text: string; tone: string }> = {
+    to_edit: { text: '剪輯中', tone: 'bg-gray-100 text-gray-600' },
+    revising: { text: '業主要改・修改中', tone: 'bg-amber-50 text-amber-700' },
+    client_review: { text: '等業主審片', tone: 'bg-orange-50 text-orange-700' },
+    to_upload: { text: '業主已過・待上傳', tone: 'bg-sky-50 text-sky-700' },
+    ready: { text: '成片完成', tone: 'bg-green-50 text-green-700' },
+  };
+  const compactCard = (asset: Asset) => {
+    const used = effStatus(asset) === 'used';
+    const flow = asset.type === 'video' && !asset.voidedAt ? FLOW_LABEL[deriveFlowStage(asset)] : undefined;
+    return (
+      <div key={asset.id} className={cn('bg-white rounded-2xl border border-black/5 shadow-sm px-4 py-3 space-y-2', used && 'opacity-60')}>
+        <div className="flex items-center gap-2 text-[12px] min-w-0">
+          <span className="font-bold text-[#5A5A40] truncate">{getVendorName(asset.vendorId)}</span>
+          {flow && <span className={cn('shrink-0 px-2 py-0.5 rounded-full font-bold whitespace-nowrap', flow.tone)}>{flow.text}</span>}
+          {asset.voidedAt && <span className="shrink-0 px-2 py-0.5 rounded-full font-bold bg-red-50 text-red-600">已作廢</span>}
+          {used && !asset.voidedAt && <span className="shrink-0 px-2 py-0.5 rounded-full font-bold bg-gray-100 text-gray-500">已使用</span>}
+          {asset.isUrgent && <Flame size={13} className="shrink-0 text-red-500" />}
+          {asset.filmingDate && <span className="ml-auto shrink-0 text-gray-400 tabular-nums">拍 {asset.filmingDate.slice(5).replace('-', '/')}</span>}
+        </div>
+        <p className="text-[15px] font-bold leading-snug line-clamp-2">{asset.title}</p>
+        <div className="flex items-center gap-2 flex-wrap">
+          {asset.stage === 'raw' ? (
+            <button onClick={() => setConvertingAsset(asset)} className="shrink-0 whitespace-nowrap bg-[#5A5A40] text-white px-3 py-1.5 rounded-lg text-[13px] font-bold">
+              轉為成片
+            </button>
+          ) : (
+            <button
+              onClick={() => toggleApproval(asset)}
+              className={cn('shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-[13px] font-bold',
+                isClientApproved(asset) ? 'bg-green-100 text-green-700' : 'bg-orange-50 text-orange-700 border border-orange-200')}
+            >
+              {isClientApproved(asset) ? '✓ 已審核' : '待審核'}
+            </button>
+          )}
+          <PreviewLinkButton asset={asset} />
+          <button onClick={() => toggleExpanded(asset.id!)} className="ml-auto shrink-0 flex items-center gap-1 text-[13px] font-bold text-gray-400 px-2 py-1.5">
+            更多 <MoreHorizontal size={15} />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 md:gap-4">
@@ -1143,7 +1199,7 @@ ${after}`)) return;
 
           {/* Asset Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-6">
-            {filteredAssets.map((asset) => (
+            {filteredAssets.map((asset) => isMobile && !expandedIds.has(asset.id!) ? compactCard(asset) : (
           <div 
             key={asset.id} 
             className={cn(
@@ -1437,6 +1493,9 @@ ${after}`)) return;
                   )}
                 </div>
                 <div className="flex items-center space-x-2">
+                  {isMobile && (
+                    <button onClick={() => toggleExpanded(asset.id!)} className="text-[13px] font-bold text-gray-400 px-2 py-1">收合</button>
+                  )}
                   {/* 作廢跟封存並排，但語意完全不同：封存＝暫時不用、仍可請款；作廢＝這支不該存在、不請款不算庫存 */}
                   <button
                     onClick={() => toggleVoid(asset)}

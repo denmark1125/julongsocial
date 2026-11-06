@@ -231,7 +231,7 @@ export default function ShootBookings({ onOpenTool }: { onOpenTool?: (tab: 'airD
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div className="space-y-1">
+        <div className="hidden md:block space-y-1">
           <h2 className="text-2xl font-bold serif text-[#5A5A40]">製作進度</h2>
           <p className="text-sm text-gray-500">從「還要再拍幾支」一路看到「這支片現在卡在誰手上」，同一條產線</p>
           <p className="text-[13px] text-gray-400">拍完只要照平常習慣把素材上傳到「素材資料庫」，這裡的預約會自動標記完成，不用多跑一步</p>
