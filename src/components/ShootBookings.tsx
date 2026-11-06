@@ -13,7 +13,7 @@ import { Vendor, Asset, Post, ShootBooking, BookingReason, UserProfile, DeficitE
 import { useLiveCollection } from '../lib/liveData';
 import { buildDeficitRows, DeficitSeverity as Severity } from '../lib/vendorDeficitRows';
 import { getContractTargets, getDeficitBreakdown, getEffectiveMonthlyTarget, getOwedVideoCount, getAvailableVideoAssets, hasVideoTrackingScope, isVendorTrackedInMonth, getDeliveredVideosInMonth } from '../lib/vendorStatus';
-import { Film, Plus, Check, CalendarClock, AlertTriangle, Pencil, X, Trash2 } from 'lucide-react';
+import { Film, Plus, Check, CalendarClock, AlertTriangle, Pencil, X, Trash2, MoreHorizontal } from 'lucide-react';
 import ProductionFlowBoard from './ProductionFlowBoard';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -47,6 +47,16 @@ export default function ShootBookings({ onOpenTool }: { onOpenTool?: (tab: 'airD
   const posts = useLiveCollection<Post>('posts');
   const bookings = useLiveCollection<ShootBooking>('shootBookings');
   const [me, setMe] = useState<UserProfile | null>(null);
+  // 手機版卡片收成正方形、一排兩張（11-06 使用者）；點「⋯」或約時間等操作才展開完整卡
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches);
+  useEffect(() => {
+    const m = window.matchMedia('(max-width: 767px)');
+    const on = () => setIsMobile(m.matches);
+    m.addEventListener('change', on);
+    return () => m.removeEventListener('change', on);
+  }, []);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const toggleExpanded = (id: string) => setExpandedIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   const [openPanel, setOpenPanel] = useState<{ vendorId: string; type: PanelType } | null>(null);
   const [pendingReason, setPendingReason] = useState<BookingReason | null>(null);
@@ -254,12 +264,43 @@ export default function ShootBookings({ onOpenTool }: { onOpenTool?: (tab: 'airD
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-2 md:grid-cols-2 xl:grid-cols-3 gap-2.5 md:gap-6">
         {rows.map(row => {
           const s = SEV_STYLES[row.sev];
           const isOpen = openPanel?.vendorId === row.vendor.id;
+          if (isMobile && !isOpen && !expandedIds.has(row.vendor.id!)) {
+            return (
+              <div key={row.vendor.id} className="aspect-square bg-white rounded-2xl border border-black/5 shadow-sm overflow-hidden flex flex-col min-w-0">
+                <div className={cn('h-1 shrink-0', s.bar)} />
+                <div className="p-3 flex-1 flex flex-col gap-1.5 min-h-0 [&>*]:shrink-0">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <span className="text-[15px] font-bold truncate">{row.vendor.name}</span>
+                    <span className={cn('ml-auto shrink-0 whitespace-nowrap px-1.5 py-0.5 rounded-full text-[11px] font-bold', s.chip)}>{s.label}</span>
+                  </div>
+                  <p className="text-[12px] leading-tight text-gray-400 truncate">
+                    {row.frozenThisMonth ? (row.isEnded ? '已終止' : '冷凍中') : `本月 ${row.delivered}/${row.target}`}・庫存 {row.stock}
+                  </p>
+                  <p className="flex items-baseline gap-1.5 leading-none">
+                    <span className="text-3xl font-bold leading-none">{row.owed}</span>
+                    <span className="text-[12px] text-gray-400">支還要再拍</span>
+                  </p>
+                  <p className={cn('mt-auto text-[12px] leading-tight truncate', row.overdue ? 'text-red-600 font-bold' : row.active ? 'text-gray-600' : 'text-gray-400')}>
+                    {row.active ? `${row.overdue ? '⚠ 逾期 ' : '📷 '}${row.active.scheduledDate.slice(5).replace('-', '/')}${row.active.startTime ? ` ${row.active.startTime}` : ''}` : '尚無預約'}
+                  </p>
+                  <div className="flex items-center gap-1">
+                    {row.active ? (
+                      <button onClick={() => setOpenPanel({ vendorId: row.vendor.id, type: 'done' })} className="flex-1 border border-black/10 rounded-lg py-1.5 text-[12px] font-bold">拍完了</button>
+                    ) : (
+                      <button onClick={() => setOpenPanel({ vendorId: row.vendor.id, type: 'book' })} className="flex-1 border border-black/10 rounded-lg py-1.5 text-[12px] font-bold">約時間</button>
+                    )}
+                    <button onClick={() => toggleExpanded(row.vendor.id!)} className="shrink-0 p-1.5 text-gray-400" aria-label="更多"><MoreHorizontal size={16} /></button>
+                  </div>
+                </div>
+              </div>
+            );
+          }
           return (
-            <div key={row.vendor.id} className="bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden">
+            <div key={row.vendor.id} className="col-span-2 md:col-span-1 bg-white rounded-[32px] border border-black/5 shadow-sm overflow-hidden">
               <div className={cn('h-1', s.bar)} />
               <div className="p-6 space-y-4">
                 <div className="flex justify-between items-start">
@@ -283,7 +324,12 @@ export default function ShootBookings({ onOpenTool }: { onOpenTool?: (tab: 'airD
                     </p>
                   </div>
                   {/* shrink-0 + nowrap 缺一不可：左邊那段說明文字一長，flex 就會把這顆 chip 壓扁成「落後待／補」兩行 */}
-                  <span className={cn('shrink-0 whitespace-nowrap px-3 py-1 rounded-full text-[13px] font-bold', s.chip)}>{s.label}</span>
+                  <div className="shrink-0 flex items-center gap-2">
+                    <span className={cn('shrink-0 whitespace-nowrap px-3 py-1 rounded-full text-[13px] font-bold', s.chip)}>{s.label}</span>
+                    {isMobile && expandedIds.has(row.vendor.id!) && (
+                      <button onClick={() => toggleExpanded(row.vendor.id!)} className="text-[13px] font-bold text-gray-400">收合</button>
+                    )}
+                  </div>
                 </div>
 
                 <div>
