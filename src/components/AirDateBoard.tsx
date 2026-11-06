@@ -5,7 +5,7 @@ import {
 } from 'date-fns';
 import { addDoc, collection, deleteField, doc, writeBatch } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import { buildAutoPost, buildTitledPost, isUntouchedAutoPost, movedSchedule } from '../lib/boardPosts';
+import { AUTO_POST_SOURCE, buildAutoPost, buildTitledPost, isUntouchedAutoPost, movedSchedule } from '../lib/boardPosts';
 import { Asset, DismissedHabit, ExtraSlot, PlannedSlotMove, Post, Vendor, deriveFlowStage } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import { buildCompanyQueue } from '../lib/companyQueue';
@@ -184,6 +184,37 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
   const place = async (assetId: string, target: Target) => {
     setSelectedId(null);
     setHoverKey(null);
+    if (assetId.startsWith(POST_KEY)) {
+      // 已掛片的貼文：拖到某天＝搬貼文日期；拖回左邊不行（片已經掛上了，要拆請到貼文管理）
+      if (target) { void insertAt(assetId, target.date); return; }
+      // 拖回左邊＝排錯了要撤銷。只有排上片日自己建、還沒人寫文案的那篇可以直接撤（刪掉那篇、片放回待排）；
+      // 小編寫過的貼文要到貼文管理處理，免得把別人的文案一起刪掉
+      const p = postById.get(assetId.slice(POST_KEY.length));
+      if (!p || !postMovable(p) || isPostLocked(p)) { if (p && isPostLocked(p) && postMovable(p)) toast.error('要撤銷先按「解鎖」'); return; }
+      if (p.createdFrom !== AUTO_POST_SOURCE || (p.content || '').trim()) { toast('這篇貼文小編已經動過了，要拿下來請到貼文管理'); return; }
+      if (!window.confirm(`把「${p.title}」退回待排？
+
+這篇系統建的待補貼文會刪掉，片放回左邊。`)) return;
+      setBusyId(assetId);
+      try {
+        const batch = writeBatch(db);
+        batch.delete(doc(db, 'posts', p.id!));
+        if (p.assetId && p.assetId !== 'to_be_added' && assets.some(x => x.id === p.assetId)) {
+          batch.update(doc(db, 'assets', p.assetId), {
+            status: 'available', usedInPostId: deleteField(),
+            plannedPostId: deleteField(), plannedAirDate: deleteField(), plannedAirSetAt: deleteField(),
+          });
+        }
+        await batch.commit();
+        toast.success('已退回待排');
+      } catch (error) {
+        console.error('退回失敗:', error);
+        toast.error('沒有存到，請再試一次');
+      } finally {
+        setBusyId(null);
+      }
+      return;
+    }
     const a = pending.find(x => x.id === assetId);
     if (!a) return;
     if (a.vendorId !== vendorId) return;
@@ -241,34 +272,64 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
     }
   };
 
+  /**
+   * 已經掛上成片的貼文（11-06 使用者：「一丟下去就鎖綠色我根本動不了」）。
+   * 業主通過的成片一排上去，useBoundPostSync 就把片掛到貼文上（片狀態變已使用），它就不在「待排的片」清單裡了；
+   * 以前畫成一行綠字、不能拖。現在畫成綠框卡片：草稿／待補中可以解鎖搬日子（搬的是貼文日期），
+   * 小編已排程／已發布的鎖死（要改請到貼文管理）。拖曳／點選用 'post:<id>' 跟毛片區分。
+   */
+  const POST_KEY = 'post:';
+  const todayStr = format(today, 'yyyy-MM-dd');
+  const attachedPosts = myVideoPosts.filter(p => p.assetId && p.assetId !== 'to_be_added');
+  const postMovable = (p: Post) => p.status !== 'scheduled' && p.status !== 'published' && postDay(p) >= todayStr;
+  const isPostLocked = (p: Post) => !postMovable(p) || !unlockedIds.has(POST_KEY + p.id);
+  const keyTitle = (key: string) => key.startsWith(POST_KEY)
+    ? postById.get(key.slice(POST_KEY.length))?.title || ''
+    : pending.find(x => x.id === key)?.title || '';
+  /** 那天除了 exceptKey 以外，有沒有已經排了片（毛片／成片、或已掛片的貼文） */
+  const dayOccupied = (dayStr: string, exceptKey: string) =>
+    mine.some(x => x.id !== exceptKey && placedDay(x) === dayStr)
+    || attachedPosts.some(p => POST_KEY + p.id !== exceptKey && postDay(p) === dayStr);
+
   /** 放到某一天（不是某篇貼文上）：那天有還沒配片的小編貼文就綁最早那篇，否則只記日子 */
   const placeOnDay = (assetId: string, d: Date) => {
     const dayStr = format(d, 'yyyy-MM-dd');
     // 那天已經排了別支片＝插隊：後面的片連同貼文往後順延（11-06 使用者）
-    if (mine.some(x => x.id !== assetId && placedDay(x) === dayStr)) { void insertAt(assetId, d); return; }
+    if (dayOccupied(dayStr, assetId)) { void insertAt(assetId, d); return; }
+    if (assetId.startsWith(POST_KEY)) { void insertAt(assetId, d); return; } // 空的日子：insertAt 沒有要順延的，等於直接搬
     const open = myVideoPosts
       .filter(p => postDay(p) === dayStr && isWaitingVideoPost(p, today) && !pending.some(x => x.id !== assetId && x.plannedPostId === p.id))
       .sort((x, y) => x.scheduledAt.localeCompare(y.scheduledAt));
     void place(assetId, { date: d, postId: open[0]?.id ?? null });
   };
 
-
   /**
    * 插隊：把這支排到 d，那天（以及被擠到的後面幾天）原本的片連同它的貼文往後順延到下一個發片日。
+   * key：毛片／成片的 assetId，或已掛片貼文的 'post:<id>'。
    * 算法在 lib/airInsert.ts（有測試）；這裡只負責確認＋一次寫入。
    * 小編已經在後台排好／已發布的貼文不搬（那天跳過）。
    */
-  const insertAt = async (assetId: string, d: Date) => {
+  const insertAt = async (key: string, d: Date) => {
     setSelectedId(null);
     setHoverKey(null);
-    const a = pending.find(x => x.id === assetId);
-    if (!a || !vendor || a.vendorId !== vendorId || d < today) return;
-    if (isLocked(a)) { toast.error(`「${a.title}」已經排好了，要換先按「解鎖」`); return; }
+    if (!vendor || d < today) return;
+    const movingPost = key.startsWith(POST_KEY) ? postById.get(key.slice(POST_KEY.length)) : undefined;
+    const a = movingPost ? undefined : pending.find(x => x.id === key);
+    if (!movingPost && (!a || a.vendorId !== vendorId)) return;
+    if (movingPost && (movingPost.vendorId !== vendorId || !postMovable(movingPost))) { toast.error('小編已經在後台排好／已發布，要改日期請到貼文管理'); return; }
+    if (movingPost && isPostLocked(movingPost)) { toast.error(`「${movingPost.title}」已經排好了，要換先按「解鎖」`); return; }
+    if (a && isLocked(a)) { toast.error(`「${a.title}」已經排好了，要換先按「解鎖」`); return; }
     const dayStr = format(d, 'yyyy-MM-dd');
+    if (movingPost && postDay(movingPost) === dayStr) return;
     const postOf = (x: Asset) => (x.plannedPostId ? postById.get(x.plannedPostId) : undefined);
-    const items = mine
-      .filter(x => x.id !== assetId && (placedDay(x) || '') >= dayStr)
-      .map(x => { const p = postOf(x); return { id: x.id!, day: placedDay(x)!, movable: !p || !['scheduled', 'published'].includes(p.status) }; });
+    const items = [
+      ...mine
+        .filter(x => x.id !== key && (placedDay(x) || '') >= dayStr)
+        .map(x => { const p = postOf(x); return { id: x.id!, day: placedDay(x)!, movable: !p || !['scheduled', 'published'].includes(p.status) }; }),
+      ...attachedPosts
+        .filter(p => POST_KEY + p.id !== key && postDay(p) >= dayStr)
+        .map(p => ({ id: POST_KEY + p.id, day: postDay(p), movable: postMovable(p) })),
+    ];
     // 發片日：用空的 posts 算，才不會因為那天已經有貼文就被藏起來
     const slotDays = listPlannedSlots({
       vendors: slotVendors([vendor]), moves: slotMoves, dismissed: dismissedHabits, extras: extraSlots, posts: [],
@@ -280,49 +341,99 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
     const blocked = new Set(myVideoPosts.map(postDay).filter(day => day > dayStr && openPost(day)));
     const plan = planInsert(dayStr, items, slotDays, blocked);
     if (plan.ok === false) { toast.error(plan.reason); return; }
-    const title = (id: string) => pending.find(x => x.id === id)?.title || '';
     const md = (day: string) => format(parseISO(day), 'M/d');
     if (plan.moves.length && !window.confirm(
-      `「${a.title}」插在 ${md(dayStr)}，後面的片連同貼文往後順延：\n\n` +
-      plan.moves.map(m => `・${title(m.id)}：${md(m.from)} → ${md(m.to)}`).join('\n') +
+      `「${keyTitle(key)}」插在 ${md(dayStr)}，後面的片連同貼文往後順延：\n\n` +
+      plan.moves.map(m => `・${keyTitle(m.id)}：${md(m.from)} → ${md(m.to)}`).join('\n') +
       '\n\n小編已經在後台排好的貼文不會動。確定嗎？')) return;
 
-    setBusyId(assetId);
+    setBusyId(key);
     try {
       const batch = writeBatch(db);
       const nowIso = new Date().toISOString();
+      /** 搬一篇已掛片的貼文：貼文日期＋那支片的上片日快照 */
+      const movePostTo = (p: Post, day: string) => {
+        batch.update(doc(db, 'posts', p.id!), movedSchedule(p, parseISO(day)));
+        if (p.assetId && p.assetId !== 'to_be_added' && assets.some(x => x.id === p.assetId)) {
+          batch.update(doc(db, 'assets', p.assetId), { plannedAirDate: day, plannedAirSetAt: nowIso });
+        }
+      };
       for (const m of plan.moves) {
+        if (m.id.startsWith(POST_KEY)) { const p = postById.get(m.id.slice(POST_KEY.length)); if (p) movePostTo(p, m.to); continue; }
         const x = pending.find(y => y.id === m.id)!;
         const p = postOf(x);
         if (p && p.status !== 'published' && p.status !== 'scheduled') batch.update(doc(db, 'posts', p.id!), movedSchedule(p, parseISO(m.to)));
         batch.update(doc(db, 'assets', m.id), { plannedAirDate: m.to, plannedAirSetAt: nowIso });
       }
-      // 插進來的這支：跟 place() 一樣——那天有小編貼文在等片就綁它，否則搬／建一篇系統貼文
-      const oldPost = postOf(a);
-      const oldAuto = isUntouchedAutoPost(oldPost) ? oldPost : undefined;
-      let nextPost = openPost(dayStr)?.id ?? null;
-      if (!nextPost) {
-        if (oldAuto) {
-          batch.update(doc(db, 'posts', oldAuto.id!), movedSchedule(oldAuto, d));
-          nextPost = oldAuto.id!;
-        } else {
-          const ref = doc(collection(db, 'posts'));
-          batch.set(ref, buildAutoPost(a, vendor, d, auth.currentUser?.uid || ''));
-          nextPost = ref.id;
+      if (movingPost) {
+        movePostTo(movingPost, dayStr);
+      } else if (a) {
+        // 插進來的這支：跟 place() 一樣——那天有小編貼文在等片就綁它，否則搬／建一篇系統貼文
+        const oldPost = postOf(a);
+        const oldAuto = isUntouchedAutoPost(oldPost) ? oldPost : undefined;
+        let nextPost = openPost(dayStr)?.id ?? null;
+        if (!nextPost) {
+          if (oldAuto) {
+            batch.update(doc(db, 'posts', oldAuto.id!), movedSchedule(oldAuto, d));
+            nextPost = oldAuto.id!;
+          } else {
+            const ref = doc(collection(db, 'posts'));
+            batch.set(ref, buildAutoPost(a, vendor, d, auth.currentUser?.uid || ''));
+            nextPost = ref.id;
+          }
+        } else if (oldAuto) {
+          batch.delete(doc(db, 'posts', oldAuto.id!));
         }
-      } else if (oldAuto) {
-        batch.delete(doc(db, 'posts', oldAuto.id!));
+        batch.update(doc(db, 'assets', key), { plannedAirDate: dayStr, plannedPostId: nextPost, plannedAirSetAt: nowIso });
       }
-      batch.update(doc(db, 'assets', assetId), { plannedAirDate: dayStr, plannedPostId: nextPost, plannedAirSetAt: nowIso });
       await batch.commit();
-      toast.success(plan.moves.length ? `已插在 ${md(dayStr)}，後面 ${plan.moves.length} 支往後順延` : `已排在 ${md(dayStr)}`);
-      setUnlockedIds(prev => { const next = new Set(prev); next.delete(assetId); return next; });
+      toast.success(plan.moves.length ? `已插在 ${md(dayStr)}，後面 ${plan.moves.length} 支往後順延` : `已改到 ${md(dayStr)}`);
+      setUnlockedIds(prev => { const next = new Set(prev); next.delete(key); return next; });
     } catch (error) {
       console.error('插隊失敗:', error);
       toast.error('沒有存到，請再試一次');
     } finally {
       setBusyId(null);
     }
+  };
+
+  /** 已掛上成片的貼文卡（綠框＝成片已掛上、還是草稿可以搬；藍＝小編已排程；灰綠＝已發布） */
+  const postChip = (p: Post) => {
+    const k = POST_KEY + p.id;
+    const movable = postMovable(p);
+    const locked = isPostLocked(p);
+    const selected = selectedId === k;
+    const label = p.status === 'published' ? '已發布' : p.status === 'scheduled' ? '小編已排程' : '成片已掛上・草稿';
+    return (
+      <div
+        key={k}
+        draggable={!locked && busyId !== k}
+        onDragStart={e => onDragStart(e, k)}
+        onDragEnd={() => setHoverKey(null)}
+        onClick={e => { e.stopPropagation(); if (!locked) setSelectedId(selected ? null : k); }}
+        title={p.status === 'scheduled' ? `${p.title}（小編已在後台排好，要改日期請到貼文管理）` : p.title}
+        className={[
+          'rounded-lg px-2 py-1 text-left select-none border-2',
+          p.status === 'published' ? 'border-gray-200 bg-gray-50 text-gray-500'
+            : p.status === 'scheduled' ? 'border-blue-300 bg-blue-50 text-blue-900'
+              : 'border-emerald-500 bg-emerald-50 text-emerald-950',
+          locked ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
+          selected ? 'ring-2 ring-[#5A5A40]' : '',
+          busyId === k ? 'opacity-40' : '',
+        ].join(' ')}
+      >
+        <div className={`flex items-center gap-0.5 text-[11px] font-bold whitespace-nowrap ${p.status === 'scheduled' ? 'text-blue-700' : p.status === 'published' ? 'text-gray-500' : 'text-emerald-700'}`}>
+          {movable ? (locked ? <Lock size={11} className="shrink-0" /> : <Unlock size={11} className="shrink-0" />) : <Lock size={11} className="shrink-0" />}
+          {label}
+          {movable && (locked ? (
+            <button type="button" onClick={e => { e.stopPropagation(); setUnlockedIds(prev => new Set(prev).add(k)); }} className="ml-auto font-normal text-gray-500 underline underline-offset-2 hover:text-[#5A5A40]">解鎖</button>
+          ) : (
+            <button type="button" onClick={e => { e.stopPropagation(); setUnlockedIds(prev => { const n = new Set(prev); n.delete(k); return n; }); }} className="ml-auto font-normal text-gray-500 underline underline-offset-2 hover:text-[#5A5A40]">鎖回</button>
+          ))}
+        </div>
+        <div className="text-[13px] font-bold truncate">{p.title}</div>
+      </div>
+    );
   };
 
   const onDragStart = (e: DragEvent, assetId: string) => {
@@ -491,7 +602,8 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                           ⚠️ 已經過去的整週只留日期：那幾週的「已排」標籤把本週擠到畫面下面（使用者 10-20 兩次說月曆太低） */}
                       {dayPosts.map(p => {
                         if (!isWaitingVideoPost(p, new Date(0))) {
-                          return <p key={p.id} title={p.title} className="text-[12px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 truncate">已排：{p.title}</p>;
+                          // 已掛上成片（或已發布）的貼文：畫成卡片，草稿可以解鎖搬（11-06）
+                          return postChip(p);
                         }
                         const bound = mine.find(a => a.plannedPostId === p.id);
                         const autoRow = !bound ? queueByKey.get(postDemandId(p.id!)) : undefined;
@@ -635,7 +747,7 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                 )}
                 {selectedId && (
                   <span className="flex-1 min-w-0 text-[13px] text-[#5A5A40] font-bold truncate">
-                    已選「{pending.find(a => a.id === selectedId)?.title}」，點一天放下
+                    已選「{keyTitle(selectedId)}」，點一天放下
                   </span>
                 )}
                 <div className="flex items-center gap-1 shrink-0">
@@ -647,6 +759,13 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
                     <ChevronRight size={18} />
                   </button>
                 </div>
+              </div>
+              {/* 四種框的意思（11-06 使用者：變綠色跟方框分不出來） */}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 border-b border-black/5 text-[12px] text-gray-500">
+                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded border border-dashed border-[#5A5A40]/50 bg-white" />系統暫補</span>
+                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded border-2 border-[#5A5A40] bg-[#5A5A40]/10" />已排定・片還在剪／審</span>
+                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded border-2 border-emerald-500 bg-emerald-50" />成片已掛上・草稿（可解鎖搬）</span>
+                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded border-2 border-blue-300 bg-blue-50" />小編已排程（不能搬）</span>
               </div>
               <div className="hidden md:grid grid-cols-7 border-b border-black/5">
                 {WEEKDAYS.split('').map(w => (
