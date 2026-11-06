@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { addDays, format, getDay, isSameMonth, parseISO } from 'date-fns';
-import { ArrowRight, Camera, Check, CheckCircle2, ChevronDown, ChevronUp, ClipboardCheck, Download, Radio } from 'lucide-react';
+import { addDays, format, getDay, parseISO } from 'date-fns';
+import { ArrowRight, BarChart3, Camera, Check, CheckCircle2, ChevronDown, ChevronUp, ClipboardCheck, Download, Film, Radio } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { db } from '../firebase';
-import { Asset, BillingContract, BillingRecord, DismissedHabit, Editor, Post, ShootBooking, UserRole, Vendor } from '../types';
+import { Asset, DismissedHabit, Editor, ExtraSlot, PlannedSlotMove, Post, ShootBooking, UserRole, Vendor } from '../types';
+import { buildCompanyQueue } from '../lib/companyQueue';
 import { useLiveCollection } from '../lib/liveData';
 import { isInternalWork } from '../lib/editorRoster';
 import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVideoTrackingScope, trackedVendors } from '../lib/vendorStatus';
@@ -40,9 +41,9 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
   const assets = useLiveCollection<Asset>('assets');
   const editors = useLiveCollection<Editor>('editors');
   const dismissedHabits = useLiveCollection<DismissedHabit>('dismissedHabits');
-  const billingRecords = useLiveCollection<BillingRecord>('billingRecords');
-  const contracts = useLiveCollection<BillingContract>('billingContracts');
   const bookings = useLiveCollection<ShootBooking>('shootBookings');
+  const slotMoves = useLiveCollection<PlannedSlotMove>('plannedSlotMoves');
+  const extraSlots = useLiveCollection<ExtraSlot>('extraSlots');
   const [precheckDoc, setPrecheckDoc] = useState<PrecheckDoc | null>(null);
   const [showAllTodos, setShowAllTodos] = useState(false);
   const [isEditReminderModalOpen, setIsEditReminderModalOpen] = useState(false);
@@ -139,35 +140,45 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
       else if (r.prog.current < 4) todos.push({ tone: r.prog.current < 3 ? 'red' : 'amber', text: `${r.v?.name} 今天 ${t}：${r.prog.note}`, sub: `「${r.p.title}」`, tab: 'publishAudit' });
     }
   }
-  const tomorrow = days[1];
-  for (const p of posts.filter(p => (p.scheduledAt || '').slice(0, 10) === tomorrow && vmap.has(p.vendorId) && p.status !== 'published')) {
-    const stuck = captionChecks(p).filter(c => !c.ok).map(c => c.label);
-    if (stuck.length) todos.push({ tone: 'amber', text: `${name(p.vendorId)} 明天 ${p.scheduledAt.slice(11, 16)} 文案待完成：${stuck.join('、')}`, sub: `「${p.title}」`, tab: 'posts' });
-  }
   for (const r of overdueShoots) todos.push({ tone: 'amber', text: `${r.vendor.name} ${md(r.active!.scheduledDate)} 的拍攝還沒回報結果`, sub: '到製作進度按「拍完／延期／取消」', tab: 'shootBookings' });
-  for (const m of missing) todos.push({ tone: 'amber', text: `${name(m.vendorId)} ${md(m.date)}（${WEEK[getDay(parseISO(m.date))]}）${m.time} 還沒排程`, sub: '依發片習慣應該要有一支', tab: 'posts' });
   const editAlerts = vendors.filter(v => stock.get(v.id!)?.severity === 'edit');
   for (const v of editAlerts) {
     const s = stock.get(v.id!)!;
     todos.push({ tone: 'amber', text: `${v.name} 成片只夠撐 ${Math.max(0, Math.floor(s.finishedRunwayDays!))} 天`, sub: `另有 ${s.rawStock} 部待剪，請催剪輯優先處理`, tab: 'videos' });
   }
-  const in30 = format(addDays(now, 30), 'yyyy-MM-dd');
-  for (const c of contracts.filter(c => c.status === 'active' && c.endDate && c.endDate >= today && c.endDate <= in30)) {
-    todos.push({ tone: 'gray', text: `${name(c.vendorId)} 合約 ${md(c.endDate!)} 到期`, tab: 'billing' });
-  }
-  const unpaid = billingRecords.filter(r => r.status !== 'paid' && r.dueDate && isSameMonth(parseISO(r.dueDate), now));
-  if (unpaid.length) todos.push({ tone: 'gray', text: `本月還有 ${unpaid.length} 筆帳款未收`, sub: `共 $${unpaid.reduce((s, r) => s + (r.amount || 0), 0).toLocaleString()}`, tab: 'billing' });
   const toneRank = { red: 0, amber: 1, gray: 2 };
   todos.sort((a, b) => toneRank[a.tone] - toneRank[b.tone]);
   const shownTodos = showAllTodos ? todos : todos.slice(0, 7);
-  const redCount = todos.filter(t => t.tone === 'red').length;
 
-  const weekShoots = bookings.filter(b => b.status === 'booked' && b.scheduledDate >= today && b.scheduledDate <= days[6]).length;
+  // ── 片源缺口：接下來 14 天哪天哪個 IP 還沒有片／片還在剪（跟剪輯師、排上片日同一份全公司配對） ──
+  const gaps = useMemo(() => {
+    const { queue } = buildCompanyQueue({ vendors, assets, posts, moves: slotMoves, dismissed: dismissedHabits, extras: extraSlots, now });
+    const until = addDays(now, 14);
+    return queue.rows
+      .filter(r => r.date && r.date <= until && (r.kind === 'no_material' || r.kind === 'to_edit'))
+      .map(r => ({
+        key: r.key, vendorId: r.vendorId, date: format(r.date!, 'yyyy-MM-dd'), kind: r.kind,
+        title: r.asset?.title || '', deadline: r.deadline ? format(r.deadline, 'yyyy-MM-dd') : '',
+        late: !!r.deadline && format(r.deadline, 'yyyy-MM-dd') < today,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vendors, assets, posts, slotMoves, dismissedHabits, extraSlots, today]);
+  const noClip = gaps.filter(g => g.kind === 'no_material');
+  const editing = gaps.filter(g => g.kind === 'to_edit');
+  const lateEdits = editing.filter(g => g.late);
+
+  // 本月各 IP 排程進度（跟製作進度同一套 buildDeficitRows）：排程＋發布了幾支／目標、還欠幾支
+  const monthRows = deficitRows
+    .filter(r => !r.frozenThisMonth && r.target > 0)
+    .map(r => ({ ...r, pct: Math.min(100, Math.round((r.delivered / r.target) * 100)) }))
+    .sort((a, b) => a.pct - b.pct);
+
   const kpis = [
     { label: '今天要發', value: live.length, sub: live.length ? `已確認發出 ${doneToday} 支` : '今天沒有排程', tone: 'text-[#1a1a1a]', tab: canAudit ? 'publishAudit' : 'posts' },
-    { label: '待處理', value: todos.filter(t => t.tone !== 'gray').length, sub: redCount ? `其中 ${redCount} 件要馬上處理` : '沒有緊急的事', tone: redCount ? 'text-rose-600' : 'text-[#1a1a1a]' },
-    { label: '需要約拍', value: needShoot.length, sub: needShoot.length ? `${needShoot.filter(x => x.urgent).length} 個 IP 很急` : '每個 IP 都有安排', tone: needShoot.some(x => x.urgent) ? 'text-orange-600' : 'text-[#1a1a1a]', tab: 'shootBookings' },
-    { label: '7 天內拍攝', value: weekShoots, sub: `14 天內共 ${upcomingShoots.length} 場`, tone: 'text-[#1a1a1a]', tab: 'shootCalendar' },
+    { label: '14 天內缺片', value: noClip.length, sub: noClip.length ? `最近 ${md(noClip[0].date)} ${name(noClip[0].vendorId)}` : '每個發片日都有片', tone: noClip.length ? 'text-[#94444F]' : 'text-[#1a1a1a]', tab: 'airDate' },
+    { label: '還在剪', value: editing.length, sub: lateEdits.length ? `${lateEdits.length} 支已過交片日` : '都在交片期限內', tone: lateEdits.length ? 'text-[#8F5843]' : 'text-[#1a1a1a]', tab: 'airDate' },
+    { label: '需要約拍', value: needShoot.length, sub: needShoot.length ? `${needShoot.filter(x => x.urgent).length} 個 IP 很急` : '每個 IP 都有安排', tone: needShoot.some(x => x.urgent) ? 'text-[#8F5843]' : 'text-[#1a1a1a]', tab: 'shootBookings' },
   ];
 
   return (
@@ -189,9 +200,11 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6">
+      {/* 電腦：左右兩欄各自往下疊（不然右邊清單一長，左邊下面就空一大塊）；手機：display:contents 讓卡片照 order 排 */}
+      <div className="flex flex-col gap-4 md:gap-6 lg:grid lg:grid-cols-12 lg:items-start">
+        <div className="contents lg:flex lg:flex-col lg:gap-6 lg:col-span-8">
         {/* 今日發布即時動態 */}
-        <section className="lg:col-span-8 bg-white rounded-3xl border border-black/5 shadow-sm p-4 md:p-6 space-y-3">
+        <section className="order-1 lg:order-none lg:col-span-8 bg-white rounded-3xl border border-black/5 shadow-sm p-4 md:p-6 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-base md:text-lg font-bold serif flex items-center gap-2 whitespace-nowrap">
               <Radio size={18} className="text-[#5A5A40]" /> 今日發布動態
@@ -248,50 +261,8 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
           )}
         </section>
 
-        {/* 待處理 */}
-        <section className="lg:col-span-4 bg-white rounded-3xl border border-black/5 shadow-sm p-4 md:p-6 space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base md:text-lg font-bold serif flex items-center gap-2 whitespace-nowrap">
-              <ClipboardCheck size={18} className="text-[#5A5A40]" /> 待處理
-            </h3>
-          </div>
-          {todos.length === 0 ? (
-            <p className="py-8 text-center text-[14px] text-gray-400 flex items-center justify-center gap-1.5"><CheckCircle2 size={16} className="text-emerald-500" /> 目前沒有要處理的事</p>
-          ) : (
-            <>
-              <ul className="space-y-1">
-                {shownTodos.map((t, i) => (
-                  <li key={i}>
-                    <button onClick={() => t.tab && setActiveTab(t.tab === 'publishAudit' && !canAudit ? 'posts' : t.tab)}
-                      className="w-full text-left flex items-start gap-2.5 px-2 py-2 rounded-xl hover:bg-[#F5F5F0] transition-colors">
-                      <span className="relative flex w-2.5 h-2.5 mt-1.5 shrink-0">
-                        {t.tone === 'red' && <span className="absolute inline-flex w-full h-full rounded-full bg-rose-400 opacity-50 animate-ping" />}
-                        <span className={cn('relative inline-flex w-2.5 h-2.5 rounded-full', TODO_DOT[t.tone])} />
-                      </span>
-                      <span className="min-w-0">
-                        <span className={cn('block text-[14px] font-bold', t.tone === 'gray' ? 'text-gray-500' : 'text-gray-800')}>{t.text}</span>
-                        {t.sub && <span className="block text-[12px] text-gray-400 truncate">{t.sub}</span>}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              {todos.length > 7 && (
-                <button onClick={() => setShowAllTodos(x => !x)} className="w-full text-[13px] font-bold text-[#5A5A40] flex items-center justify-center gap-1 py-1">
-                  {showAllTodos ? <>收起 <ChevronUp size={14} /></> : <>還有 {todos.length - 7} 件 <ChevronDown size={14} /></>}
-                </button>
-              )}
-              {editAlerts.length > 0 && (
-                <button onClick={() => setIsEditReminderModalOpen(true)} className="w-full text-[13px] font-bold text-gray-500 hover:text-[#5A5A40] flex items-center justify-center gap-1.5 py-1">
-                  <Download size={14} /> 導出催剪輯清單
-                </button>
-              )}
-            </>
-          )}
-        </section>
-
         {/* 近 7 天排程＋拍攝 */}
-        <section className="lg:col-span-8 bg-white rounded-3xl border border-black/5 shadow-sm p-4 md:p-6 space-y-3">
+        <section className="order-3 lg:order-none lg:col-span-8 bg-white rounded-3xl border border-black/5 shadow-sm p-4 md:p-6 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-base md:text-lg font-bold serif whitespace-nowrap">近 7 天排程總覽</h3>
             <GoLink onClick={() => setActiveTab('calendar')}>排程行事曆</GoLink>
@@ -300,7 +271,6 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
             <Legend cls="bg-[#5A5A40]">已排程</Legend>
             <Legend cls="bg-emerald-500">已發布</Legend>
             <Legend cls="bg-gray-300">草稿</Legend>
-            <Legend cls="bg-rose-500">文案未完成（今明兩天）</Legend>
             <span className="flex items-center gap-1"><Camera size={12} /> 拍攝</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-7 gap-2">
@@ -328,7 +298,6 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                         <span className={cn('w-2 h-2 rounded-full shrink-0', dot)} />
                         <span className="tabular-nums text-gray-400 shrink-0">{p.scheduledAt.slice(11, 16)}</span>
                         <span className="truncate text-gray-700">{name(p.vendorId)}</span>
-                        {!captionDone && i <= 1 && p.status !== 'published' && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />}
                       </div>
                     );
                   })}
@@ -344,8 +313,67 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
           </div>
         </section>
 
+        {/* 本月各 IP 排程進度（排程＋發布／目標，進度最落後的排上面） */}
+        <section className="order-5 lg:order-none lg:col-span-8 bg-white rounded-3xl border border-black/5 shadow-sm p-4 md:p-6 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-base md:text-lg font-bold serif flex items-center gap-2 whitespace-nowrap"><BarChart3 size={18} className="text-[#5A5A40]" /> 本月排程進度</h3>
+            <GoLink onClick={() => setActiveTab('shootBookings')}>製作進度</GoLink>
+          </div>
+          <p className="text-[12px] text-gray-400">已排程＋已發布／本月目標，落後的排前面（跟製作進度同一套算法）</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2.5">
+            {monthRows.map(r => (
+              <button key={r.vendor.id} onClick={() => setActiveTab('shootBookings')} className="text-left min-w-0">
+                <div className="flex items-baseline gap-2 min-w-0">
+                  <span className="text-[14px] font-bold truncate">{r.vendor.name}</span>
+                  <span className="text-[12px] text-gray-400 tabular-nums shrink-0">{r.delivered}/{r.target}</span>
+                  {r.owed > 0
+                    ? <span className="ml-auto shrink-0 text-[12px] font-bold text-[#94444F]">還欠 {r.owed} 支</span>
+                    : <span className="ml-auto shrink-0 text-[12px] text-gray-400">庫存 {r.stock}</span>}
+                </div>
+                <div className="mt-1 h-1.5 rounded-full bg-[#F1EFEC] overflow-hidden">
+                  <div className={cn('h-full rounded-full', r.pct >= 100 ? 'bg-[#8AA37F]' : r.pct >= 60 ? 'bg-[#7F9DB3]' : 'bg-[#C98B70]')} style={{ width: `${r.pct}%` }} />
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        </div>
+        <div className="contents lg:flex lg:flex-col lg:gap-6 lg:col-span-4">
+        {/* 片源缺口（11-06 使用者：儀表板要看得出缺哪支片） */}
+        <section className="order-2 lg:order-none lg:col-span-4 bg-white rounded-3xl border border-black/5 shadow-sm p-4 md:p-6 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-base md:text-lg font-bold serif flex items-center gap-2 whitespace-nowrap">
+              <Film size={18} className="text-[#5A5A40]" /> 片源缺口
+            </h3>
+            <GoLink onClick={() => setActiveTab('airDate')}>排上片日</GoLink>
+          </div>
+          <p className="text-[12px] text-gray-400">接下來 14 天的發片日，還沒有片或片還在剪的</p>
+          {gaps.length === 0 ? (
+            <p className="py-6 text-center text-[14px] text-gray-400 flex items-center justify-center gap-1.5"><CheckCircle2 size={16} className="text-[#8AA37F]" /> 每個發片日都有成片</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {gaps.slice(0, 10).map(g => (
+                <li key={g.key}>
+                  <button onClick={() => setActiveTab('airDate')} className="w-full text-left flex items-center gap-3 px-2 py-1.5 rounded-xl hover:bg-[#F5F5F0]">
+                    <span className="w-14 shrink-0 text-[13px] font-bold tabular-nums text-gray-600">{g.date === today ? '今天' : md(g.date)}<span className="ml-0.5 font-normal text-gray-400">{WEEK[getDay(parseISO(g.date))]}</span></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[14px] font-bold truncate">{name(g.vendorId)}</span>
+                      {g.title && <span className="block text-[12px] text-gray-400 truncate">{g.title}</span>}
+                    </span>
+                    {g.kind === 'no_material'
+                      ? <StatusPill tone="problem" label="還沒有片" size="sm" />
+                      : <StatusPill tone={g.late ? 'problem' : 'working'} label={g.late ? '過交片日' : '剪輯中'} detail={g.deadline ? `${md(g.deadline)} 交` : ''} size="sm" />}
+                  </button>
+                </li>
+              ))}
+              {gaps.length > 10 && <li className="text-center"><GoLink onClick={() => setActiveTab('airDate')}>還有 {gaps.length - 10} 個</GoLink></li>}
+            </ul>
+          )}
+        </section>
+
         {/* 拍攝安排 */}
-        <section className="lg:col-span-4 bg-white rounded-3xl border border-black/5 shadow-sm p-4 md:p-6 space-y-4">
+        <section className="order-4 lg:order-none lg:col-span-4 bg-white rounded-3xl border border-black/5 shadow-sm p-4 md:p-6 space-y-4">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-base md:text-lg font-bold serif flex items-center gap-2 whitespace-nowrap"><Camera size={18} className="text-[#5A5A40]" /> 拍攝安排</h3>
             <GoLink onClick={() => setActiveTab('shootBookings')}>製作進度</GoLink>
@@ -382,6 +410,50 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
             {upcomingShoots.length > 6 && <GoLink onClick={() => setActiveTab('shootCalendar')}>還有 {upcomingShoots.length - 6} 場，看拍攝行事曆</GoLink>}
           </div>
         </section>
+
+        {/* 需注意：只留緊急的（發布出錯、後台未排、拍攝逾期、催剪輯）。小編文案提醒不放這裡（11-06） */}
+        <section className="order-6 lg:order-none lg:col-span-4 bg-white rounded-3xl border border-black/5 shadow-sm p-4 md:p-6 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base md:text-lg font-bold serif flex items-center gap-2 whitespace-nowrap">
+              <ClipboardCheck size={18} className="text-[#5A5A40]" /> 需注意
+            </h3>
+          </div>
+          {todos.length === 0 ? (
+            <p className="py-8 text-center text-[14px] text-gray-400 flex items-center justify-center gap-1.5"><CheckCircle2 size={16} className="text-emerald-500" /> 目前沒有緊急的事</p>
+          ) : (
+            <>
+              <ul className="space-y-1">
+                {shownTodos.map((t, i) => (
+                  <li key={i}>
+                    <button onClick={() => t.tab && setActiveTab(t.tab === 'publishAudit' && !canAudit ? 'posts' : t.tab)}
+                      className="w-full text-left flex items-start gap-2.5 px-2 py-2 rounded-xl hover:bg-[#F5F5F0] transition-colors">
+                      <span className="relative flex w-2.5 h-2.5 mt-1.5 shrink-0">
+                        {t.tone === 'red' && <span className="absolute inline-flex w-full h-full rounded-full bg-rose-400 opacity-50 animate-ping" />}
+                        <span className={cn('relative inline-flex w-2.5 h-2.5 rounded-full', TODO_DOT[t.tone])} />
+                      </span>
+                      <span className="min-w-0">
+                        <span className={cn('block text-[14px] font-bold', t.tone === 'gray' ? 'text-gray-500' : 'text-gray-800')}>{t.text}</span>
+                        {t.sub && <span className="block text-[12px] text-gray-400 truncate">{t.sub}</span>}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {todos.length > 7 && (
+                <button onClick={() => setShowAllTodos(x => !x)} className="w-full text-[13px] font-bold text-[#5A5A40] flex items-center justify-center gap-1 py-1">
+                  {showAllTodos ? <>收起 <ChevronUp size={14} /></> : <>還有 {todos.length - 7} 件 <ChevronDown size={14} /></>}
+                </button>
+              )}
+              {editAlerts.length > 0 && (
+                <button onClick={() => setIsEditReminderModalOpen(true)} className="w-full text-[13px] font-bold text-gray-500 hover:text-[#5A5A40] flex items-center justify-center gap-1.5 py-1">
+                  <Download size={14} /> 導出催剪輯清單
+                </button>
+              )}
+            </>
+          )}
+        </section>
+
+        </div>
       </div>
 
       <EditReminderExportModal isOpen={isEditReminderModalOpen} onClose={() => setIsEditReminderModalOpen(false)} vendors={vendors} assets={assets} posts={posts} />

@@ -833,10 +833,7 @@ ${after}`)) return;
   return (
     <div className="space-y-4 md:space-y-6">
       {/* ── 手機：篩選面板＋右下角「＋」動作 ── */}
-      <button onClick={() => setActionSheet(true)} aria-label="新增／上傳"
-        className="md:hidden fixed right-4 bottom-[84px] z-30 w-12 h-12 rounded-full bg-[#5A5A40] text-white shadow-xl flex items-center justify-center">
-        <Plus size={24} />
-      </button>
+      {/* 右下角「＋」拿掉了：同事找不到「從雲端認領」（11-06），認領／上傳放回頂端 */}
       {(filterSheet || actionSheet) && (
         <div className="md:hidden fixed inset-0 z-50 flex flex-col justify-end" onClick={() => { setFilterSheet(false); setActionSheet(false); }}>
           <div className="absolute inset-0 bg-black/30" />
@@ -888,7 +885,7 @@ ${after}`)) return;
           <h2 className="text-2xl font-bold serif text-[#5A5A40]">素材資料庫</h2>
           <p className="text-sm text-gray-500">管理各廠商的影片與貼文素材庫存</p>
         </div>
-        <div className="hidden md:flex flex-wrap items-center gap-2 md:gap-4 w-full sm:w-auto relative">
+        <div className="flex flex-wrap items-center gap-2 md:gap-4 w-full sm:w-auto relative">
           {/* 同事（employee）也要能上傳毛片 —— 他們才是這個功能的主要使用者。
               只有剪輯師不行：那顆 Drive token 看得到我們建立的所有檔案，對外包權限太大，
               後端也會再擋一次。
@@ -927,6 +924,9 @@ ${after}`)) return;
               <>
                 <div className="fixed inset-0 z-30" onClick={() => setMoreOpen(false)} />
                 <div className="absolute right-0 top-full mt-2 z-40 w-48 bg-white rounded-2xl border border-black/5 shadow-xl p-1.5">
+                  <button onClick={() => { setMoreOpen(false); setNewAsset({ ...newAsset, type: activeTab, stage: filterStage }); setIsAdding(true); }} className="w-full flex items-center gap-2 px-3 py-3 rounded-xl text-[15px] font-bold text-[#5A5A40] hover:bg-gray-50">
+                    <Plus size={18} /> 上架素材
+                  </button>
                   <button onClick={() => { setMoreOpen(false); setIsTaskListOpen(true); }} className="w-full flex items-center gap-2 px-3 py-3 rounded-xl text-[15px] font-bold text-[#5A5A40] hover:bg-gray-50">
                     <ClipboardList size={18} /> 導出剪輯清單
                   </button>
