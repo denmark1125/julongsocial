@@ -11,7 +11,7 @@ import { isInternalWork } from '../lib/editorRoster';
 import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVideoTrackingScope, trackedVendors } from '../lib/vendorStatus';
 import { buildDeficitRows } from '../lib/vendorDeficitRows';
 import { AUDIT_STATUS_ICON, AUDIT_STATUS_LABEL } from '../lib/publishAudit';
-import { assetOfPost, auditCounts, auditProgress, buildAuditRows, captionChecks, computePrecheck, type PrecheckDoc } from '../lib/publishAuditRows';
+import { assetOfPost, auditCounts, auditProgress, buildAuditRows, captionChecks, computePrecheck, precheckFreshness, type PrecheckDoc } from '../lib/publishAuditRows';
 import { progressStatus, StatusPill, VIDEO_STEPS } from './VideoProgressSteps';
 import EditReminderExportModal from './EditReminderExportModal';
 
@@ -73,10 +73,11 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
         ? r.cells.filter(c => precheck.get(`${r.p.id}|${c.pf}`)?.status === 'not_scheduled').map(c => c.pf) : [];
       const note = notScheduled.length ? `${notScheduled.join('/')} 後台還沒排`
         : prog.note.startsWith('已排程') ? `已排程・今天 ${r.p.scheduledAt.slice(11, 16)} 發布` : prog.note;
-      return { ...r, prog: { current: prog.current, note }, notScheduled };
+      const freshness = precheckFreshness(precheckDoc?.fetchedAt || precheckDoc?.tiktokFetchedAt, r.p.scheduledAt, now);
+      return { ...r, prog: { current: prog.current, note }, notScheduled, freshness };
     })
     .sort((a, b) => a.p.scheduledAt.localeCompare(b.p.scheduledAt)),
-  [auditRows, assets, precheck, vendors, editors, nowStamp]);
+  [auditRows, assets, precheck, vendors, editors, nowStamp, precheckDoc, now]);
   const doneToday = live.filter(r => r.prog.current >= 5).length;
 
   // ── 4. 拍攝：哪個 IP 要約拍（製作進度同一套）＋庫存撐不到 14 天的 ──
@@ -131,7 +132,10 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
       else if (['not_seen', 'content_mismatch', 'time_mismatch'].includes(c.status)) todos.push({ tone: 'amber', text: `${r.v?.name} ${c.pf} ${AUDIT_STATUS_LABEL[c.status]}`, sub: `今天 ${t}「${r.p.title}」`, tab: 'publishAudit' });
     }
     if (r.p.scheduledAt > nowStamp && r.prog.current < 5) {
-      if (r.notScheduled.length) todos.push({ tone: 'red', text: `${r.v?.name} 今天 ${t} ${r.notScheduled.join('/')} 後台還沒排`, sub: `機器人 ${precheckDoc?.fetchedAt ? format(parseISO(precheckDoc.fetchedAt), 'HH:mm') : ''} 看的・「${r.p.title}」`, tab: 'publishAudit' });
+      // 機器人看完之後小編才排的它不知道：舊的結果只說「看時還沒排」、用琥珀色，傍晚那輪還是沒排才算紅色（11-06）
+      if (r.notScheduled.length) todos.push(r.freshness.fresh
+        ? { tone: 'red', text: `${r.v?.name} ${t} 後台未排程（${r.notScheduled.join('/')}）`, sub: `檢查 ${r.freshness.seenAt}・「${r.p.title}」`, tab: 'publishAudit' }
+        : { tone: 'amber', text: `${r.v?.name} ${t} 後台待確認`, sub: `最後檢查 ${r.freshness.seenAt}${r.freshness.next ? `・下次 ${r.freshness.next}` : ''}`, tab: 'publishAudit' });
       else if (r.prog.current < 4) todos.push({ tone: r.prog.current < 3 ? 'red' : 'amber', text: `${r.v?.name} 今天 ${t}：${r.prog.note}`, sub: `「${r.p.title}」`, tab: 'publishAudit' });
     }
   }
@@ -194,7 +198,7 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
             </h3>
             <div className="flex items-center gap-3 min-w-0">
               <span className="text-[12px] text-gray-400 truncate hidden sm:inline">
-                {precheckDoc?.fetchedAt ? `機器人 ${format(parseISO(precheckDoc.fetchedAt), 'HH:mm')} 看過後台排程` : '機器人今天還沒看過後台排程'}
+                {precheckDoc?.fetchedAt ? `後台檢查 ${format(parseISO(precheckDoc.fetchedAt), 'HH:mm')}` : '後台今日未檢查'}
                 {counts.problem > 0 && <span className="text-rose-600 font-bold">・{counts.problem} 項要注意</span>}
               </span>
               {canAudit && <GoLink onClick={() => setActiveTab('publishAudit')}>發布稽核</GoLink>}
@@ -204,8 +208,8 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
             <p className="py-8 text-center text-[14px] text-gray-400">今天沒有排程</p>
           ) : (
             <ul className="divide-y divide-black/5">
-              {live.map(({ p, v, cells, prog, notScheduled }) => {
-                const bad = notScheduled.length > 0 || cells.some(c => ['wrong_account', 'missing', 'no_caption'].includes(c.status));
+              {live.map(({ p, v, cells, prog, notScheduled, freshness }) => {
+                const bad = cells.some(c => ['wrong_account', 'missing', 'no_caption'].includes(c.status));
                 return (
                   <li key={p.id} className="py-3 grid grid-cols-[48px_1fr] gap-x-3 gap-y-1.5">
                     <span className={cn('text-[15px] font-bold tabular-nums', p.scheduledAt <= nowStamp ? 'text-gray-400' : 'text-[#1a1a1a]')}>{p.scheduledAt.slice(11, 16)}</span>
@@ -218,7 +222,9 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
                     <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 min-w-0">
                       <MiniSteps current={prog.current} />
                       {notScheduled.length
-                        ? <StatusPill tone="problem" label="後台還沒排" detail={notScheduled.join('/')} size="sm" />
+                        ? (freshness.fresh
+                          ? <StatusPill tone="problem" label="後台未排程" detail={`${notScheduled.join('/')}・檢查 ${freshness.seenAt}`} size="sm" />
+                          : <StatusPill tone="waiting" label="後台待確認" detail={`最後檢查 ${freshness.seenAt}${freshness.next ? `・下次 ${freshness.next}` : ''}`} size="sm" />)
                         : bad
                           ? <StatusPill tone="problem" label="發布有問題" detail="看發布稽核" size="sm" />
                           : <StatusPill {...progressStatus(prog.current, prog.note, p.scheduledAt)} size="sm" />}

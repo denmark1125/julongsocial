@@ -7,7 +7,7 @@ import { Asset, Editor, Post, Vendor } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import { isInternalWork } from '../lib/editorRoster';
 import { progressStatus, StatusPill, VideoSteps } from './VideoProgressSteps';
-import { assetOfPost, auditCounts, auditProgress, buildAuditRows, captionChecks, computePrecheck, TONE, tiktokNextCheck, type PrecheckDoc } from '../lib/publishAuditRows';
+import { assetOfPost, auditCounts, auditProgress, buildAuditRows, captionChecks, computePrecheck, precheckFreshness, TONE, tiktokNextCheck, type PrecheckDoc } from '../lib/publishAuditRows';
 import {
   AUDIT_STATUS_ICON, AUDIT_STATUS_LABEL, AUDITABLE_PLATFORMS, describeAudit, type AuditStatus, type PlatformAudit,
 } from '../lib/publishAudit';
@@ -190,14 +190,21 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                   // 綠＝排好、紅色呼吸燈＝還沒排、橘＝時間跟系統不同（後面寫後台的時間）、灰＝讀不到；滑過看完整說明
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-gray-500">
                     <span className="font-bold whitespace-nowrap">後台排程</span>
+                    {(() => {
+                      // 機器人看完之後才排的它不知道：舊結果的「沒排」用琥珀色、不閃，旁邊註明幾點看的（11-06 小編誤會）
+                      const fr = precheckFreshness(precheckDoc?.fetchedAt || precheckDoc?.tiktokFetchedAt, p.scheduledAt);
+                      const stale = !fr.fresh && cells.some(c => precheck.get(`${p.id}|${c.pf}`)?.status === 'not_scheduled');
+                      return stale ? <span className="order-last text-[#80653A]">待確認・最後檢查 {fr.seenAt}{fr.next ? `・下次 ${fr.next}` : ''}</span> : null;
+                    })()}
                     {cells.map(({ pf }) => {
                       const r = precheck.get(`${p.id}|${pf}`);
                       if (!r) return null;
-                      const dot = r.status === 'scheduled' ? 'bg-emerald-500' : r.status === 'not_scheduled' ? 'bg-rose-500' : r.status === 'time_diff' ? 'bg-amber-500' : 'bg-gray-300';
+                      const stale = r.status === 'not_scheduled' && !precheckFreshness(precheckDoc?.fetchedAt || precheckDoc?.tiktokFetchedAt, p.scheduledAt).fresh;
+                      const dot = r.status === 'scheduled' ? 'bg-emerald-500' : r.status === 'not_scheduled' ? (stale ? 'bg-amber-400' : 'bg-rose-500') : r.status === 'time_diff' ? 'bg-amber-500' : 'bg-gray-300';
                       return (
                         <span key={pf} className="flex items-center gap-1.5 whitespace-nowrap" title={describePrecheck(r, p.scheduledAt)}>
                           <span className="relative flex w-2.5 h-2.5">
-                            {r.status === 'not_scheduled' && <span className="absolute inline-flex w-full h-full rounded-full bg-rose-400 opacity-50 animate-ping" />}
+                            {r.status === 'not_scheduled' && !stale && <span className="absolute inline-flex w-full h-full rounded-full bg-rose-400 opacity-50 animate-ping" />}
                             <span className={`relative inline-flex w-2.5 h-2.5 rounded-full ${dot}`} />
                           </span>
                           {pf}{r.status === 'time_diff' && <span className="text-amber-700">（後台 {r.metaTime}）</span>}

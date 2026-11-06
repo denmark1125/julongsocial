@@ -64,13 +64,14 @@ export function VideoSteps({ current }: { current: number }) {
  * 很醜、跟圓圈顏色打架、也不好讀）。標籤講現在是哪個狀態（顏色跟著狀態走），後面灰字只補時間或原因。
  */
 type Tone = 'done' | 'scheduled' | 'waiting' | 'working' | 'idle' | 'problem';
+// 莫蘭迪低飽和（11-06 使用者）：底色淡、字用同色系的深色，對比仍夠看得清楚
 const TONE_CLASS: Record<Tone, { pill: string; dot: string }> = {
-  done: { pill: 'bg-emerald-50 text-emerald-700 ring-emerald-100', dot: 'bg-emerald-500' },
-  scheduled: { pill: 'bg-sky-50 text-sky-700 ring-sky-100', dot: 'bg-sky-500' },
-  waiting: { pill: 'bg-amber-50 text-amber-800 ring-amber-100', dot: 'bg-amber-500' },
-  working: { pill: 'bg-orange-50 text-orange-700 ring-orange-100', dot: 'bg-orange-500' },
-  idle: { pill: 'bg-gray-50 text-gray-600 ring-gray-200', dot: 'bg-gray-400' },
-  problem: { pill: 'bg-rose-50 text-rose-700 ring-rose-100', dot: 'bg-rose-500' },
+  done: { pill: 'bg-[#EEF2EA] text-[#56704E] ring-[#DCE5D5]', dot: 'bg-[#8AA37F]' },        // 鼠尾草綠
+  scheduled: { pill: 'bg-[#EAF0F4] text-[#4A6579] ring-[#D6E1E9]', dot: 'bg-[#7F9DB3]' },   // 霧藍
+  waiting: { pill: 'bg-[#F5EFE3] text-[#80653A] ring-[#E9DFCB]', dot: 'bg-[#C4A46B]' },     // 奶茶沙
+  working: { pill: 'bg-[#F6ECE6] text-[#8F5843] ring-[#EBD9CF]', dot: 'bg-[#C98B70]' },     // 陶土
+  idle: { pill: 'bg-[#F1EFEC] text-[#6B665F] ring-[#E3DFDA]', dot: 'bg-[#A8A29B]' },        // 灰褐
+  problem: { pill: 'bg-[#F6E9EA] text-[#94444F] ring-[#EBD3D6]', dot: 'bg-[#C77B85]' },     // 乾燥玫瑰
 };
 
 export function progressStatus(current: number, note: string, scheduledAt?: string, today = format(new Date(), 'yyyy-MM-dd')): { tone: Tone; label: string; detail: string } {

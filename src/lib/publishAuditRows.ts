@@ -131,3 +131,21 @@ export function captionChecks(p: Post): { label: string; ok: boolean; wait: stri
     { label: '業主審文案', ok: !!p.clientConfirmed, wait: '待業主審核文案' },
   ];
 }
+
+/**
+ * 機器人看到「後台沒排」這個結果可不可信（11-06 小編誤會：12:12 看時沒排，小編下午才排，畫面卻一直寫「後台還沒排」）。
+ * 機器人只在固定時間看（見 rpa-profiles），看完之後小編才排的它不知道。
+ * 可信＝傍晚那兩輪（17:00 後）看的，或離發布不到 2.5 小時看的；不然只能說「機器人 HH:mm 看時還沒排」，等下一輪。
+ */
+const META_ROBOT_TIMES = ['09:35', '11:55', '17:30', '18:00'];
+export function precheckFreshness(fetchedAt: string | undefined, scheduledAt: string, now = new Date()): { fresh: boolean; seenAt: string; next: string | null } {
+  if (!fetchedAt) return { fresh: false, seenAt: '', next: null };
+  const seen = parseISO(fetchedAt);
+  const seenAt = format(seen, 'HH:mm');
+  const sched = parseISO(scheduledAt);
+  const fresh = (format(seen, 'yyyy-MM-dd') === scheduledAt.slice(0, 10) && seenAt >= '17:00')
+    || (sched.getTime() - seen.getTime()) <= 150 * 60 * 1000;
+  const nowHm = format(now, 'HH:mm');
+  const next = META_ROBOT_TIMES.find(t => t > nowHm && t < scheduledAt.slice(11, 16)) || null;
+  return { fresh, seenAt, next };
+}
