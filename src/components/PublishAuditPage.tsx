@@ -427,7 +427,7 @@ function auditProgress(
   // 片好了不一定是小編沒排：常常卡在文案還沒寫、內部還沒檢核、業主還沒審文案（11-06 使用者）。照順序講第一個卡住的
   if (base.current === 3) {
     const stuck = captionChecks(p).find(c => !c.ok);
-    return { current: 3, note: stuck ? `片已完成，卡在：${stuck.wait}` : '片和文案都審過了，等小編到後台排程' };
+    return { current: 3, note: stuck ? `成片已完成・${stuck.wait}` : '成片與文案皆已確認・待小編排程' };
   }
   return base;
 }
@@ -435,8 +435,8 @@ function auditProgress(
 /** 貼文本身的三個關卡（貼文詳細頁的「內部檢核」「業主審核」兩個勾選＋文案有沒有寫） */
 function captionChecks(p: Post): { label: string; ok: boolean; wait: string }[] {
   return [
-    { label: '文案', ok: !!(p.content || '').trim(), wait: '系統還沒填文案' },
-    { label: '內部檢核', ok: !!p.internalConfirmed, wait: '內部還沒檢核文案' },
-    { label: '業主審文案', ok: !!p.clientConfirmed, wait: '業主還沒審文案' },
+    { label: '文案', ok: !!(p.content || '').trim(), wait: '待補文案' },
+    { label: '內部檢核', ok: !!p.internalConfirmed, wait: '待內部檢核文案' },
+    { label: '業主審文案', ok: !!p.clientConfirmed, wait: '待業主審核文案' },
   ];
 }
