@@ -10,7 +10,7 @@ import { VideoSteps, videoProgress } from './VideoProgressSteps';
 import {
   AUDIT_STATUS_ICON, AUDIT_STATUS_LABEL, AUDITABLE_PLATFORMS, describeAudit, type AuditStatus, type PlatformAudit,
 } from '../lib/publishAudit';
-import { describePrecheck, mergeCalendars, PRECHECK_ICON, precheckAll, unmatchedCards, type PrecheckResult, type VendorCalendar } from '../lib/publishPrecheck';
+import { describePrecheck, mergeCalendars, precheckAll, unmatchedCards, type PrecheckResult, type VendorCalendar } from '../lib/publishPrecheck';
 
 /**
  * 發布稽核（2026-11-05）：某一天排定的貼文，IG/FB 實際有沒有發、發在哪、時間對不對。
@@ -238,11 +238,23 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                   </div>
                 </div>
                 {cells.some(c => precheck.has(`${p.id}|${c.pf}`)) && (
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-gray-500">
-                    <span className="font-bold whitespace-nowrap">發布前（Meta 排程）</span>
+                  // 後台排程：跟文案三關一樣用小燈號（11-06 使用者：整句「IG 後台還沒排（系統寫 19:00）」×3 太雜）。
+                  // 綠＝排好、紅色呼吸燈＝還沒排、橘＝時間跟系統不同（後面寫後台的時間）、灰＝讀不到；滑過看完整說明
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-gray-500">
+                    <span className="font-bold whitespace-nowrap">後台排程</span>
                     {cells.map(({ pf }) => {
                       const r = precheck.get(`${p.id}|${pf}`);
-                      return r ? <span key={pf} className="whitespace-nowrap">{PRECHECK_ICON[r.status]} {pf} {describePrecheck(r, p.scheduledAt)}</span> : null;
+                      if (!r) return null;
+                      const dot = r.status === 'scheduled' ? 'bg-emerald-500' : r.status === 'not_scheduled' ? 'bg-rose-500' : r.status === 'time_diff' ? 'bg-amber-500' : 'bg-gray-300';
+                      return (
+                        <span key={pf} className="flex items-center gap-1.5 whitespace-nowrap" title={describePrecheck(r, p.scheduledAt)}>
+                          <span className="relative flex w-2.5 h-2.5">
+                            {r.status === 'not_scheduled' && <span className="absolute inline-flex w-full h-full rounded-full bg-rose-400 opacity-50 animate-ping" />}
+                            <span className={`relative inline-flex w-2.5 h-2.5 rounded-full ${dot}`} />
+                          </span>
+                          {pf}{r.status === 'time_diff' && <span className="text-amber-700">（後台 {r.metaTime}）</span>}
+                        </span>
+                      );
                     })}
                   </div>
                 )}
