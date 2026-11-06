@@ -220,7 +220,7 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                 <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 py-1">
                   <div className="w-full max-w-[400px]"><VideoSteps current={prog.current} /></div>
                   <div className="space-y-1">
-                    <p className={`text-[15px] font-bold tracking-wide ${prog.current >= 5 ? 'text-[#5A5A40]' : 'text-[#3d3d2c]'}`}>{prog.note}</p>
+                    <p className={`text-[15px] font-bold tracking-wide ${prog.current >= 5 ? 'text-[#5A5A40]' : 'text-orange-700'}`}>{prog.note}</p>
                     {prog.current < 5 && (
                       // 文案三關：小燈號就好（11-06 使用者：標籤太複雜）。綠＝過了，紅色呼吸燈＝還沒
                       <div className="flex flex-wrap items-center gap-3">
