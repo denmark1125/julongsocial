@@ -588,7 +588,11 @@ export default function AssetDatabase() {
     // 作廢的片只在「作廢」分頁出現，其餘分頁（含「全部」）一律不顯示，
     // 否則使用者會在可使用清單裡看到已經宣告不要的東西
     const voided = !!a.voidedAt;
-    const matchesStatus = filterStatus === 'voided'
+    // 待審核（11-06 使用者）：不管排了沒都列出來——內部剪輯的片常常已經排上去（變已使用、淡掉），
+    // 卻還沒按審核，原本在「可使用」找不到它
+    const matchesStatus = filterStatus === 'unreviewed'
+      ? !voided && effStatus(a) !== 'archived' && !isClientApproved(a)
+      : filterStatus === 'voided'
       ? voided
       : voided
         ? false
@@ -843,7 +847,7 @@ ${after}`)) return;
                 {([
                   ['類型', [['video', '影片'], ['post', '貼文']], activeTab, (v: string) => setActiveTab(v as AssetType)],
                   ['階段', [['raw', '待剪毛片'], ['finished', '成片']], filterStage, (v: string) => { setFilterStage(v as any); setFilterStatus('all'); }],
-                  ['狀態', [...(filterStage === 'finished' ? [['available', '可使用'], ['used', '已使用'], ['manual', '手動認列']] : []), ['voided', '作廢'], ['archived', '回收站'], ['all', '全部']], filterStatus, (v: string) => setFilterStatus(v as any)],
+                  ['狀態', [...(filterStage === 'finished' ? [['unreviewed', '待審核'], ['available', '可使用'], ['used', '已使用'], ['manual', '手動認列']] : []), ['voided', '作廢'], ['archived', '回收站'], ['all', '全部']], filterStatus, (v: string) => setFilterStatus(v as any)],
                 ] as [string, string[][], string, (v: string) => void][]).map(([label, opts, cur, set]) => (
                   <div key={label} className="space-y-1.5">
                     <p className="text-[12px] font-bold text-gray-400">{label}</p>
@@ -947,7 +951,10 @@ ${after}`)) return;
             <BarChart3 size={18} />
             <span>庫存總覽</span>
           </button>
-          <div className="hidden md:flex bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm items-center space-x-3">
+          <div
+            onClick={() => { setFilterStage('finished'); setFilterStatus('unreviewed'); }}
+            title="點一下列出所有還沒審核的片（含已經排上去的）"
+            className="hidden md:flex cursor-pointer hover:border-amber-300 bg-white px-4 py-2 rounded-2xl border border-black/5 shadow-sm items-center space-x-3">
             <div className="bg-amber-50 p-2 rounded-lg text-amber-600">
               <Clock size={18} />
             </div>
@@ -1097,11 +1104,11 @@ ${after}`)) return;
                 />
               </div>
             </div>
-            <div className="p-2 max-h-[500px] overflow-y-auto no-scrollbar">
+            <div className="p-2 max-h-[calc(100vh-280px)] overflow-y-auto no-scrollbar">
               <button
                 onClick={() => setFilterVendor('all')}
                 className={cn(
-                  "w-full flex items-center justify-between p-4 rounded-2xl transition-all text-left mb-1",
+                  "w-full flex items-center justify-between px-4 py-2.5 rounded-xl transition-all text-left mb-0.5",
                   filterVendor === 'all' ? "bg-[#5A5A40] text-white shadow-md" : "hover:bg-gray-50 text-gray-600"
                 )}
               >
@@ -1124,7 +1131,7 @@ ${after}`)) return;
                     key={vendor.id}
                     onClick={() => setFilterVendor(vendor.id)}
                     className={cn(
-                      "w-full flex flex-col p-4 rounded-2xl transition-all text-left mb-1 group",
+                      "w-full flex flex-col px-4 py-2 rounded-xl transition-all text-left mb-0.5 group",
                       filterVendor === vendor.id ? "bg-[#5A5A40] text-white shadow-md" : "hover:bg-gray-50 text-gray-600"
                     )}
                   >
@@ -1177,13 +1184,22 @@ ${after}`)) return;
             </div>
             <button onClick={() => setFilterSheet(true)} className="md:hidden shrink-0 flex items-center gap-1 px-3 py-2 rounded-xl bg-white border border-black/5 shadow-sm text-[13px] font-bold text-[#5A5A40] whitespace-nowrap">
               <Filter size={15} />
-              {activeTab === 'video' ? '影片' : '貼文'}・{filterStage === 'raw' ? '待剪' : '成片'}・{({ available: '可使用', used: '已使用', manual: '手動認列', voided: '作廢', archived: '回收站', all: '全部' } as Record<string, string>)[filterStatus] || '全部'}
+              {activeTab === 'video' ? '影片' : '貼文'}・{filterStage === 'raw' ? '待剪' : '成片'}・{({ unreviewed: '待審核', available: '可使用', used: '已使用', manual: '手動認列', voided: '作廢', archived: '回收站', all: '全部' } as Record<string, string>)[filterStatus] || '全部'}
             </button>
             <div className="hidden md:flex items-center gap-2 w-full md:w-auto">
               {/* 手機：篩選可左右滑，不要擠成一個字一行 */}
               <div className="flex items-center bg-white rounded-xl border border-black/5 p-1 shadow-sm min-w-0 overflow-x-auto no-scrollbar">
                 {filterStage === 'finished' && (
                   <>
+                    <button
+                      onClick={() => setFilterStatus('unreviewed')}
+                      className={cn(
+                        "shrink-0 whitespace-nowrap px-3 md:px-4 py-1.5 rounded-lg text-[13px] md:text-xs font-bold transition-all",
+                        filterStatus === 'unreviewed' ? "bg-amber-500 text-white shadow-sm" : "text-amber-600 hover:bg-amber-50"
+                      )}
+                    >
+                      待審核
+                    </button>
                     <button
                       onClick={() => setFilterStatus('available')}
                       className={cn(
@@ -1267,7 +1283,8 @@ ${after}`)) return;
             key={asset.id} 
             className={cn(
               "col-span-2 md:col-span-1 bg-white rounded-3xl md:rounded-[32px] overflow-hidden border border-black/5 shadow-sm transition-all group",
-              effStatus(asset) === 'used' 
+              // 已使用但還沒審核的不淡掉：那正是要有人去按審核的片（11-06）
+              effStatus(asset) === 'used' && isClientApproved(asset)
                 ? "opacity-50 scale-[0.96] grayscale-[0.5] hover:opacity-80" 
                 : "hover:shadow-md hover:scale-[1.01]"
             )}
@@ -1275,12 +1292,12 @@ ${after}`)) return;
             <div className={cn(
               "bg-[#F5F5F0] relative flex items-center justify-center overflow-hidden transition-all",
               // 沒有縮圖、只有一個灰色圖示：手機上壓成一條，只留兩個標籤（不然一張卡佔半個螢幕）
-              effStatus(asset) === 'used' ? "h-12 md:h-auto md:aspect-[21/9]" : "h-12 md:h-auto md:aspect-video"
+              "h-12"
             )}>
               {asset.type === 'video' ? (
-                <Video size={effStatus(asset) === 'used' ? 32 : 48} className="hidden md:block text-[#5A5A40] opacity-20" />
+                <Video size={20} className="text-[#5A5A40] opacity-20" />
               ) : (
-                <FileText size={effStatus(asset) === 'used' ? 32 : 48} className="hidden md:block text-[#5A5A40] opacity-20" />
+                <FileText size={20} className="text-[#5A5A40] opacity-20" />
               )}
               {asset.url && (
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -1297,7 +1314,7 @@ ${after}`)) return;
                   </a>
                 </div>
               )}
-              <div className="absolute top-1/2 -translate-y-1/2 md:translate-y-0 md:top-4 left-4">
+              <div className="absolute top-1/2 -translate-y-1/2 left-4">
                 <span className={cn(
                   "px-3 py-1 rounded-full text-[13px] font-bold text-white uppercase tracking-wider",
                   asset.stage === 'raw' ? "bg-[#8B7355]" : effStatus(asset) === 'used' ? "bg-gray-400" : "bg-[#5A5A40]"
@@ -1307,7 +1324,7 @@ ${after}`)) return;
                   {asset.category || (asset.stage === 'raw' ? '原始素材' : '未分類')}
                 </span>
               </div>
-              <div className="absolute top-1/2 -translate-y-1/2 md:translate-y-0 md:top-4 right-4">
+              <div className="absolute top-1/2 -translate-y-1/2 right-4">
                 <span className={cn(
                   "px-3 py-1 rounded-full text-[13px] font-bold uppercase tracking-wider",
                   asset.stage === 'raw' ? "bg-[#8B7355]/10 text-[#8B7355] border border-[#8B7355]/20" : 

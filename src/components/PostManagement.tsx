@@ -464,81 +464,37 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
 
   return (
     <div className="readability-surface space-y-6 min-w-0">
-      {/* Statistics Section */}
-      <div className="hidden md:grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
-        {vendorStats.map(stat => (
-          <div key={stat.id} className="bg-white p-4 rounded-3xl border border-black/5 shadow-sm">
-            <div className="flex justify-between items-start mb-2">
-              {/* 單行截斷而非換行：中文換行會從詞中間切、還會留孤字（例如「…門市日／常」）。全名在 title 提示 */}
-              <div className="font-bold text-base truncate pr-2" title={stat.name}>{stat.name}</div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                {stat.monthAdjustments.length > 0 && (
-                  <span className="text-[13px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-100">
-                    {stat.monthAdjustments.reduce((s, a) => s + a.videoDelta, 0) > 0 ? '+' : ''}
-                    {stat.monthAdjustments.reduce((s, a) => s + a.videoDelta, 0)}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => openAdjustModal(stat.vendor)}
-                  className="p-1 text-gray-300 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                  title="本月加贈／扣片調整"
-                >
-                  <Gift size={13} />
+      {/* 各 IP 本月進度：一張小卡一行（11-06 使用者：原本卡片太大，要滑很久才到貼文）。點卡片＝篩這個 IP */}
+      <div className="hidden md:grid grid-cols-2 lg:grid-cols-4 2xl:grid-cols-6 gap-2">
+        {vendorStats.map(stat => {
+          const adj = stat.monthAdjustments.reduce((s, a) => s + a.videoDelta, 0);
+          const done = stat.count >= stat.target;
+          const active = selectedVendorId === stat.id;
+          return (
+            <div key={stat.id}
+              onClick={() => setSelectedVendorId(active ? 'all' : stat.id!)}
+              className={cn('cursor-pointer bg-white px-3 py-2 rounded-xl border shadow-sm transition-colors',
+                active ? 'border-[#5A5A40] ring-1 ring-[#5A5A40]' : 'border-black/5 hover:border-[#5A5A40]/30')}>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="font-bold text-[14px] truncate" title={stat.name}>{stat.name}</span>
+                {adj !== 0 && <span className="text-[11px] font-bold text-amber-600 bg-amber-50 px-1 rounded-full">{adj > 0 ? '+' : ''}{adj}</span>}
+                <button type="button" onClick={e => { e.stopPropagation(); openAdjustModal(stat.vendor); }}
+                  className="p-0.5 text-gray-300 hover:text-amber-600 rounded shrink-0" title="本月加贈／扣片調整">
+                  <Gift size={12} />
                 </button>
-                <div className="text-[13px] font-bold text-gray-500 uppercase tracking-wider">本月進度</div>
+                <span className={cn('ml-auto text-[13px] font-bold tabular-nums shrink-0', done ? 'text-green-700' : 'text-orange-600')}>
+                  {stat.count}<span className="text-gray-400 font-normal">/{stat.target}</span>
+                </span>
               </div>
-            </div>
-            <div className="flex items-end justify-between mb-1">
-              <div className="text-2xl font-bold serif">{stat.count} <span className="text-sm text-gray-500 font-sans">/ {stat.target}</span></div>
-              <div className={cn(
-                "text-[13px] font-bold px-2 py-0.5 rounded-full",
-                stat.count >= stat.target ? "bg-green-100 text-green-700" : "bg-orange-100 text-orange-700"
-              )}>
-                {stat.percentage}%
+              <div className="mt-1.5 w-full h-1 bg-gray-100 rounded-full overflow-hidden">
+                <div className={cn('h-full', done ? 'bg-green-500' : 'bg-orange-400')} style={{ width: `${stat.percentage}%` }} />
               </div>
-            </div>
-            <div className="flex gap-2 mb-2">
-              {stat.hasPosts && (
-                <div className="flex-1">
-                  <div className="flex justify-between text-[13px] font-bold text-blue-400 mb-0.5">
-                    <span>圖文</span>
-                    <span>{stat.postCount}/{stat.targetPosts}</span>
-                  </div>
-                  <div className="w-full h-1 bg-blue-50 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-blue-400 transition-all duration-500"
-                      style={{ width: `${stat.targetPosts > 0 ? Math.min((stat.postCount / stat.targetPosts) * 100, 100) : 0}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-              {stat.hasVideos && (
-                <div className="flex-1">
-                  <div className="flex justify-between text-[13px] font-bold text-orange-400 mb-0.5">
-                    <span>影音</span>
-                    <span>{stat.videoCount}/{stat.targetVideos}</span>
-                  </div>
-                  <div className="w-full h-1 bg-orange-50 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-orange-400 transition-all duration-500"
-                      style={{ width: `${stat.targetVideos > 0 ? Math.min((stat.videoCount / stat.targetVideos) * 100, 100) : 0}%` }}
-                    />
-                  </div>
-                </div>
+              {stat.hasPosts && stat.hasVideos && (
+                <p className="mt-1 text-[11px] text-gray-400">圖文 {stat.postCount}/{stat.targetPosts}・影音 {stat.videoCount}/{stat.targetVideos}</p>
               )}
             </div>
-            <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-              <div 
-                className={cn(
-                  "h-full transition-all duration-500",
-                  stat.count >= stat.target ? "bg-green-500" : "bg-[#5A5A40]"
-                )}
-                style={{ width: `${stat.percentage}%` }}
-              />
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
