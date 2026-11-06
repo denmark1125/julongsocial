@@ -244,7 +244,6 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
             <h3 className="text-base md:text-lg font-bold serif flex items-center gap-2 whitespace-nowrap">
               <ClipboardCheck size={18} className="text-[#5A5A40]" /> 待處理
             </h3>
-            <span className="text-[12px] text-gray-400 whitespace-nowrap">跟 LINE 通知同一套</span>
           </div>
           {todos.length === 0 ? (
             <p className="py-8 text-center text-[14px] text-gray-400 flex items-center justify-center gap-1.5"><CheckCircle2 size={16} className="text-emerald-500" /> 目前沒有要處理的事</p>
