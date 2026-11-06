@@ -6,11 +6,12 @@ import { auth, db } from '../firebase';
 import { Asset, Editor, Post, Vendor } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import { isInternalWork } from '../lib/editorRoster';
-import { VideoSteps, videoProgress } from './VideoProgressSteps';
+import { VideoSteps } from './VideoProgressSteps';
+import { assetOfPost, auditCounts, auditProgress, buildAuditRows, captionChecks, computePrecheck, TONE, tiktokNextCheck, type PrecheckDoc } from '../lib/publishAuditRows';
 import {
   AUDIT_STATUS_ICON, AUDIT_STATUS_LABEL, AUDITABLE_PLATFORMS, describeAudit, type AuditStatus, type PlatformAudit,
 } from '../lib/publishAudit';
-import { describePrecheck, mergeCalendars, precheckAll, unmatchedCards, type PrecheckResult, type VendorCalendar } from '../lib/publishPrecheck';
+import { describePrecheck, mergeCalendars, unmatchedCards, type VendorCalendar } from '../lib/publishPrecheck';
 
 /**
  * 發布稽核（2026-11-05）：某一天排定的貼文，IG/FB 實際有沒有發、發在哪、時間對不對。
@@ -20,23 +21,6 @@ import { describePrecheck, mergeCalendars, precheckAll, unmatchedCards, type Pre
 
 type Report = { text?: string; reportSentAt?: string; unscheduled?: { vendorId: string; platform: string; publishedAt: string; caption: string; permalink?: string }[] };
 
-// 問題排前面，眼睛先看到要處理的
-const SEVERITY: Record<AuditStatus, number> = {
-  wrong_account: 0, no_caption: 0, missing: 1, not_seen: 2, content_mismatch: 3, time_mismatch: 4, pending: 5, ok: 6, skipped: 7, unsupported: 8,
-};
-const TONE: Record<AuditStatus, string> = {
-  wrong_account: 'bg-red-50 text-red-700 border-red-100',
-  missing: 'bg-red-50 text-red-700 border-red-100',
-  not_seen: 'bg-amber-50 text-amber-700 border-amber-100',
-  content_mismatch: 'bg-amber-50 text-amber-700 border-amber-100',
-  no_caption: 'bg-red-50 text-red-700 border-red-100',
-  time_mismatch: 'bg-amber-50 text-amber-700 border-amber-100',
-  pending: 'bg-gray-50 text-gray-500 border-black/5',
-  ok: 'bg-green-50 text-green-700 border-green-100',
-  skipped: 'bg-gray-50 text-gray-400 border-black/5',
-  unsupported: 'bg-gray-50 text-gray-300 border-black/5',
-};
-
 const todayTaipei = () => format(new Date(), 'yyyy-MM-dd');
 
 export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: boolean }) {
@@ -45,7 +29,7 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [report, setReport] = useState<Report | null>(null);
   // 發布前檢查：RPA 機器人（11:55、17:30、18:00）抄回來的 Meta 排程日曆
-  const [precheckDoc, setPrecheckDoc] = useState<{ fetchedAt?: string; tiktokFetchedAt?: string; vendors?: Record<string, VendorCalendar>; tiktok?: Record<string, VendorCalendar> } | null>(null);
+  const [precheckDoc, setPrecheckDoc] = useState<PrecheckDoc | null>(null);
   const [running, setRunning] = useState(false);
   const [runMsg, setRunMsg] = useState('');
   // 「立刻檢查」的結果（不寫資料庫、不推 LINE），蓋在畫面上直到換日期
@@ -65,12 +49,7 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
   const assets = useLiveCollection<Asset>('assets');
   const editors = useLiveCollection<Editor>('editors');
   // 跟伺服器用同一個 precheckAll 算，畫面不另外寫一套
-  const precheck = useMemo(() => {
-    if (!precheckDoc?.vendors && !precheckDoc?.tiktok) return new Map<string, PrecheckResult>();
-    const cals = mergeCalendars(precheckDoc.vendors, precheckDoc.tiktok);
-    const strictPosts = posts.filter(p => vmap.get(p.vendorId)?.strictTiming && cals[p.vendorId]);
-    return new Map(precheckAll(strictPosts as any, cals).map(r => [`${r.postId}|${r.platform}`, r.result]));
-  }, [precheckDoc, posts, vmap]);
+  const precheck = useMemo(() => computePrecheck(precheckDoc, posts, vmap), [precheckDoc, posts, vmap]);
   // Meta 排了、系統當天卻沒有的（看機器人抄的那一刻之後的）
   const precheckExtra = useMemo(() => {
     if ((!precheckDoc?.vendors && !precheckDoc?.tiktok) || !(precheckDoc.fetchedAt || precheckDoc.tiktokFetchedAt)) return [];
@@ -80,38 +59,8 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
   }, [precheckDoc, posts, vmap, day]);
   const vendorName = (id: string) => vmap.get(id)?.name || id;
 
-  // 草稿也列：排上片日自動建的貼文一開始就是草稿，小編不一定會改成已排程，但那天一樣要發
-  const rows = useMemo(() => posts
-    .map(p => {
-      const v = vmap.get(p.vendorId);
-      // 平台順序固定 IG → FB → TikTok → 其他（資料裡的順序是小編點選的順序，每列不一樣很難對照）
-      const order = (pf: string) => { const i = ['IG', 'FB', 'TikTok'].indexOf(pf); return i < 0 ? 9 : i; };
-      const cells = [...(p.platforms || [])].sort((a, b) => order(a) - order(b)).map(pf => {
-        const fresh = preview[`${p.id}|${pf}`];
-        const saved = p.publishAudit?.[pf];
-        const a = fresh || (saved && saved.forScheduledAt === p.scheduledAt ? saved : undefined);
-        // TikTok 靠機器人抄卡片（隔天早上 09:35 才查得到晚上的片），IG/FB 靠 Meta API 每分鐘查
-        const isTikTok = pf === 'TikTok';
-        const configured = isTikTok ? !!v?.tiktokBsId : !!v?.metaFbPageId;
-        const supported = isTikTok || AUDITABLE_PLATFORMS.includes(pf as any);
-        // 沒設粉專／帳號＝根本沒在查，不能顯示成「等待中」騙人，跟尚未支援的平台一樣灰掉、不計數
-        const status: AuditStatus = !supported || !configured ? 'unsupported' : (a?.status || 'pending');
-        return { pf, a, status, configured };
-      });
-      const worst = Math.min(...cells.map(c => SEVERITY[c.status]), 99);
-      return { p, v, cells, worst };
-    })
-    .sort((a, b) => a.worst - b.worst || a.p.scheduledAt.localeCompare(b.p.scheduledAt)),
-  [posts, vmap, preview]);
-
-  const counts = useMemo(() => {
-    const c = { problem: 0, ok: 0, pending: 0 };
-    for (const r of rows) for (const x of r.cells) {
-      if (x.status === 'unsupported' || x.status === 'skipped') continue;
-      if (x.status === 'ok') c.ok++; else if (x.status === 'pending') c.pending++; else c.problem++;
-    }
-    return c;
-  }, [rows]);
+  const rows = useMemo(() => buildAuditRows(posts, vmap, preview), [posts, vmap, preview]);
+  const counts = useMemo(() => auditCounts(rows), [rows]);
 
   // 準時 IP 卻沒設粉專＝整家都沒在稽核，要讓人看得到
   // 只發 TikTok 的（依妍／縈寶）本來就不需要 FB 粉專，不能叫人去設
@@ -202,8 +151,7 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
         ) : (
           <ul className="divide-y divide-black/5">
             {rows.map(({ p, v, cells }) => {
-              const asset = (p.assetId && p.assetId !== 'to_be_added' ? assets.find(a => a.id === p.assetId) : undefined)
-                || assets.find(a => a.plannedPostId === p.id && !a.voidedAt);
+              const asset = assetOfPost(p, assets);
               const prog = auditProgress(p, cells, precheck, asset, !!asset && isInternalWork(asset, vendors, editors));
               return (
               <li key={p.id} className="px-5 py-4 space-y-2">
@@ -398,57 +346,4 @@ function DailyReportCard({ report, vendorName }: { report: Report; vendorName: (
       )}
     </div>
   );
-}
-
-/**
- * TikTok 沒有官方讀取管道，靠電腦上的機器人（09:35／11:55／17:30／18:00，見 rpa-profiles/run-meta-precheck.cmd）。
- * 排定時間之後、現在之後的第一輪就是會確認的時間；18:00 之後發的片要等隔天 09:35（下班關機）。
- */
-const TIKTOK_ROBOT_TIMES = ['09:35', '11:55', '17:30', '18:00'];
-function tiktokNextCheck(scheduledAt: string): string {
-  const now = format(new Date(), "yyyy-MM-dd'T'HH:mm");
-  const from = scheduledAt > now ? scheduledAt : now;
-  const day = from.slice(0, 10);
-  const t = TIKTOK_ROBOT_TIMES.find(x => `${day}T${x}` > from);
-  if (t) return `機器人 ${day === now.slice(0, 10) ? '今天' : `${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))}`} ${t} 確認`;
-  const next = format(addDays(parseISO(day), 1), 'yyyy-MM-dd');
-  return `機器人 ${next === format(addDays(new Date(), 1), 'yyyy-MM-dd') ? '明天' : `${Number(next.slice(5, 7))}/${Number(next.slice(8, 10))}`} 09:35 確認（18:00 後發的片下班後查不到）`;
-}
-
-/**
- * 稽核頁的五站進度：跟董事行事曆同一套（videoProgress），再加上稽核頁才有的兩個訊號——
- * 機器人看到後台各平台都排好了（草稿也算到「小編排程」完成），系統查到各平台都發出去了（就算還沒改綠色也算發布完成）。
- */
-function auditProgress(
-  p: Post, cells: { pf: string; status: AuditStatus; configured: boolean }[], precheck: Map<string, PrecheckResult>,
-  asset: Asset | undefined, internal: boolean,
-): { current: number; note: string } {
-  const today = format(new Date(), 'yyyy-MM-dd');
-  const base = videoProgress(p, asset, today, () => '', internal);
-  // 跟自動改綠色同一個規則：有 IG/FB 就只看 IG/FB，TikTok 不擋
-  const all = cells.filter(c => c.configured && c.status !== 'unsupported');
-  const metaCells = all.filter(c => c.pf === 'IG' || c.pf === 'FB');
-  const checked = metaCells.length ? metaCells : all;
-  if (base.current < 5 && checked.length && checked.every(c => c.status === 'ok' || c.status === 'time_mismatch')) {
-    return { current: 5, note: '各平台都確認發出去了' };
-  }
-  const pre = cells.map(c => precheck.get(`${p.id}|${c.pf}`)).filter(Boolean) as PrecheckResult[];
-  if (base.current < 4 && pre.length && pre.every(r => r.status === 'scheduled')) {
-    return { current: 4, note: `後台已排好，${p.scheduledAt.slice(11, 16)} 發布` };
-  }
-  // 片好了不一定是小編沒排：常常卡在文案還沒寫、內部還沒檢核、業主還沒審文案（11-06 使用者）。照順序講第一個卡住的
-  if (base.current === 3) {
-    const stuck = captionChecks(p).find(c => !c.ok);
-    return { current: 3, note: stuck ? `成片已完成・${stuck.wait}` : '成片與文案皆已確認・待小編排程' };
-  }
-  return base;
-}
-
-/** 貼文本身的三個關卡（貼文詳細頁的「內部檢核」「業主審核」兩個勾選＋文案有沒有寫） */
-function captionChecks(p: Post): { label: string; ok: boolean; wait: string }[] {
-  return [
-    { label: '文案', ok: !!(p.content || '').trim(), wait: '待補文案' },
-    { label: '內部檢核', ok: !!p.internalConfirmed, wait: '待內部檢核文案' },
-    { label: '業主審文案', ok: !!p.clientConfirmed, wait: '待業主審核文案' },
-  ];
 }

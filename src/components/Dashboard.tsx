@@ -1,557 +1,411 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  collection, 
-  query, 
-  onSnapshot, 
-  orderBy,
-  limit 
-} from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
-import { db } from '../firebase';
-import { Post, Vendor, Asset, DismissedHabit, BillingRecord, BillingContract, ShootBooking, UserRole } from '../types';
-import { useLiveCollection } from '../lib/liveData';
-import { visibleVendors, trackedVendors, getVideoStockAlert, getOwedVideoCount, getDeficitBreakdown, getAvailableVideoAssets, hasVideoTrackingScope, LOW_STOCK_RUNWAY_DAYS } from '../lib/vendorStatus';
-import { 
-  format, 
-  isPast, 
-  addDays, 
-  parseISO,
-  isAfter,
-  isBefore,
-  startOfWeek,
-  endOfWeek,
-  isSameDay,
-  getDay,
-  subDays,
-  isSameMonth
-} from 'date-fns';
-import { 
-  AlertTriangle, 
-  Clock, 
-  ArrowRight,
-  ListTodo,
-  BellRing,
-  Plus,
-  AlertCircle,
-  CreditCard,
-  Film,
-  Scissors,
-  Download
-} from 'lucide-react';
-
+import React, { useEffect, useMemo, useState } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { addDays, format, getDay, isSameMonth, parseISO } from 'date-fns';
+import { ArrowRight, Camera, CheckCircle2, ChevronDown, ChevronUp, ClipboardCheck, Download, Radio } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-
-import toast from 'react-hot-toast';
+import { db } from '../firebase';
+import { Asset, BillingContract, BillingRecord, DismissedHabit, Editor, Post, ShootBooking, UserRole, Vendor } from '../types';
+import { useLiveCollection } from '../lib/liveData';
+import { isInternalWork } from '../lib/editorRoster';
+import { getAvailableVideoAssets, getOwedVideoCount, getVideoStockAlert, hasVideoTrackingScope, trackedVendors } from '../lib/vendorStatus';
+import { buildDeficitRows } from '../lib/vendorDeficitRows';
+import { AUDIT_STATUS_ICON, AUDIT_STATUS_LABEL } from '../lib/publishAudit';
+import { assetOfPost, auditCounts, auditProgress, buildAuditRows, captionChecks, computePrecheck, type PrecheckDoc } from '../lib/publishAuditRows';
+import { VIDEO_STEPS } from './VideoProgressSteps';
+import EditReminderExportModal from './EditReminderExportModal';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-import { 
-  PartnerIcon, 
-  GrowthIcon, 
-  SuccessIcon, 
-  InventoryIcon 
-} from './CustomIcons';
-import EditReminderExportModal from './EditReminderExportModal';
+/**
+ * 儀表板＝快速導覽（2026-11-06 改版）。一眼看完四件事：
+ *  1. 今天的片發布到哪一站（跟發布稽核同一套算法，lib/publishAuditRows）
+ *  2. 待處理：跟 LINE 通知講的同一類事情（稽核出錯、後台沒排、片沒好、文案沒寫、缺排程、催剪輯）
+ *  3. 近 7 天排程＋拍攝總覽
+ *  4. 哪個 IP 要約拍（跟製作進度同一套 buildDeficitRows）
+ * 這頁只讀資料不寫入；多讀的只有今天的 publishPrechecks 一份文件。
+ */
+
+const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
+const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+
+type Todo = { tone: 'red' | 'amber' | 'gray'; text: string; sub?: string; tab?: string };
+const TODO_DOT = { red: 'bg-rose-500', amber: 'bg-amber-500', gray: 'bg-gray-300' };
 
 export default function Dashboard({ setActiveTab, currentUserRole }: { setActiveTab: (tab: string) => void; currentUserRole?: UserRole }) {
-  // 共用即時資料層：這幾份整個 session 只訂閱一次，切分頁不再重讀（見 'lib/liveData'）
   const posts = useLiveCollection<Post>('posts');
   const vendors = useLiveCollection<Vendor>('vendors');
   const assets = useLiveCollection<Asset>('assets');
+  const editors = useLiveCollection<Editor>('editors');
   const dismissedHabits = useLiveCollection<DismissedHabit>('dismissedHabits');
   const billingRecords = useLiveCollection<BillingRecord>('billingRecords');
   const contracts = useLiveCollection<BillingContract>('billingContracts');
   const bookings = useLiveCollection<ShootBooking>('shootBookings');
+  const [precheckDoc, setPrecheckDoc] = useState<PrecheckDoc | null>(null);
+  const [showAllTodos, setShowAllTodos] = useState(false);
   const [isEditReminderModalOpen, setIsEditReminderModalOpen] = useState(false);
-  const [isTestingPush, setIsTestingPush] = useState(false);
+  // 每分鐘重算一次「現在」，今晚的片過了時間會自己往下一站走
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 60_000); return () => clearInterval(t); }, []);
 
-  const handleTestStockAlertPush = async () => {
-    setIsTestingPush(true);
-    try {
-      const auth = getAuth();
-      const idToken = await auth.currentUser?.getIdToken();
-      if (!idToken) {
-        toast.error('認證失敗，請重新登入');
-        return;
+  const today = format(now, 'yyyy-MM-dd');
+  const nowStamp = format(now, "yyyy-MM-dd'T'HH:mm");
+  const canAudit = currentUserRole === 'engineer' || currentUserRole === 'manager';
+
+  useEffect(() => onSnapshot(doc(db, 'publishPrechecks', today), s => setPrecheckDoc(s.exists() ? (s.data() as PrecheckDoc) : null), () => setPrecheckDoc(null)), [today]);
+
+  const vmap = useMemo(() => new Map(vendors.map(v => [v.id!, v])), [vendors]);
+  const name = (id: string) => vmap.get(id)?.name || '未知IP';
+
+  // ── 1. 今天的片 ──
+  const todayPosts = useMemo(() => posts.filter(p => (p.scheduledAt || '').slice(0, 10) === today && vmap.has(p.vendorId)), [posts, today, vmap]);
+  const precheck = useMemo(() => computePrecheck(precheckDoc, todayPosts, vmap), [precheckDoc, todayPosts, vmap]);
+  const auditRows = useMemo(() => buildAuditRows(todayPosts, vmap), [todayPosts, vmap]);
+  const counts = useMemo(() => auditCounts(auditRows), [auditRows]);
+  const live = useMemo(() => auditRows
+    .map(r => {
+      const asset = assetOfPost(r.p, assets);
+      const prog = auditProgress(r.p, r.cells, precheck, asset, !!asset && isInternalWork(asset, vendors, editors));
+      // 系統是「已排程」但機器人看到後台沒排＝兩邊說法不同，以後台為準顯示紅字（還沒到時間才講）
+      const notScheduled = r.p.scheduledAt > nowStamp && prog.current < 5
+        ? r.cells.filter(c => precheck.get(`${r.p.id}|${c.pf}`)?.status === 'not_scheduled').map(c => c.pf) : [];
+      const note = notScheduled.length ? `${notScheduled.join('/')} 後台還沒排`
+        : prog.note.startsWith('已排程') ? `已排程・今天 ${r.p.scheduledAt.slice(11, 16)} 發布` : prog.note;
+      return { ...r, prog: { current: prog.current, note }, notScheduled };
+    })
+    .sort((a, b) => a.p.scheduledAt.localeCompare(b.p.scheduledAt)),
+  [auditRows, assets, precheck, vendors, editors, nowStamp]);
+  const doneToday = live.filter(r => r.prog.current >= 5).length;
+
+  // ── 4. 拍攝：哪個 IP 要約拍（製作進度同一套）＋庫存撐不到 14 天的 ──
+  const deficitRows = useMemo(() => buildDeficitRows(vendors, posts, assets, bookings, today), [vendors, posts, assets, bookings, today]);
+  const stock = useMemo(() => {
+    const month = today.slice(0, 7);
+    return new Map(vendors.filter(v => hasVideoTrackingScope(v, month)).map(v => {
+      const free = getAvailableVideoAssets(v.id!, assets, posts);
+      const owed = getOwedVideoCount(v, posts, assets, free.length);
+      return [v.id!, getVideoStockAlert(v, free, owed)] as const;
+    }));
+  }, [vendors, assets, posts, today]);
+  const needShoot = deficitRows
+    .filter(r => !r.active && !r.isEnded && (r.owed > 0 || stock.get(r.vendor.id!)?.severity === 'shoot'))
+    .map(r => {
+      const s = stock.get(r.vendor.id!);
+      const days = s?.totalRunwayDays != null ? Math.max(0, Math.floor(s.totalRunwayDays)) : null;
+      return { r, days, urgent: r.sev === 'crit' || (days != null && days <= 7) };
+    })
+    .sort((a, b) => Number(b.urgent) - Number(a.urgent) || b.r.owed - a.r.owed);
+  const overdueShoots = deficitRows.filter(r => r.overdue);
+  const horizon = format(addDays(now, 14), 'yyyy-MM-dd');
+  const upcomingShoots = bookings
+    .filter(b => b.status === 'booked' && b.scheduledDate >= today && b.scheduledDate <= horizon)
+    .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate) || (a.startTime || '').localeCompare(b.startTime || ''));
+
+  // ── 3. 近 7 天 ──
+  const days = Array.from({ length: 7 }, (_, i) => format(addDays(now, i), 'yyyy-MM-dd'));
+  const missing = useMemo(() => {
+    const out: { vendorId: string; date: string; time: string }[] = [];
+    for (const date of days) {
+      const dow = getDay(parseISO(date));
+      for (const v of trackedVendors(vendors)) {
+        for (const h of (v.postingHabits || []).filter(h => h.daysOfWeek.includes(dow))) {
+          if (dismissedHabits.some(d => d.vendorId === v.id && d.habitTime === h.time && d.date === date)) continue;
+          // 前後一天有排就算有（沿用原本缺漏排程的判斷）
+          const near = [format(addDays(parseISO(date), -1), 'yyyy-MM-dd'), date, format(addDays(parseISO(date), 1), 'yyyy-MM-dd')];
+          if (posts.some(p => p.vendorId === v.id && near.includes((p.scheduledAt || '').slice(0, 10)))) continue;
+          out.push({ vendorId: v.id!, date, time: h.time });
+        }
       }
-      const response = await fetch('/api/admin/test-stock-alert-push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        toast.error(data.error || '推播測試失敗');
-      } else if (!data.pushed) {
-        toast(data.reason === 'no recipients bound' ? '沒有工程師綁定LINE，無法推播' : '目前沒有告急IP，不用推播', { icon: 'ℹ️' });
-      } else {
-        toast.success(`已推播給 ${data.recipientCount} 位工程師`);
-      }
-    } catch (e) {
-      toast.error('推播測試發生錯誤');
-    } finally {
-      setIsTestingPush(false);
     }
-  };
+    return out;
+  }, [vendors, posts, dismissedHabits, days.join()]);
 
+  // ── 2. 待處理（跟 LINE 通知同類的事） ──
+  const todos: Todo[] = [];
+  for (const r of live) {
+    const t = r.p.scheduledAt.slice(11, 16);
+    for (const c of r.cells) {
+      if (['wrong_account', 'missing', 'no_caption'].includes(c.status)) todos.push({ tone: 'red', text: `${r.v?.name} ${c.pf} ${AUDIT_STATUS_LABEL[c.status]}`, sub: `今天 ${t}「${r.p.title}」`, tab: 'publishAudit' });
+      else if (['not_seen', 'content_mismatch', 'time_mismatch'].includes(c.status)) todos.push({ tone: 'amber', text: `${r.v?.name} ${c.pf} ${AUDIT_STATUS_LABEL[c.status]}`, sub: `今天 ${t}「${r.p.title}」`, tab: 'publishAudit' });
+    }
+    if (r.p.scheduledAt > nowStamp && r.prog.current < 5) {
+      if (r.notScheduled.length) todos.push({ tone: 'red', text: `${r.v?.name} 今天 ${t} ${r.notScheduled.join('/')} 後台還沒排`, sub: `機器人 ${precheckDoc?.fetchedAt ? format(parseISO(precheckDoc.fetchedAt), 'HH:mm') : ''} 看的・「${r.p.title}」`, tab: 'publishAudit' });
+      else if (r.prog.current < 4) todos.push({ tone: r.prog.current < 3 ? 'red' : 'amber', text: `${r.v?.name} 今天 ${t}：${r.prog.note}`, sub: `「${r.p.title}」`, tab: 'publishAudit' });
+    }
+  }
+  const tomorrow = days[1];
+  for (const p of posts.filter(p => (p.scheduledAt || '').slice(0, 10) === tomorrow && vmap.has(p.vendorId) && p.status !== 'published')) {
+    const stuck = captionChecks(p).filter(c => !c.ok).map(c => c.label);
+    if (stuck.length) todos.push({ tone: 'amber', text: `${name(p.vendorId)} 明天 ${p.scheduledAt.slice(11, 16)} 文案待完成：${stuck.join('、')}`, sub: `「${p.title}」`, tab: 'posts' });
+  }
+  for (const r of overdueShoots) todos.push({ tone: 'amber', text: `${r.vendor.name} ${md(r.active!.scheduledDate)} 的拍攝還沒回報結果`, sub: '到製作進度按「拍完／延期／取消」', tab: 'shootBookings' });
+  for (const m of missing) todos.push({ tone: 'amber', text: `${name(m.vendorId)} ${md(m.date)}（${WEEK[getDay(parseISO(m.date))]}）${m.time} 還沒排程`, sub: '依發片習慣應該要有一支', tab: 'posts' });
+  const editAlerts = vendors.filter(v => stock.get(v.id!)?.severity === 'edit');
+  for (const v of editAlerts) {
+    const s = stock.get(v.id!)!;
+    todos.push({ tone: 'amber', text: `${v.name} 成片只夠撐 ${Math.max(0, Math.floor(s.finishedRunwayDays!))} 天`, sub: `另有 ${s.rawStock} 部待剪，請催剪輯優先處理`, tab: 'videos' });
+  }
+  const in30 = format(addDays(now, 30), 'yyyy-MM-dd');
+  for (const c of contracts.filter(c => c.status === 'active' && c.endDate && c.endDate >= today && c.endDate <= in30)) {
+    todos.push({ tone: 'gray', text: `${name(c.vendorId)} 合約 ${md(c.endDate!)} 到期`, tab: 'billing' });
+  }
+  const unpaid = billingRecords.filter(r => r.status !== 'paid' && r.dueDate && isSameMonth(parseISO(r.dueDate), now));
+  if (unpaid.length) todos.push({ tone: 'gray', text: `本月還有 ${unpaid.length} 筆帳款未收`, sub: `共 $${unpaid.reduce((s, r) => s + (r.amount || 0), 0).toLocaleString()}`, tab: 'billing' });
+  const toneRank = { red: 0, amber: 1, gray: 2 };
+  todos.sort((a, b) => toneRank[a.tone] - toneRank[b.tone]);
+  const shownTodos = showAllTodos ? todos : todos.slice(0, 7);
+  const redCount = todos.filter(t => t.tone === 'red').length;
 
-  const stats = [
-    { label: '合作廠商', value: visibleVendors(vendors).length, icon: PartnerIcon, color: 'text-[#5A5A40]', bg: 'bg-[#5A5A40]/10' },
-    { label: '本月貼文', value: posts.length, icon: GrowthIcon, color: 'text-[#8B7355]', bg: 'bg-[#8B7355]/10' },
-    { label: '已發布', value: posts.filter(p => p.status === 'published').length, icon: SuccessIcon, color: 'text-[#8A8A6A]', bg: 'bg-[#8A8A6A]/10' },
-    { label: '素材庫存', value: assets.filter(a => a.status === 'available').length, icon: InventoryIcon, color: 'text-[#A67C52]', bg: 'bg-[#A67C52]/10' },
+  const weekShoots = bookings.filter(b => b.status === 'booked' && b.scheduledDate >= today && b.scheduledDate <= days[6]).length;
+  const kpis = [
+    { label: '今天要發', value: live.length, sub: live.length ? `已確認發出 ${doneToday} 支` : '今天沒有排程', tone: 'text-[#1a1a1a]', tab: canAudit ? 'publishAudit' : 'posts' },
+    { label: '待處理', value: todos.filter(t => t.tone !== 'gray').length, sub: redCount ? `其中 ${redCount} 件要馬上處理` : '沒有緊急的事', tone: redCount ? 'text-rose-600' : 'text-[#1a1a1a]' },
+    { label: '需要約拍', value: needShoot.length, sub: needShoot.length ? `${needShoot.filter(x => x.urgent).length} 個 IP 很急` : '每個 IP 都有安排', tone: needShoot.some(x => x.urgent) ? 'text-orange-600' : 'text-[#1a1a1a]', tab: 'shootBookings' },
+    { label: '7 天內拍攝', value: weekShoots, sub: `14 天內共 ${upcomingShoots.length} 場`, tone: 'text-[#1a1a1a]', tab: 'shootCalendar' },
   ];
 
-  // Video Stock Alert：分兩級——'shoot'=連原始素材都不夠撐 LOW_STOCK_RUNWAY_DAYS 天，要安排拍攝；
-  // 'edit'=素材夠但沒剪完，成片撐不到天數，催剪輯優先處理。
-  // 用 hasVideoTrackingScope 而非 trackedVendors：冷凍中的廠商如果還留有舊欠片，一樣要提醒，不能因為冷凍就從告警清單消失
-  // （這個月本身不會疊加新短缺/新的撐幾天壓力，那部分邏輯在 getDeficitBreakdown/getWeeklyPace 內部已經處理）
-  // ERP裡不分派任何人都看得到全部（跟催不分你我）；assignedUserIds只用來過濾未來的LINE推播，不影響這裡
-  const dashboardMonth = format(new Date(), 'yyyy-MM');
-  const stockAlertVendors = vendors
-    .filter(v => hasVideoTrackingScope(v, dashboardMonth))
-    .map(vendor => {
-    const vendorVideoAssets = getAvailableVideoAssets(vendor.id!, assets, posts);
-    const owed = getOwedVideoCount(vendor, posts, assets, vendorVideoAssets.length);
-    const alert = getVideoStockAlert(vendor, vendorVideoAssets, owed);
-    const currentMonthEntry = getDeficitBreakdown(vendor, posts, assets, dashboardMonth).monthlyShortfalls.find(e => e.month === dashboardMonth);
-    const activeBooking = bookings
-      .filter(b => b.vendorId === vendor.id && b.status === 'booked')
-      .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate))[0] || null;
-    return { ...vendor, ...alert, activeBooking, monthTarget: currentMonthEntry?.target, expectedByNow: currentMonthEntry?.expectedByNow };
-  }).filter(v => v.severity !== null)
-    .sort((a, b) => (a.severity === 'shoot' ? 0 : 1) - (b.severity === 'shoot' ? 0 : 1));
-
-  // Reminders: Posts that need attention
-  const approvalReminders = posts.filter(p => {
-    const scheduledDate = parseISO(p.scheduledAt);
-    const fiveDaysFromNow = addDays(new Date(), 5);
-    const threeDaysFromNow = addDays(new Date(), 3);
-    const twoDaysFromNow = addDays(new Date(), 2);
-    
-    const needsInternal = !p.internalConfirmed && isBefore(scheduledDate, fiveDaysFromNow) && isAfter(scheduledDate, new Date());
-    const needsClient = !p.clientConfirmed && isBefore(scheduledDate, threeDaysFromNow) && isAfter(scheduledDate, new Date());
-    const needsSchedule = p.status === 'draft' && isBefore(scheduledDate, twoDaysFromNow) && isAfter(scheduledDate, new Date());
-    
-    return needsInternal || needsClient || needsSchedule;
-  });
-
-  // Missing Schedule Logic: Check next 7 days
-  const missingSchedules = [];
-  const today = new Date();
-  for (let i = 0; i < 7; i++) {
-    const checkDate = addDays(today, i);
-    const dayOfWeek = getDay(checkDate);
-    const dateStr = format(checkDate, 'yyyy-MM-dd');
-    
-    trackedVendors(vendors).forEach(vendor => {
-      const habits = vendor.postingHabits || [];
-      const dayHabits = habits.filter(h => h.daysOfWeek.includes(dayOfWeek));
-
-      dayHabits.forEach(habit => {
-        // Check if dismissed
-        const isDismissed = dismissedHabits.some(d => 
-          d.vendorId === vendor.id && 
-          d.habitTime === habit.time && 
-          d.date === dateStr
-        );
-
-        if (isDismissed) return;
-
-        // Check if fulfilled (post on day +/- 1)
-        const isFulfilled = posts.some(p => 
-          p.vendorId === vendor.id && 
-          (
-            isSameDay(parseISO(p.scheduledAt), checkDate) || 
-            isSameDay(parseISO(p.scheduledAt), subDays(checkDate, 1)) ||
-            isSameDay(parseISO(p.scheduledAt), addDays(checkDate, 1))
-          )
-        );
-        
-        if (!isFulfilled) {
-          missingSchedules.push({
-            vendorId: vendor.id,
-            vendorName: vendor.name,
-            date: checkDate,
-            habit: habit
-          });
-        }
-      });
-    });
-  }
-
-  const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
-  const weekEnd = endOfWeek(new Date(), { weekStartsOn: 1 });
-  const thisWeekPosts = posts.filter(p => {
-    if (!p.scheduledAt || p.scheduledAt.length === 0) return false;
-    const d = parseISO(p.scheduledAt);
-    return isAfter(d, weekStart) && isBefore(d, weekEnd);
-  });
-
-  const todoList = {
-    needsInternal: thisWeekPosts.filter(p => !p.internalConfirmed),
-    needsClient: thisWeekPosts.filter(p => p.internalConfirmed && !p.clientConfirmed),
-    readyToSchedule: thisWeekPosts.filter(p => p.internalConfirmed && p.clientConfirmed && p.status === 'draft')
-  };
-
-  const pendingBills = billingRecords.filter(r => 
-    r.status !== 'paid' && 
-    isSameMonth(parseISO(r.dueDate), new Date())
-  );
-
-  // Expiring Contracts (within 30 days)
-  const expiringContracts = contracts.filter(c => {
-    if (!c.endDate) return false;
-    const end = parseISO(c.endDate);
-    const diff = addDays(new Date(), 30);
-    return isBefore(end, diff) && isAfter(end, subDays(new Date(), 1)) && c.status === 'active';
-  });
-
   return (
-    <div className="space-y-4 md:space-y-8">
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6">
-        {stats.map((stat, i) => (
-          <div key={i} className="bg-white p-4 md:p-6 rounded-2xl md:rounded-[32px] shadow-sm border border-black/5 flex flex-col md:flex-row items-center md:items-center space-y-2 md:space-y-0 md:space-x-4 text-center md:text-left">
-            <div className={`${stat.bg} p-3 md:p-4 rounded-xl md:rounded-2xl`}>
-              <stat.icon className={cn(stat.color, "w-5 h-5 md:w-6 md:h-6")} />
-            </div>
-            <div>
-              <p className="text-[13px] md:text-sm text-gray-500 font-medium">{stat.label}</p>
-              <p className="text-lg md:text-2xl font-bold">{stat.value}</p>
-            </div>
-          </div>
+    <div className="space-y-4 md:space-y-6">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-xl md:text-2xl font-bold serif text-[#5A5A40] whitespace-nowrap">{md(today)}（{WEEK[getDay(now)]}）今日概況</h2>
+        <span className="text-[13px] text-gray-400 whitespace-nowrap">{format(now, 'HH:mm')} 更新</span>
+      </div>
+
+      {/* 四個數字 */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {kpis.map(k => (
+          <button key={k.label} onClick={() => k.tab && setActiveTab(k.tab)} disabled={!k.tab}
+            className="text-left bg-white rounded-2xl border border-black/5 shadow-sm px-4 py-3 md:px-5 md:py-4 enabled:hover:border-[#5A5A40]/30 transition-colors">
+            <p className="text-[13px] font-bold text-gray-400 whitespace-nowrap">{k.label}</p>
+            <p className={cn('text-2xl md:text-3xl font-bold tabular-nums leading-tight', k.tone)}>{k.value}</p>
+            <p className="text-[12px] text-gray-500 truncate">{k.sub}</p>
+          </button>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-8">
-        {/* Main Column - To-Do & Activity */}
-        <div className="lg:col-span-8 space-y-4 md:space-y-8">
-          {/* Weekly To-Do */}
-          <div className="bg-white p-5 md:p-8 rounded-3xl md:rounded-[40px] border border-black/5 shadow-sm space-y-4 md:space-y-6">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg md:text-xl font-bold serif flex items-center">
-                <ListTodo className="text-[#5A5A40] mr-2 w-5 h-5 md:w-6 md:h-6" />
-                本週工作清單
-              </h3>
-              <span className="text-[13px] md:text-xs text-gray-400 font-medium">
-                {format(weekStart, 'MM/dd')} - {format(weekEnd, 'MM/dd')}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6">
+        {/* 今日發布即時動態 */}
+        <section className="lg:col-span-8 bg-white rounded-3xl border border-black/5 shadow-sm p-4 md:p-6 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-base md:text-lg font-bold serif flex items-center gap-2 whitespace-nowrap">
+              <Radio size={18} className="text-[#5A5A40]" /> 今日發布動態
+            </h3>
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="text-[12px] text-gray-400 truncate hidden sm:inline">
+                {precheckDoc?.fetchedAt ? `機器人 ${format(parseISO(precheckDoc.fetchedAt), 'HH:mm')} 看過後台排程` : '機器人今天還沒看過後台排程'}
+                {counts.problem > 0 && <span className="text-rose-600 font-bold">・{counts.problem} 項要注意</span>}
               </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
-              {[
-                { label: '待主管審核', count: todoList.needsInternal.length, color: 'bg-purple-500', list: todoList.needsInternal },
-                { label: '待客戶審核', count: todoList.needsClient.length, color: 'bg-blue-500', list: todoList.needsClient },
-                { label: '待排程發布', count: todoList.readyToSchedule.length, color: 'bg-green-500', list: todoList.readyToSchedule }
-              ].map((group, idx) => (
-                <div key={idx} className="bg-[#F5F5F0] p-4 md:p-5 rounded-2xl md:rounded-3xl space-y-3 md:space-y-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-[13px] md:text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center">
-                      <span className={`w-1.5 h-1.5 md:w-2 md:h-2 ${group.color} rounded-full mr-1.5 md:mr-2`}></span>
-                      {group.label}
-                    </p>
-                    <span className="text-[13px] md:text-xs font-bold text-gray-400">{group.count}</span>
-                  </div>
-                  <div className="space-y-2">
-                    {group.list.slice(0, 3).map(p => (
-                      <div key={p.id} className="bg-white p-2.5 md:p-3 rounded-xl text-[13px] shadow-sm border border-black/5">
-                        <p className="font-bold truncate mb-0.5 md:mb-1">{p.title}</p>
-                        <p className="text-gray-400 flex items-center">
-                          <Clock size={8} md:size={10} className="mr-1" />
-                          {p.scheduledAt && p.scheduledAt.length > 0 ? format(parseISO(p.scheduledAt), 'MM/dd HH:mm') : '未定'}
-                        </p>
-                      </div>
-                    ))}
-                    {group.count === 0 && <p className="text-[13px] text-gray-400 italic text-center py-2 md:py-4">無待辦事項</p>}
-                    {group.count > 3 && <p className="text-[13px] text-center text-[#5A5A40] font-bold">還有 {group.count - 3} 項...</p>}
-                  </div>
-                </div>
-              ))}
+              {canAudit && <GoLink onClick={() => setActiveTab('publishAudit')}>發布稽核</GoLink>}
             </div>
           </div>
-
-          {/* Recent Activity */}
-          <div className="bg-white p-5 md:p-8 rounded-3xl md:rounded-[40px] border border-black/5 shadow-sm space-y-4 md:space-y-6">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg md:text-xl font-bold serif">近期排程概覽</h3>
-              <button onClick={() => setActiveTab('posts')} className="text-xs md:text-sm text-[#5A5A40] font-bold hover:underline flex items-center">
-                查看全部 <ArrowRight size={12} md:size={14} className="ml-1" />
-              </button>
-            </div>
-            <div className="space-y-2 md:space-y-4">
-              {[...posts]
-                .filter(p => p.scheduledAt)
-                .sort((a, b) => (b.scheduledAt || '').localeCompare(a.scheduledAt || ''))
-                .slice(0, 5)
-                .map(post => {
-                const vendor = vendors.find(v => v.id === post.vendorId);
+          {live.length === 0 ? (
+            <p className="py-8 text-center text-[14px] text-gray-400">今天沒有排程</p>
+          ) : (
+            <ul className="divide-y divide-black/5">
+              {live.map(({ p, v, cells, prog, notScheduled }) => {
+                const bad = notScheduled.length > 0 || cells.some(c => ['wrong_account', 'missing', 'no_caption'].includes(c.status));
                 return (
-                  <div key={post.id} className="flex items-center justify-between p-3 md:p-4 rounded-2xl md:rounded-3xl hover:bg-[#F5F5F0] transition-colors group">
-                    <div className="flex items-center space-x-3 md:space-x-4">
-                      <div className="w-12 h-12 md:w-14 md:h-14 bg-[#F5F5F0] group-hover:bg-white rounded-xl md:rounded-2xl flex flex-col items-center justify-center text-[#5A5A40] transition-colors">
-                        <span className="text-[13px] font-bold uppercase">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'MMM') : '-'}</span>
-                        <span className="text-lg md:text-xl font-bold leading-none">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'dd') : '-'}</span>
-                      </div>
-                      <div className="max-w-[140px] md:max-w-[200px]">
-                        <p className="font-bold text-xs md:text-sm truncate">{post.title}</p>
-                        <p className="text-[13px] md:text-xs text-gray-400 truncate">{vendor?.name} • {post.platforms.join(', ')}</p>
+                  <li key={p.id} className="py-3 grid grid-cols-[48px_1fr] gap-x-3 gap-y-1.5">
+                    <span className={cn('text-[15px] font-bold tabular-nums', p.scheduledAt <= nowStamp ? 'text-gray-400' : 'text-[#1a1a1a]')}>{p.scheduledAt.slice(11, 16)}</span>
+                    <div className="min-w-0 flex items-baseline gap-2">
+                      <span className="text-[14px] font-bold whitespace-nowrap">{v?.name}</span>
+                      {v?.strictTiming && <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-[#5A5A40]/10 text-[#5A5A40] font-bold whitespace-nowrap">準時</span>}
+                      <span className="text-[13px] text-gray-500 truncate min-w-0">{p.title}</span>
+                    </div>
+                    <span />
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 min-w-0">
+                      <MiniSteps current={prog.current} />
+                      <span className={cn('text-[13px] font-bold truncate min-w-0', bad ? 'text-rose-600' : prog.current >= 5 ? 'text-[#5A5A40]' : 'text-orange-700')}>{prog.note}</span>
+                      <div className="flex gap-1.5 sm:ml-auto shrink-0">
+                        {cells.filter(c => c.status !== 'unsupported').map(c => (
+                          <span key={c.pf} title={`${c.pf}：${AUDIT_STATUS_LABEL[c.status]}`}
+                            className={cn('text-[12px] px-2 py-0.5 rounded-full font-bold whitespace-nowrap border',
+                              c.status === 'ok' ? 'bg-green-50 text-green-700 border-green-100'
+                                : c.status === 'pending' ? 'bg-gray-50 text-gray-400 border-black/5'
+                                : ['wrong_account', 'missing', 'no_caption'].includes(c.status) ? 'bg-red-50 text-red-700 border-red-100'
+                                : 'bg-amber-50 text-amber-700 border-amber-100')}>
+                            {c.status === 'pending' ? '' : `${AUDIT_STATUS_ICON[c.status]} `}{c.pf}
+                          </span>
+                        ))}
                       </div>
                     </div>
-                    <div className="flex items-center space-x-2 md:space-x-4">
-                      <span className={cn(
-                        "text-[13px] px-2 md:px-3 py-0.5 md:py-1 rounded-full font-bold uppercase tracking-wider",
-                        post.status === 'published' ? "bg-green-100 text-green-700" : 
-                        post.status === 'scheduled' ? "bg-blue-100 text-blue-700" : 
-                        post.status === 'pending' ? "bg-orange-100 text-orange-700" : 
-                        "bg-gray-100 text-gray-600"
-                      )}>
-                        {post.status === 'published' ? '已發布' : post.status === 'scheduled' ? '已排程' : post.status === 'pending' ? '待補中' : '草稿'}
-                      </span>
-                    </div>
-                  </div>
+                  </li>
                 );
               })}
-            </div>
-          </div>
-        </div>
-
-        {/* Sidebar Column - Alerts & Stock */}
-        <div className="lg:col-span-4 space-y-4 md:space-y-8">
-          {/* Video Stock Alert */}
-          <div className="bg-[#5A5A40] p-5 md:p-8 rounded-3xl md:rounded-[40px] text-white space-y-4 md:space-y-6 shadow-xl">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base md:text-lg font-bold serif flex items-center">
-                <AlertCircle className="mr-2" size={18} md:size={20} />
-                影片素材警示
-              </h3>
-              <span className="bg-white/20 px-2 py-1 rounded-lg text-[13px] md:text-xs font-bold">
-                低於 {LOW_STOCK_RUNWAY_DAYS} 天
-              </span>
-            </div>
-            {stockAlertVendors.some(v => v.severity === 'edit') && (
-              <button
-                onClick={() => setIsEditReminderModalOpen(true)}
-                className="w-full bg-white/10 hover:bg-white/20 text-white text-xs font-bold py-2 rounded-xl transition-colors flex items-center justify-center"
-              >
-                <Download size={14} className="mr-1.5" /> 導出催剪輯清單
-              </button>
-            )}
-            {currentUserRole === 'engineer' && (
-              <button
-                onClick={handleTestStockAlertPush}
-                disabled={isTestingPush}
-                className="w-full bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white text-xs font-bold py-2 rounded-xl transition-colors flex items-center justify-center"
-              >
-                <BellRing size={14} className="mr-1.5" /> {isTestingPush ? '推播測試中...' : '測試LINE庫存推播'}
-              </button>
-            )}
-            <div className="space-y-2 md:space-y-3">
-              {stockAlertVendors.length > 0 ? stockAlertVendors.map(v => (
-                <div key={v.id} className="bg-white/10 p-3 md:p-4 rounded-xl md:rounded-2xl flex justify-between items-center backdrop-blur-sm">
-                  <div className="flex items-start space-x-2">
-                    {v.severity === 'shoot' ? (
-                      <Film size={16} className="text-red-300 mt-0.5 shrink-0" />
-                    ) : (
-                      <Scissors size={16} className="text-amber-300 mt-0.5 shrink-0" />
-                    )}
-                    <div>
-                      <p className="font-bold text-xs md:text-sm">
-                        {v.name}
-                        <span className={cn(
-                          "ml-2 px-1.5 py-0.5 rounded text-[13px] font-bold align-middle",
-                          v.severity === 'shoot' ? "bg-red-400/30 text-red-100" : "bg-amber-400/30 text-amber-100"
-                        )}>
-                          {v.severity === 'shoot' ? '需拍片' : '催剪輯'}
-                        </span>
-                      </p>
-                      {v.severity === 'shoot' ? (
-                        <>
-                          <p className="text-[13px] md:text-xs text-white/60">
-                            成片+素材共 {v.finishedStock + v.rawStock} 部
-                            {v.owed > 0
-                              ? `，累計已欠 ${v.owed} 支`
-                              : `，只夠撐 ${Math.max(0, Math.floor(v.totalRunwayDays!))} 天`}
-                            ，需盡快安排拍攝
-                          </p>
-                          {v.owed > 0 && v.expectedByNow !== undefined && (
-                            <p className="text-[13px] text-white/40">
-                              （本月目標 {v.monthTarget} 支・照節奏目前應交 {Math.max(0, Math.round(v.expectedByNow))} 支）
-                            </p>
-                          )}
-                        </>
-                      ) : (
-                        <p className="text-[13px] md:text-xs text-white/60">
-                          成片剩 {v.finishedStock} 部只夠撐 {Math.max(0, Math.floor(v.finishedRunwayDays!))} 天，另有 {v.rawStock} 部待剪
-                          {v.editorName ? `，麻煩去催剪輯師「${v.editorName}」優先剪` : '，麻煩去催剪輯師優先剪'}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {v.activeBooking && (
-                      <span className="bg-emerald-400/20 text-emerald-100 px-2 py-1 rounded-lg text-[13px] font-bold whitespace-nowrap">
-                        已預約 {format(parseISO(v.activeBooking.scheduledDate), 'MM/dd')}
-                      </span>
-                    )}
-                    <button
-                      onClick={() => setActiveTab(v.severity === 'shoot' ? 'shootBookings' : 'videos')}
-                      className="bg-white text-[#5A5A40] p-1.5 md:p-2 rounded-lg md:rounded-xl hover:scale-105 transition-transform shrink-0"
-                    >
-                      <Plus size={14} md:size={16} />
-                    </button>
-                  </div>
-                </div>
-              )) : (
-                <div className="text-center py-4 text-white/60 italic text-xs md:text-sm">
-                  目前庫存充足
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Missing Schedules */}
-          <div className="bg-white p-5 md:p-8 rounded-3xl md:rounded-[40px] border border-black/5 shadow-sm space-y-4 md:space-y-6">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base md:text-lg font-bold serif flex items-center">
-                <BellRing className="text-[#A67C52] mr-2" size={18} md:size={20} />
-                缺漏排程提醒
-              </h3>
-              <span className="bg-[#A67C52]/10 text-[#A67C52] text-[13px] md:text-xs font-bold px-2 py-0.5 md:py-1 rounded-full">
-                {missingSchedules.length}
-              </span>
-            </div>
-            <div className="space-y-2 md:space-y-3">
-              {missingSchedules.slice(0, 5).map((miss, idx) => (
-                <div key={idx} className="p-3 md:p-4 bg-[#F5F5F0] rounded-xl md:rounded-2xl flex justify-between items-center">
-                  <div>
-                    <p className="text-[13px] md:text-xs font-bold text-gray-700">{miss.vendorName}</p>
-                    <p className="text-[13px] text-gray-400">
-                      {format(miss.date, 'MM/dd (eee)')} {miss.habit.time}
-                    </p>
-                  </div>
-                  <button onClick={() => setActiveTab('posts')} className="text-[#5A5A40] hover:scale-110 transition-transform">
-                    <Plus size={14} md:size={16} />
-                  </button>
-                </div>
-              ))}
-              {missingSchedules.length === 0 && (
-                <div className="text-center py-6 md:py-8 text-gray-400 italic text-xs md:text-sm">
-                  排程已全數完成
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Urgent Approvals */}
-          <div className="bg-white p-5 md:p-8 rounded-3xl md:rounded-[40px] border border-black/5 shadow-sm space-y-4 md:space-y-6">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base md:text-lg font-bold serif flex items-center">
-                <AlertTriangle className="text-[#8B4513] mr-2" size={18} md:size={20} />
-                緊急審核
-              </h3>
-              <span className="bg-[#8B4513]/10 text-[#8B4513] text-[13px] md:text-xs font-bold px-2 py-0.5 md:py-1 rounded-full">
-                {approvalReminders.length}
-              </span>
-            </div>
-            <div className="space-y-2 md:space-y-3">
-              {approvalReminders.slice(0, 3).map(post => (
-                <div key={post.id} className="p-3 md:p-4 border border-[#8B4513]/10 rounded-xl md:rounded-2xl bg-[#8B4513]/5 space-y-1 md:space-y-2">
-                  <p className="text-[13px] md:text-xs font-bold truncate">{post.title}</p>
-                  <div className="flex justify-between items-center">
-                    <span className="text-[13px] text-gray-400">{post.scheduledAt ? format(parseISO(post.scheduledAt), 'MM/dd HH:mm') : '-'}</span>
-                    <button onClick={() => setActiveTab('posts')} className="text-[13px] md:text-xs text-[#8B4513] font-bold">
-                      處理
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Pending Bills */}
-          <div className="bg-white p-5 md:p-8 rounded-3xl md:rounded-[40px] border border-black/5 shadow-sm space-y-4 md:space-y-6">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base md:text-lg font-bold serif flex items-center">
-                <CreditCard className="text-[#5A5A40] mr-2" size={18} md:size={20} />
-                待核收帳款
-              </h3>
-              <span className="bg-[#5A5A40]/10 text-[#5A5A40] text-[13px] md:text-xs font-bold px-2 py-0.5 md:py-1 rounded-full">
-                {pendingBills.length}
-              </span>
-            </div>
-            <div className="space-y-2 md:space-y-3">
-              {pendingBills.slice(0, 3).map(record => {
-                const vendor = vendors.find(v => v.id === record.vendorId);
-                return (
-                  <div key={record.id} className="p-3 md:p-4 bg-[#F5F5F0] rounded-xl md:rounded-2xl flex justify-between items-center">
-                    <div>
-                      <p className="text-[13px] md:text-xs font-bold text-gray-700">{vendor?.name}</p>
-                      <p className="text-[13px] text-gray-400">
-                        出帳日: {format(parseISO(record.dueDate), 'MM/dd')}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs font-bold text-[#5A5A40]">${record.amount.toLocaleString()}</p>
-                      <button onClick={() => setActiveTab('billing')} className="text-[13px] text-gray-400 hover:text-[#5A5A40] underline">
-                        查看
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-              {pendingBills.length === 0 && (
-                <div className="text-center py-6 md:py-8 text-gray-400 italic text-xs md:text-sm">
-                  本月帳款已結清
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Expiring Contracts */}
-          {expiringContracts.length > 0 && (
-            <div className="bg-white p-5 md:p-8 rounded-3xl md:rounded-[40px] border border-black/5 shadow-sm space-y-4 md:space-y-6">
-              <div className="flex items-center justify-between">
-                <h3 className="text-base md:text-lg font-bold serif flex items-center">
-                  <AlertCircle className="text-red-500 mr-2" size={18} md:size={20} />
-                  合約即將到期
-                </h3>
-                <span className="bg-red-100 text-red-700 text-[13px] md:text-xs font-bold px-2 py-0.5 md:py-1 rounded-full">
-                  {expiringContracts.length}
-                </span>
-              </div>
-              <div className="space-y-2 md:space-y-3">
-                {expiringContracts.map(contract => {
-                  const vendor = vendors.find(v => v.id === contract.vendorId);
-                  return (
-                    <div key={contract.id} className="p-3 md:p-4 bg-red-50 rounded-xl md:rounded-2xl flex justify-between items-center">
-                      <div>
-                        <p className="text-[13px] md:text-xs font-bold text-red-700">{vendor?.name}</p>
-                        <p className="text-[13px] text-red-400">
-                          到期日: {contract.endDate}
-                        </p>
-                      </div>
-                      <button onClick={() => setActiveTab('billing')} className="text-[13px] text-red-700 font-bold underline">
-                        續約
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            </ul>
           )}
-        </div>
+        </section>
+
+        {/* 待處理 */}
+        <section className="lg:col-span-4 bg-white rounded-3xl border border-black/5 shadow-sm p-4 md:p-6 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base md:text-lg font-bold serif flex items-center gap-2 whitespace-nowrap">
+              <ClipboardCheck size={18} className="text-[#5A5A40]" /> 待處理
+            </h3>
+            <span className="text-[12px] text-gray-400 whitespace-nowrap">跟 LINE 通知同一套</span>
+          </div>
+          {todos.length === 0 ? (
+            <p className="py-8 text-center text-[14px] text-gray-400 flex items-center justify-center gap-1.5"><CheckCircle2 size={16} className="text-emerald-500" /> 目前沒有要處理的事</p>
+          ) : (
+            <>
+              <ul className="space-y-1">
+                {shownTodos.map((t, i) => (
+                  <li key={i}>
+                    <button onClick={() => t.tab && setActiveTab(t.tab === 'publishAudit' && !canAudit ? 'posts' : t.tab)}
+                      className="w-full text-left flex items-start gap-2.5 px-2 py-2 rounded-xl hover:bg-[#F5F5F0] transition-colors">
+                      <span className="relative flex w-2.5 h-2.5 mt-1.5 shrink-0">
+                        {t.tone === 'red' && <span className="absolute inline-flex w-full h-full rounded-full bg-rose-400 opacity-50 animate-ping" />}
+                        <span className={cn('relative inline-flex w-2.5 h-2.5 rounded-full', TODO_DOT[t.tone])} />
+                      </span>
+                      <span className="min-w-0">
+                        <span className={cn('block text-[14px] font-bold', t.tone === 'gray' ? 'text-gray-500' : 'text-gray-800')}>{t.text}</span>
+                        {t.sub && <span className="block text-[12px] text-gray-400 truncate">{t.sub}</span>}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {todos.length > 7 && (
+                <button onClick={() => setShowAllTodos(x => !x)} className="w-full text-[13px] font-bold text-[#5A5A40] flex items-center justify-center gap-1 py-1">
+                  {showAllTodos ? <>收起 <ChevronUp size={14} /></> : <>還有 {todos.length - 7} 件 <ChevronDown size={14} /></>}
+                </button>
+              )}
+              {editAlerts.length > 0 && (
+                <button onClick={() => setIsEditReminderModalOpen(true)} className="w-full text-[13px] font-bold text-gray-500 hover:text-[#5A5A40] flex items-center justify-center gap-1.5 py-1">
+                  <Download size={14} /> 導出催剪輯清單
+                </button>
+              )}
+            </>
+          )}
+        </section>
+
+        {/* 近 7 天排程＋拍攝 */}
+        <section className="lg:col-span-8 bg-white rounded-3xl border border-black/5 shadow-sm p-4 md:p-6 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-base md:text-lg font-bold serif whitespace-nowrap">近 7 天排程總覽</h3>
+            <GoLink onClick={() => setActiveTab('calendar')}>排程行事曆</GoLink>
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12px] text-gray-400">
+            <Legend cls="bg-[#5A5A40]">已排程</Legend>
+            <Legend cls="bg-emerald-500">已發布</Legend>
+            <Legend cls="bg-gray-300">草稿</Legend>
+            <Legend cls="bg-rose-500">文案未完成（今明兩天）</Legend>
+            <span className="flex items-center gap-1"><Camera size={12} /> 拍攝</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-7 gap-2">
+            {days.map((d, i) => {
+              const dayPosts = posts.filter(p => (p.scheduledAt || '').slice(0, 10) === d && vmap.has(p.vendorId)).sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
+              const dayShoots = bookings.filter(b => b.status === 'booked' && b.scheduledDate === d);
+              const dayMissing = missing.filter(m => m.date === d);
+              return (
+                <div key={d} className={cn('rounded-2xl p-2 min-w-0 space-y-1', i === 0 ? 'bg-[#5A5A40]/[0.07] ring-1 ring-[#5A5A40]/20' : 'bg-[#F5F5F0]')}>
+                  <p className="text-[13px] font-bold text-gray-600 whitespace-nowrap px-1">
+                    {i === 0 ? '今天' : i === 1 ? '明天' : md(d)} <span className="text-gray-400 font-normal">{WEEK[getDay(parseISO(d))]}</span>
+                    <span className="sm:hidden text-gray-400 font-normal">　{dayPosts.length} 支</span>
+                  </p>
+                  {dayShoots.map(b => (
+                    <div key={b.id} title={b.title || ''} className="flex items-center gap-1 text-[12px] px-1.5 py-1 rounded-lg bg-white border border-[#5A5A40]/20 text-[#5A5A40] font-bold min-w-0">
+                      <Camera size={12} className="shrink-0" />
+                      <span className="truncate">{b.startTime ? `${b.startTime} ` : ''}{name(b.vendorId)}</span>
+                    </div>
+                  ))}
+                  {dayPosts.map(p => {
+                    const captionDone = captionChecks(p).every(c => c.ok);
+                    const dot = p.status === 'published' ? 'bg-emerald-500' : p.status === 'scheduled' ? 'bg-[#5A5A40]' : 'bg-gray-300';
+                    return (
+                      <div key={p.id} title={`${p.title}${captionDone ? '' : `（文案未完成：${captionChecks(p).filter(c => !c.ok).map(c => c.label).join('、')}）`}`} className="flex items-center gap-1.5 text-[12px] px-1.5 py-0.5 min-w-0">
+                        <span className={cn('w-2 h-2 rounded-full shrink-0', dot)} />
+                        <span className="tabular-nums text-gray-400 shrink-0">{p.scheduledAt.slice(11, 16)}</span>
+                        <span className="truncate text-gray-700">{name(p.vendorId)}</span>
+                        {!captionDone && i <= 1 && p.status !== 'published' && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />}
+                      </div>
+                    );
+                  })}
+                  {dayMissing.map((m, j) => (
+                    <div key={j} className="text-[12px] px-1.5 py-0.5 rounded-lg border border-dashed border-amber-300 text-amber-700 truncate" title="依發片習慣這天應該要有一支">
+                      {m.time} {name(m.vendorId)} 缺
+                    </div>
+                  ))}
+                  {!dayPosts.length && !dayShoots.length && !dayMissing.length && <p className="text-[12px] text-gray-300 px-1">—</p>}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* 拍攝安排 */}
+        <section className="lg:col-span-4 bg-white rounded-3xl border border-black/5 shadow-sm p-4 md:p-6 space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-base md:text-lg font-bold serif flex items-center gap-2 whitespace-nowrap"><Camera size={18} className="text-[#5A5A40]" /> 拍攝安排</h3>
+            <GoLink onClick={() => setActiveTab('shootBookings')}>製作進度</GoLink>
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-[13px] font-bold text-gray-400">還沒約拍的 IP</p>
+            {needShoot.length === 0 ? (
+              <p className="text-[13px] text-gray-400 py-2">每個要拍的 IP 都已經約好了</p>
+            ) : needShoot.map(({ r, days: left, urgent }) => (
+              <button key={r.vendor.id} onClick={() => setActiveTab('shootBookings')}
+                className={cn('w-full text-left flex items-center justify-between gap-2 px-3 py-2 rounded-xl', urgent ? 'bg-orange-50' : 'bg-[#F5F5F0]')}>
+                <span className="text-[14px] font-bold truncate min-w-0 flex items-center gap-2">
+                  {urgent && <span className="relative flex w-2 h-2 shrink-0"><span className="absolute inline-flex w-full h-full rounded-full bg-orange-400 opacity-60 animate-ping" /><span className="relative inline-flex w-2 h-2 rounded-full bg-orange-500" /></span>}
+                  {r.vendor.name}
+                </span>
+                <span className={cn('text-[12px] font-bold whitespace-nowrap', urgent ? 'text-orange-700' : 'text-gray-500')}>
+                  {[r.owed > 0 ? `欠 ${r.owed} 支` : '', left != null ? `庫存剩 ${left} 天` : `庫存 ${r.stock} 支`].filter(Boolean).join('・')}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-[13px] font-bold text-gray-400">接下來 14 天</p>
+            {upcomingShoots.length === 0 ? (
+              <p className="text-[13px] text-gray-400 py-2">還沒有約好的拍攝</p>
+            ) : upcomingShoots.slice(0, 6).map(b => (
+              <div key={b.id} className="flex items-baseline gap-3 px-1 text-[13px] min-w-0">
+                <span className="font-bold tabular-nums whitespace-nowrap w-[72px] shrink-0">{b.scheduledDate === today ? '今天' : md(b.scheduledDate)}（{WEEK[getDay(parseISO(b.scheduledDate))]}）</span>
+                <span className="tabular-nums text-gray-400 w-10 shrink-0">{b.startTime || ''}</span>
+                <span className="font-bold truncate min-w-0">{name(b.vendorId)}</span>
+                {b.crew && <span className="text-gray-400 truncate">{b.crew}</span>}
+              </div>
+            ))}
+            {upcomingShoots.length > 6 && <GoLink onClick={() => setActiveTab('shootCalendar')}>還有 {upcomingShoots.length - 6} 場，看拍攝行事曆</GoLink>}
+          </div>
+        </section>
       </div>
-      <EditReminderExportModal
-        isOpen={isEditReminderModalOpen}
-        onClose={() => setIsEditReminderModalOpen(false)}
-        vendors={vendors}
-        assets={assets}
-        posts={posts}
-      />
+
+      <EditReminderExportModal isOpen={isEditReminderModalOpen} onClose={() => setIsEditReminderModalOpen(false)} vendors={vendors} assets={assets} posts={posts} />
     </div>
   );
+}
+
+/** 五站縮小版：小圓點＋線，目前這站橘色呼吸燈（完整版在發布稽核頁） */
+function MiniSteps({ current }: { current: number }) {
+  return (
+    <div className="flex items-center shrink-0" title={VIDEO_STEPS.map((s, i) => `${i < current ? '✓' : i === current ? '▶' : '・'}${s}`).join(' ')}>
+      {VIDEO_STEPS.map((s, i) => (
+        <React.Fragment key={s}>
+          <span className="relative flex w-3 h-3">
+            {i === current && <span className="absolute inline-flex w-full h-full rounded-full bg-orange-400 opacity-50 animate-ping" />}
+            <span className={cn('relative inline-flex w-3 h-3 rounded-full border-2',
+              i < current ? 'bg-[#5A5A40] border-[#5A5A40]' : i === current ? 'bg-orange-500 border-orange-500' : 'bg-white border-gray-200')} />
+          </span>
+          {i < VIDEO_STEPS.length - 1 && <span className={cn('w-4 h-[2px]', i < current ? 'bg-[#5A5A40]' : 'bg-gray-200')} />}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+function GoLink({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button onClick={onClick} className="text-[13px] text-[#5A5A40] font-bold hover:underline flex items-center gap-0.5 whitespace-nowrap">
+      {children} <ArrowRight size={13} />
+    </button>
+  );
+}
+
+function Legend({ cls, children }: { cls: string; children: React.ReactNode }) {
+  return <span className="flex items-center gap-1"><span className={cn('w-2 h-2 rounded-full', cls)} />{children}</span>;
 }
