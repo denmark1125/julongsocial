@@ -125,12 +125,28 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
       )}
       <p className="text-[13px] text-gray-400 -mt-3">
         發布前檢查：{precheckDoc?.fetchedAt ? `機器人 ${format(parseISO(precheckDoc.fetchedAt), 'HH:mm')} 看過 Meta 排程` : '這天機器人還沒看過 Meta 排程（每天 09:35、11:55、17:30、18:00 自動看，電腦要開著）'}
-        {(() => {
-          const bad = [...Object.values<VendorCalendar>(precheckDoc?.vendors || {}).filter(v => !v.ok).map(v => `${v.name} Meta（${v.error}）`),
-            ...Object.values<VendorCalendar>(precheckDoc?.tiktok || {}).filter(v => !v.ok).map(v => `${v.name} TikTok（${v.error}）`)];
-          return bad.length ? <span className="text-red-500">　讀不到：{bad.join('、')}</span> : null;
-        })()}
       </p>
+      {isEngineer && (() => {
+        // 11-10：讀不到的原因是機器人自己的事（多半是登入過期），只給工程師看；
+        // 同一個原因只講一次，不要每家 IP 各重複一長串（10 家一樣的紅字會被同事當成壞掉）
+        const groups = new Map<string, string[]>();
+        const add = (v: VendorCalendar, plat: string) => {
+          const key = `${plat}｜${v.error || '原因不明'}`;
+          groups.set(key, [...(groups.get(key) || []), v.name]);
+        };
+        Object.values<VendorCalendar>(precheckDoc?.vendors || {}).filter(v => !v.ok).forEach(v => add(v, 'Meta'));
+        Object.values<VendorCalendar>(precheckDoc?.tiktok || {}).filter(v => !v.ok).forEach(v => add(v, 'TikTok'));
+        if (!groups.size) return null;
+        return (
+          <div className="bg-gray-50 border border-black/5 rounded-2xl px-5 py-3 text-[13px] text-gray-500 -mt-3 space-y-1">
+            <p className="font-bold">工程師看：機器人這次有幾家沒讀到（只有工程師看得到）</p>
+            {[...groups].map(([key, names]) => {
+              const [plat, err] = key.split('｜');
+              return <p key={key}>{plat} {names.length} 家沒讀到：{err}（{names.join('、')}）</p>;
+            })}
+          </div>
+        );
+      })()}
 
       {precheckExtra.length > 0 && (
         <div className="bg-amber-50 border border-amber-100 rounded-2xl px-5 py-3 text-[13px] text-amber-800 space-y-1">

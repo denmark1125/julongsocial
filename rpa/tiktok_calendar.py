@@ -80,6 +80,13 @@ POSTS_JS = r"""
 """
 
 
+LOGIN_MSG = "TikTok 機器人登入過期，請在電腦執行 py -3.14 rpa/tiktok_calendar.py --login 重新登入"
+
+
+class LoginExpired(RuntimeError):
+    pass
+
+
 def to_hhmm(t: str) -> str:
     m = re.match(r"(\d{1,2}):(\d{2})\s*(AM|PM)", t)
     if not m:
@@ -112,11 +119,11 @@ def read_account(page, bs_id: str, today: datetime) -> tuple[list[dict], set[str
     # ① 排好還沒發的：首頁週曆的綠色卡片。這週什麼都沒排時週曆是空白（「Schedule your post」），不是錯誤
     page.goto(f"https://business-suite.tiktok.com/?org_id={ORG_ID}&bs_id={bs_id}")
     page.wait_for_function(
-        r"() => /Schedule your post/.test(document.body.innerText) || [...document.querySelectorAll('*')].some(e => e.childElementCount===0 && /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+\d{1,2}$/.test((e.textContent||'').trim()))",
+        r"() => /\/login/.test(location.pathname) || /Schedule your post/.test(document.body.innerText) || [...document.querySelectorAll('*')].some(e => e.childElementCount===0 && /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+\d{1,2}$/.test((e.textContent||'').trim()))",
         timeout=40_000)
+    if "/login" in page.url:  # 11-09：登入過期會被導到 ads.tiktok.com/i18n/login，原本要等 40 秒逾時才報「Timeout」
+        raise LoginExpired(LOGIN_MSG)
     page.wait_for_timeout(2500)
-    if "login" in page.url:
-        raise RuntimeError("TikTok 登入過期")
     data = page.evaluate(EXTRACT_JS)
     visible = {card_date(h["day"], today) for h in data["heads"]}
     for c in data["cards"]:
@@ -172,10 +179,17 @@ def main() -> None:
         if login:
             page.goto(f"https://business-suite.tiktok.com/?org_id={ORG_ID}")
             print("👉 請在跳出來的瀏覽器裡自己登入 TikTok（驗證碼也請自己處理，最多等 5 分鐘）")
-            page.wait_for_url(re.compile(r"business-suite\.tiktok\.com/(\?|posts|$)"), timeout=5 * 60_000)
+            # 11-09：不能只看網址——還沒被導去登入頁前網址就已經是 business-suite，會沒登入就說「完成」
+            page.wait_for_function(
+                r"() => location.hostname === 'business-suite.tiktok.com' && !/login/.test(location.pathname) && (/Schedule your post/.test(document.body.innerText) || [...document.querySelectorAll('*')].some(e => e.childElementCount===0 && /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+\d{1,2}$/.test((e.textContent||'').trim())))",
+                timeout=5 * 60_000, polling=1000)
             page.wait_for_timeout(3000)
             print("✅ 登入完成")
+        expired = False
         for v in vendors:
+            if expired:  # 登入過期：其他帳號一定也讀不到，直接標同一句，不要每家各等 40 秒
+                result[v["id"]] = {"ok": False, "name": v["name"], "error": LOGIN_MSG}
+                continue
             try:
                 cards, visible = read_account(page, v["bs"], now)
                 result[v["id"]] = {"ok": True, "name": v["name"], "cards": cards}
@@ -184,6 +198,10 @@ def main() -> None:
                         extra[k][v["id"]] = {"ok": True, "name": v["name"], "cards": [c for c in cards if c["date"] == k and c["status"] == "scheduled"]}
                 show = "、".join(f"{c['date'][5:]} {c['time']}{'(排)' if c['status'] == 'scheduled' else ''}" for c in sorted(cards, key=lambda c: (c['date'], c['time'])))
                 print(f"✅ {v['name']}：{len(cards)} 則 {show}")
+            except LoginExpired:
+                expired = True
+                result[v["id"]] = {"ok": False, "name": v["name"], "error": LOGIN_MSG}
+                print(f"❌ {LOGIN_MSG}")
             except Exception as e:
                 result[v["id"]] = {"ok": False, "name": v["name"], "error": str(e)[:300]}
                 print(f"❌ {v['name']}：{e}")
