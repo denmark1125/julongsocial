@@ -296,8 +296,10 @@ async function buildNoonBrief(db: any, vmap: Map<string, VendorInfo>, now: Date)
     const p = x.post;
     const pfs = (p.platforms || []).join('/');
     const metaBits = (p.platforms || []).map((pf: string) => meta.get(`${p.id}|${pf}`)).filter(Boolean);
-    const metaText = !metaBits.length ? '' : metaBits.every((r: any) => r.status === 'scheduled') ? '｜Meta 已排好 ✓'
-      : `｜Meta ${metaBits.some((r: any) => r.status === 'unreadable') ? '讀不到' : '還沒排好'} ⚠️`;
+    // 11-10：這裡的抄本含 TikTok（祥濱只發 TikTok 卻寫「Meta 還沒排好」）→ 統一叫「後台」；
+    // 中午還沒排是常態（小編下午才排），不加 ⚠️，17:30 那輪還沒排才會另外推
+    const metaText = !metaBits.length ? '' : metaBits.every((r: any) => r.status === 'scheduled') ? '｜後台已排好 ✓'
+      : metaBits.some((r: any) => r.status === 'unreadable') ? '｜後台讀不到' : '｜後台還沒排（17:30 再看）';
     return `・${p.scheduledAt.slice(11, 16)} ${x.vendor.name}${x.vendor.strict ? '（準時）' : ''}「${(p.title || '').slice(0, 16)}」${pfs}｜${x.ready ? '成片已好 ✓' : `${x.label} ⚠️`}${metaText}${x.noCaption ? '｜系統還沒填文案 ⚠️' : ''}`;
   });
   const progress: FlexProgress[] = [
@@ -305,7 +307,7 @@ async function buildNoonBrief(db: any, vmap: Map<string, VendorInfo>, now: Date)
     { label: '系統已填文案', done: items.filter(x => !x.noCaption).length, total: items.length },
   ];
   const extra = unmatchedCards(items.filter(x => x.vendor.strict).map(x => x.post), calendars, day, taipeiTime(now))
-    .map(x => `❓ ${vmap.get(x.vendorId)?.name || ''} ${x.card.platform} Meta 排了 ${x.card.time}，系統今天沒有對應的排程 → 請確認`);
+    .map(x => `❓ ${vmap.get(x.vendorId)?.name || ''} ${x.card.platform} 後台排了 ${x.card.time}，系統今天沒有對應的排程 → 請確認（業主自己排的就不用管）`);
   return { text: [`☀️ ${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))} 今天要發的片（${items.length} 支）`, ...lines, ...extra].join('\n'), progress };
 }
 
@@ -428,7 +430,7 @@ async function evaluatePrecheck(db: any, vmap: Map<string, VendorInfo>, now: Dat
   }
 
   // TikTok 發布後檢查：TikTok 沒有能用的讀取管道，只能靠機器人抄回來的「已發布」卡片（只比時間）
-  const ttLines = doc.tiktokFetchedAt ? await auditTikTok(db, vmap, doc.tiktok || {}, now, dryRun) : [];
+  const ttLines = doc.tiktokFetchedAt ? await auditTikTok(db, vmap, doc.tiktok || {}, now, new Date(doc.tiktokFetchedAt), dryRun) : [];
 
   if (!dryRun) {
     await ref.set({
@@ -439,10 +441,29 @@ async function evaluatePrecheck(db: any, vmap: Map<string, VendorInfo>, now: Dat
       extra: extra.map(x => ({ vendorId: x.vendorId, ...x.card })),
     }, { merge: true });
   }
-  const at = [doc.fetchedAt, doc.tiktokFetchedAt].filter(Boolean).map((t: string) => taipeiTime(new Date(t))).sort().pop() || '';
+  const latest = [doc.fetchedAt, doc.tiktokFetchedAt].filter(Boolean).map((t: string) => new Date(t)).sort((a, b) => a.getTime() - b.getTime()).pop();
+  const at = latest ? taipeiTime(latest) : '';
+  // 11-10：週末電腦關機時，週六早上用的是週五傍晚的抄本，只寫「17:47」會被看成今天傍晚
+  const latestDay = latest ? taipeiDay(latest) : day;
+  const atLabel = latestDay === day ? `${at} 看後台排程` : `${Number(latestDay.slice(5, 7))}/${Number(latestDay.slice(8, 10))} ${at} 最後一次看後台，之後電腦沒開`;
   const out: string[] = [];
+  // 11-10：機器人讀不到（多半是登入過期）原本只在稽核頁掛紅字，11-09 中午到 11-10 下午都沒人發現。
+  // 改成每天每個機器人推一次給收稽核通知的人（工程師），同一個原因只講一次
+  const robotLines: string[] = [];
+  const robotAlerted: Record<string, string> = { ...(doc.robotAlerted || {}) };
+  for (const [plat, cals] of [['Meta', doc.vendors], ['TikTok', doc.tiktok]] as const) {
+    const bad = Object.values<VendorCalendar>(cals || {}).filter(v => !v.ok);
+    if (!bad.length || robotAlerted[plat] === day) continue;
+    const errs = [...new Set(bad.map(v => v.error || '原因不明'))];
+    robotLines.push(`⚠️ ${plat} 機器人有 ${bad.length} 家讀不到：${errs.join('；')}`);
+    robotAlerted[plat] = day;
+  }
+  if (robotLines.length) {
+    if (!dryRun) await ref.set({ robotAlerted }, { merge: true });
+    out.push(['🤖 檢查機器人', ...robotLines].join('\n'));
+  }
   // 中午前那一輪（09:35／11:55）的發布前結果併進 12:00「今天要發的片」，不另外推；TikTok 發布後的問題照推
-  if (lines.length && at >= NOON_AT) out.push([`🗓️ 發布前檢查（${at} 看後台排程）`, ...lines].join('\n'));
+  if (lines.length && (at >= NOON_AT || latestDay !== day)) out.push([`🗓️ 發布前檢查（${atLabel}）`, ...lines].join('\n'));
   if (ttLines.length) out.push(['🎵 TikTok 發布檢查', ...ttLines].join('\n'));
   return out.length ? out.join('\n\n') : null;
 }
@@ -452,7 +473,10 @@ async function evaluatePrecheck(db: any, vmap: Map<string, VendorInfo>, now: Dat
  * 用跟 IG/FB 同一套 auditOne（TikTok 沒文案可比，只比時間）。結果寫 posts.publishAudit.TikTok，問題只推一次。
  * 時間只到機器人有跑的時候：晚上的片要隔天早上 09:35 才查得到（這台電腦下班關機）。
  */
-async function auditTikTok(db: any, vmap: Map<string, VendorInfo>, tiktok: Record<string, VendorCalendar>, now: Date, dryRun: boolean): Promise<string[]> {
+async function auditTikTok(db: any, vmap: Map<string, VendorInfo>, tiktok: Record<string, VendorCalendar>, now: Date, seenAt: Date, dryRun: boolean): Promise<string[]> {
+  // 11-10：判斷要用「機器人抄的時間」不能用現在時間。週五 17:47 抄完就關機，週六 09:40 拿這份抄本判斷
+  // 週五 19:00 的片＝「整天沒看到」→ 11-07 日報誤報紅茶造咖／康青龍 TikTok ❌（其實是機器人沒看過）
+  if (seenAt.getTime() > now.getTime()) seenAt = now;
   const live: LivePost[] = [];
   for (const [vid, cal] of Object.entries(tiktok)) {
     if (!cal?.ok) continue;
@@ -463,7 +487,7 @@ async function auditTikTok(db: any, vmap: Map<string, VendorInfo>, tiktok: Recor
     }
   }
   const from = taipeiStamp(new Date(now.getTime() - 48 * 3600_000));
-  const snap = await db.collection('posts').where('scheduledAt', '>=', from).where('scheduledAt', '<=', taipeiStamp(now)).get();
+  const snap = await db.collection('posts').where('scheduledAt', '>=', from).where('scheduledAt', '<=', taipeiStamp(seenAt)).get();
   const posts = snap.docs.map((d: any) => ({ id: d.id, ref: d.ref, ...d.data() }))
     .filter((p: any) => (p.platforms || []).includes('TikTok') && vmap.get(p.vendorId)?.tiktokBsId && tiktok[p.vendorId]?.ok)
     .sort((a: any, b: any) => a.scheduledAt.localeCompare(b.scheduledAt));
@@ -474,7 +498,7 @@ async function auditTikTok(db: any, vmap: Map<string, VendorInfo>, tiktok: Recor
     const v = vmap.get(p.vendorId)!;
     const prev: PlatformAudit | undefined = p.publishAudit?.TikTok;
     if (prev?.livePostId) claimed.delete(prev.livePostId);
-    const audit = auditOne({ post: p, platform: 'TikTok', strictTiming: v.strict, live, now, claimed, previous: prev, allowTikTok: true });
+    const audit = auditOne({ post: p, platform: 'TikTok', strictTiming: v.strict, live, now: seenAt, claimed, previous: prev, allowTikTok: true });
     if (audit.livePostId) claimed.add(audit.livePostId);
     if (shouldAlert(audit) || (audit.status === 'missing' && !audit.alertedAt)) {
       lines.push(`${AUDIT_STATUS_ICON[audit.status]} ${v.name}「${(p.title || '').slice(0, 16)}」${describeAudit(audit, p.scheduledAt, id => vmap.get(id)?.name || id)}`);

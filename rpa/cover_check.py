@@ -112,7 +112,7 @@ def main() -> None:
     now = datetime.now(TPE)
     since = (now - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M")
     until = now.strftime("%Y-%m-%dT%H:%M")
-    posts = db.collection("posts").where("scheduledAt", ">=", since).where("scheduledAt", "<=", until).stream()
+    posts = db.collection("posts").where(filter=firestore.FieldFilter("scheduledAt", ">=", since)).where(filter=firestore.FieldFilter("scheduledAt", "<=", until)).stream()
 
     tmp = tempfile.mkdtemp()
     checked = 0
