@@ -149,12 +149,17 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
       })()}
 
       {precheckExtra.length > 0 && (
-        <div className="bg-amber-50 border border-amber-100 rounded-2xl px-5 py-3 text-[13px] text-amber-800 space-y-1">
-          <p className="font-bold">❓ Meta 上排了、系統今天沒有對應的排程（業主自己排的就不用管）</p>
-          {precheckExtra.map((x, i) => (
-            <p key={i}>{vmap.get(x.vendorId)?.name} {x.card.platform} {x.card.time}</p>
-          ))}
-        </div>
+        // 11-11 使用者：業主自己會排（紅茶造咖），不要醒目提醒 → 收合灰字，跟「系統沒排的貼文」一樣
+        <details className="rounded-xl bg-gray-50 px-3 py-2">
+          <summary className="cursor-pointer text-[13px] text-gray-500">
+            另外有 {precheckExtra.length} 則後台排了、系統沒有的排程（多半是業主自己排的，不用處理）— 點開看
+          </summary>
+          <div className="mt-2 space-y-1 text-[13px] text-gray-600">
+            {precheckExtra.map((x, i) => (
+              <p key={i}>{vmap.get(x.vendorId)?.name} {x.card.platform} {x.card.time}</p>
+            ))}
+          </div>
+        </details>
       )}
 
       {unconfigured.length > 0 && (
