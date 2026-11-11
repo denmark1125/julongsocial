@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { auditOne, isSettled, shouldAlert, taipeiToDate, unscheduledLivePosts, type LivePost } from '../publishAudit';
+import { auditOne, findCrossAccountPosts, isSettled, shouldAlert, taipeiToDate, unscheduledLivePosts, type LivePost } from '../publishAudit';
 
 // 案例取自 2026-11-01～11-04 正式資料（IG/FB 實際貼文 vs 系統排程）
 const live: LivePost[] = [
@@ -181,5 +181,40 @@ describe('沒有文案（11-05 好正點忘了貼文案）', () => {
   it('補上文案後重查 → 正確', () => {
     const fixed: LivePost[] = [{ ...liveNoCap[0], caption: '在家做西米露總是結塊又軟爛？ 好正點不藏私，教你兩招' }];
     expect(auditOne({ post: p, platform: 'IG', strictTiming: true, live: fixed, now }).status).toBe('ok');
+  });
+});
+
+describe('findCrossAccountPosts（反查發錯 IP，11-11）', () => {
+  const youCap = '佑生農場的放山雞蛋為什麼蛋黃這麼挺？ 今天帶你到雞舍看看我們怎麼養';
+  const youPost = post({ id: 'you', vendorId: 'yousheng', scheduledAt: '2026-11-10T20:00', content: youCap });
+  const dafaPost = post({ id: 'dafa', vendorId: 'dafa', scheduledAt: '2026-11-10T20:00', content: '大發汽車美容教你三步驟 冬天洗車不傷漆面' });
+  const wrong: LivePost = { platform: 'IG', id: 'w1', vendorId: 'dafa', publishedAt: '2026-11-10T12:01:00Z', caption: youCap };
+
+  it('佑生的片出現在大發帳號（佑生自己也發對了）→ 抓到', () => {
+    const right: LivePost = { ...wrong, id: 'r1', vendorId: 'yousheng' };
+    const hits = findCrossAccountPosts([wrong, right], [youPost, dafaPost]);
+    expect(hits.map(h => [h.live.id, h.post.id])).toEqual([['w1', 'you']]);
+  });
+
+  it('大發同時段也有排片 → 一樣抓到（不會被當成大發自己的片）', () => {
+    expect(findCrossAccountPosts([wrong], [youPost, dafaPost])).toHaveLength(1);
+  });
+
+  it('業主自己發的、跟任何排程都不像 → 不報', () => {
+    const own: LivePost = { ...wrong, id: 'o1', vendorId: 'tea', caption: '今天店休一天，明天見！謝謝大家的支持' };
+    expect(findCrossAccountPosts([own], [youPost, dafaPost])).toEqual([]);
+  });
+
+  it('IG 共同創作者（同一則同時在兩家帳號）→ 不報', () => {
+    const collab = [{ ...wrong, id: 'c1' }, { ...wrong, id: 'c1', vendorId: 'yousheng' }];
+    expect(findCrossAccountPosts(collab, [youPost])).toEqual([]);
+  });
+
+  it('自己帳號發自己的片 → 不報', () => {
+    expect(findCrossAccountPosts([{ ...wrong, vendorId: 'yousheng' }], [youPost, dafaPost])).toEqual([]);
+  });
+
+  it('TikTok 不比', () => {
+    expect(findCrossAccountPosts([{ ...wrong, platform: 'TikTok' }], [youPost])).toEqual([]);
   });
 });

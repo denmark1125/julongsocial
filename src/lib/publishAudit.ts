@@ -8,7 +8,7 @@ import { titleSimilarity } from './postMatch.js';
  *
  * ⚠️ 這裡只「回報」不「判誰的錯」：
  *   - 時間對不上＝**排程沒更新**（使用者 11-05 確認：多半是實際就是要 20:00 發、系統沒改），不叫發錯
- *   - 平台多出系統沒排的貼文＝可能是業主自己發的，只能標 ❓，不能判錯
+ *   - 平台多出系統沒排的貼文＝可能是業主自己發的，只在頁面標 ❓、不推 LINE（11-11）；但文案像別家的片 → 發錯 IP（findCrossAccountPosts）
  *   - 彈性 IP（如自然風，做不出來就不發）沒發不算錯
  *
  * 本檔是純函式，伺服器排程與畫面共用；不要在別處另寫一套比對。
@@ -170,6 +170,45 @@ export function findOnOtherAccount(post: AuditPostInput, platform: AuditPlatform
     if (s >= WRONG_ACCOUNT_MATCH && (!best || s > best.s)) best = { l, s };
   }
   return best?.l ?? null;
+}
+
+export interface CrossAccountHit {
+  live: LivePost;          // 在哪個帳號看到的那一則（live.vendorId＝被發錯的帳號）
+  post: AuditPostInput;    // 它其實是哪個 IP 的哪支片
+  score: number;
+}
+
+/**
+ * 反查發錯 IP（2026-11-11 使用者：「佑生農場上到大發這種」）：
+ * 每個 IP 帳號上的每一則貼文，跟**別的 IP** 排的片比文案；比別人像、而且比自己家任何一支都像得多 → 發錯帳號。
+ *
+ * 跟 findOnOtherAccount 不同：那個只在「自己帳號找不到」時才找，
+ * 佑生發對了、大發又多發一次，或大發同時段剛好有排片（被當成大發自己的「文案不同」）都會漏，這裡補上。
+ *
+ * - 同一則貼文同時出現在兩個 IP 自己的帳號（IG 共同創作者）→ 是故意的，不算
+ * - TikTok 文案是機器人抄的、不可靠，不比
+ */
+export function findCrossAccountPosts(live: LivePost[], posts: AuditPostInput[]): CrossAccountHit[] {
+  const win = SEARCH_WINDOW_HOURS * 3600_000;
+  const seenOn = new Map<string, Set<string>>(); // livePostId → 出現在哪些 IP 帳號
+  for (const l of live) seenOn.set(l.id, (seenOn.get(l.id) || new Set()).add(l.vendorId));
+  const hits: CrossAccountHit[] = [];
+  for (const l of live) {
+    if (!CAPTION_CHECK_PLATFORMS.includes(l.platform) || (l.caption || '').trim().length < 10) continue;
+    const t = new Date(l.publishedAt).getTime();
+    let own = 0;
+    let best: { p: AuditPostInput; s: number } | null = null;
+    for (const p of posts) {
+      if (Math.abs(taipeiToDate(p.scheduledAt).getTime() - t) > win) continue;
+      const s = captionScore(p, l);
+      if (p.vendorId === l.vendorId) own = Math.max(own, s);
+      else if (s >= WRONG_ACCOUNT_MATCH && (!best || s > best.s)) best = { p, s };
+    }
+    if (!best || best.s < own + 0.15) continue;
+    if (seenOn.get(l.id)?.has(best.p.vendorId)) continue;
+    hits.push({ live: l, post: best.p, score: best.s });
+  }
+  return hits;
 }
 
 export interface AuditOneArgs {

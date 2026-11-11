@@ -1,7 +1,7 @@
 import { deriveFlowStage } from '../types.js';
 import {
-  AUDIT_STATUS_ICON, AUDITABLE_PLATFORMS, auditOne, describeAudit, isSettled, shouldAlert, taipeiDay, taipeiTime,
-  taipeiToDate, type LivePost, type PlatformAudit,
+  AUDIT_STATUS_ICON, AUDITABLE_PLATFORMS, auditOne, describeAudit, findCrossAccountPosts, isSettled, shouldAlert, taipeiDay, taipeiTime,
+  taipeiToDate, type CrossAccountHit, type LivePost, type PlatformAudit,
 } from './publishAudit.js';
 import { fetchFacebookPosts, fetchInstagramPosts, listMetaPages, type MetaPage } from './metaGraph.js';
 import { describePrecheck, mergeCalendars, PRECHECK_ICON, precheckAll, unmatchedCards, type VendorCalendar } from './publishPrecheck.js';
@@ -27,6 +27,7 @@ export interface JobDeps {
   now?: Date;
   dryRun?: boolean;                         // 只算不寫、不推（本機預覽／手動測試用）
   appUrl?: string;
+  forceCross?: boolean;                     // dryRun 時不管時間點也跑反查（測試用）
 }
 
 export interface JobResult {
@@ -37,6 +38,7 @@ export interface JobResult {
   reminder?: string;
   precheck?: string;   // 這一輪發布前檢查要推的文字（沒有問題就沒有）
   cover?: string;      // 這一輪封面檢查要推的文字
+  cross?: string[];    // 這一輪反查到的「發錯 IP」
   rows: AuditRow[];
 }
 
@@ -97,6 +99,21 @@ async function fetchVendorLive(v: VendorInfo, pages: Map<string, MetaPage>, sinc
     else console.error('publish-audit fetch failed', v.name, r.reason?.message);
   }
   return out;
+}
+
+/** 所有設好粉專的 IP 的 IG＋FB 貼文（反查發錯 IP 用） */
+async function fetchAllLive(vmap: Map<string, VendorInfo>, pages: Map<string, MetaPage>, sinceIso: string): Promise<LivePost[]> {
+  const all = await Promise.all([...vmap.values()].filter(v => v.fbPageId).map(v => fetchVendorLive(v, pages, sinceIso)));
+  return all.flat();
+}
+
+/** 排定後第幾分鐘做反查（都在 AFTER_OFFSETS 裡，小抄一定會叫醒） */
+const CROSS_CHECK_OFFSETS = [10, 30, 90];
+
+function crossLine(h: CrossAccountHit, p: any, vmap: Map<string, VendorInfo>): string {
+  const wrong = vmap.get(h.live.vendorId)?.name || h.live.vendorId;
+  const right = vmap.get(h.post.vendorId)?.name || h.post.vendorId;
+  return `❌ 「${wrong}」${h.live.platform} ${taipeiTime(new Date(h.live.publishedAt))} 發了「${right}」的片「${(p?.title || '').slice(0, 16)}」→ 請確認，發錯請刪除`;
 }
 
 export async function runPublishAudit(deps: JobDeps): Promise<JobResult> {
@@ -191,6 +208,40 @@ export async function runPublishAudit(deps: JobDeps): Promise<JobResult> {
       result.alerts = [...grouped].map(([k, pfs]) => k.slice(k.indexOf('|') + 1).replace('{PF}', pfs.join('/')));
       const text = ['🔔 發布稽核', ...result.alerts, deps.appUrl ? `詳情：${deps.appUrl}/?tab=publishAudit` : ''].filter(Boolean).join('\n');
       if (!dryRun) await push(text);
+    }
+  }
+
+  // 反查發錯 IP：排定後 10／30／90 分鐘各一次，把所有 IP 帳號的貼文拿來比別家的片（11-11）
+  const crossDue = posts.filter((p: any) => (p.platforms || []).some((pf: string) => AUDITABLE_PLATFORMS.includes(pf as any))
+    && CROSS_CHECK_OFFSETS.includes(Math.round((now.getTime() - taipeiToDate(p.scheduledAt).getTime()) / 60_000)));
+  if (crossDue.length || (dryRun && deps.forceCross)) {
+    try {
+      const vmap = await getVendors();
+      const pages = new Map((await listMetaPages(metaToken, now.getTime())).map(p => [p.id, p]));
+      const live = await fetchAllLive(vmap, pages, new Date(now.getTime() - 6 * 3600_000).toISOString());
+      const hits = findCrossAccountPosts(live, posts.filter((p: any) => vmap.get(p.vendorId)));
+      const fresh = new Map(result.rows.map(r => [`${r.postId}|${r.platform}`, r.audit] as [string, PlatformAudit]));
+      const lines: string[] = [];
+      for (const h of hits) {
+        const p: any = posts.find((x: any) => x.id === h.post.id);
+        if (p?.crossAccount?.[h.live.id]) continue; // 推過了
+        const a = fresh.get(`${p.id}|${h.live.platform}`) ?? p.publishAudit?.[h.live.platform];
+        if (a?.status === 'wrong_account' && a.livePostId === h.live.id) continue; // 已經用「疑似發到別的帳號」推過同一則
+        lines.push(crossLine(h, p, vmap));
+        if (!dryRun) {
+          await db.collection('posts').doc(p.id).set({ crossAccount: { [h.live.id]: {
+            vendorId: h.live.vendorId, platform: h.live.platform, publishedAt: h.live.publishedAt,
+            permalink: h.live.permalink || null, alertedAt: now.toISOString(),
+          } } }, { merge: true });
+        }
+      }
+      if (lines.length) {
+        result.cross = lines;
+        const text = ['🚨 疑似發錯 IP', ...lines, deps.appUrl ? `詳情：${deps.appUrl}/?tab=publishAudit` : ''].filter(Boolean).join('\n');
+        if (!dryRun) await push(text);
+      }
+    } catch (e: any) {
+      console.error('publish-audit cross scan failed', e?.message);
     }
   }
 
@@ -306,9 +357,8 @@ async function buildNoonBrief(db: any, vmap: Map<string, VendorInfo>, now: Date)
     { label: '成片已好', done: items.filter(x => x.ready).length, total: items.length },
     { label: '系統已填文案', done: items.filter(x => !x.noCaption).length, total: items.length },
   ];
-  const extra = unmatchedCards(items.filter(x => x.vendor.strict).map(x => x.post), calendars, day, taipeiTime(now))
-    .map(x => `❓ ${vmap.get(x.vendorId)?.name || ''} ${x.card.platform} 後台排了 ${x.card.time}，系統今天沒有對應的排程 → 請確認（業主自己排的就不用管）`);
-  return { text: [`☀️ ${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))} 今天要發的片（${items.length} 支）`, ...lines, ...extra].join('\n'), progress };
+  // 11-11：「後台排了、系統沒有」不再推（紅茶造咖業主自己會排，天天被問）；稽核頁上仍看得到
+  return { text: [`☀️ ${Number(day.slice(5, 7))}/${Number(day.slice(8, 10))} 今天要發的片（${items.length} 支）`, ...lines].join('\n'), progress };
 }
 
 /**
@@ -353,15 +403,22 @@ export async function buildDailyReport(
   }
 
   // 準時 IP 上系統沒排的貼文（可能是業主自己發的）→ 只列數量，細節看頁面
+  // 11-11 使用者：業主自己會發（紅茶造咖），系統沒排的貼文不再列進日報，只留在頁面上（收合）備查
   const unscheduled: { vendorId: string; platform: string; publishedAt: string; caption: string; permalink?: string }[] = [];
+  // 日報再反查一次發錯 IP：不在排定時間附近發的（例 隔天早上補發到別人帳號）也抓得到
+  const cross: string[] = [];
   try {
     const pages = new Map((await listMetaPages(metaToken, now.getTime())).map(p => [p.id, p]));
     const sinceIso = taipeiToDate(fromStamp).toISOString();
-    for (const v of [...vmap.values()].filter(v => v.strict && v.fbPageId)) {
-      const live = (await fetchVendorLive(v, pages, sinceIso)).filter(l => l.publishedAt <= now.toISOString());
-      for (const l of live.filter(l => !claimed.has(l.id))) {
-        unscheduled.push({ vendorId: v.id, platform: l.platform, publishedAt: l.publishedAt, caption: (l.caption || '').slice(0, 60), permalink: l.permalink });
-      }
+    const live = (await fetchAllLive(vmap, pages, sinceIso)).filter(l => l.publishedAt <= now.toISOString());
+    for (const l of live.filter(l => vmap.get(l.vendorId)?.strict && !claimed.has(l.id))) {
+      unscheduled.push({ vendorId: l.vendorId, platform: l.platform, publishedAt: l.publishedAt, caption: (l.caption || '').slice(0, 60), permalink: l.permalink });
+    }
+    const crossKeys = new Set<string>();
+    for (const h of findCrossAccountPosts(live, posts)) {
+      const p: any = posts.find((x: any) => x.id === h.post.id);
+      const line = crossLine(h, p, vmap);
+      if (!crossKeys.has(line)) { crossKeys.add(line); cross.push(line); }
     }
   } catch (e: any) {
     console.error('publish-audit unscheduled scan failed', e?.message);
@@ -373,7 +430,7 @@ export async function buildDailyReport(
     `📋 ${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))} 發布稽核（昨天 18:00～今天 18:00）`,
     ...(lines.length ? lines : ['沒有要注意的']),
     okCount ? `✅ 其他 ${okCount} 支正確` : '',
-    unscheduled.length ? `❓ 準時 IP 有 ${unscheduled.length} 則系統沒排的貼文（可能是業主自己發的）` : '',
+    ...cross,
     upcoming.length ? '🌙 今晚待發' : '',
     ...upcoming.map(x => `・${x.vendor.name} ${x.post.scheduledAt.slice(11, 16)}「${(x.post.title || '').slice(0, 16)}」｜${x.ready ? '成片已好 ✓' : `${x.label} ⚠️`}${x.noCaption ? '｜系統還沒填文案 ⚠️' : ''}`),
     appUrl ? `詳情：${appUrl}/?tab=publishAudit` : '',
@@ -425,9 +482,7 @@ async function evaluatePrecheck(db: any, vmap: Map<string, VendorInfo>, now: Dat
     grouped.set(k, [...(grouped.get(k) || []), r.platform]);
   }
   for (const [k, pfs] of grouped) lines.push(k.slice(k.indexOf('|') + 1).replace('{PF}', pfs.join('/')));
-  for (const x of extra) {
-    lines.push(`❓ ${vmap.get(x.vendorId)?.name || ''} ${x.card.platform} 後台排了 ${x.card.time}，系統今天沒有對應的排程 → 請確認（業主自己排的就不用管）`);
-  }
+  // 11-11：「後台排了、系統沒有」只存進文件給稽核頁看，不推 LINE（業主自己排的天天被問）
 
   // TikTok 發布後檢查：TikTok 沒有能用的讀取管道，只能靠機器人抄回來的「已發布」卡片（只比時間）
   const ttLines = doc.tiktokFetchedAt ? await auditTikTok(db, vmap, doc.tiktok || {}, now, new Date(doc.tiktokFetchedAt), dryRun) : [];

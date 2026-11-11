@@ -269,6 +269,16 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                     );
                   })}
                 </div>
+                {/* 11-11 反查發錯 IP：這支片在別家帳號也出現了（伺服器排定後 10／30／90 分鐘查） */}
+                {Object.entries<any>(p.crossAccount || {}).map(([id, x]) => (
+                  <div key={id} className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[13px] bg-red-50 text-red-700 border-red-100">
+                    <span className="font-bold whitespace-nowrap">🚨 {x.platform}</span>
+                    <span className="min-w-0">這支片出現在「{vendorName(x.vendorId)}」帳號（{x.publishedAt ? new Date(x.publishedAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Taipei' }) : ''}）→ 請確認，發錯請刪除</span>
+                    {x.permalink && (
+                      <a href={x.permalink} target="_blank" rel="noreferrer" className="shrink-0 opacity-60 hover:opacity-100" title="打開那則貼文"><ExternalLink size={13} /></a>
+                    )}
+                  </div>
+                ))}
               </li>
               );
             })}
