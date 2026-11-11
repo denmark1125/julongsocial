@@ -77,6 +77,11 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server is listening on port ${PORT}`);
 });
 
+// NAS 的 TimeTree 同步在廠商名單變動時會整本重送（約 500 筆、>100KB），預設 100KB 上限會擋掉，
+// 而且 NAS 送失敗就不記狀態、下輪再整本重送 → 永遠卡住（11-09~11-11 實際發生）。只放寬這支。
+// 先解析的會設 req._body，後面全域的 express.json 會自動跳過。
+app.use("/api/shoot-sync", express.json({ limit: "2mb" }));
+
 // LINE webhook 簽章驗證需要原始bytes，JSON.stringify(req.body)不保證跟LINE原始送來的一致，
 // 所以在解析當下順便留一份原始buffer，只有LINE webhook那支API會用到，其他路由不受影響
 app.use(express.json({
