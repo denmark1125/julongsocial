@@ -8,7 +8,8 @@ import {
   deleteDoc,
   doc,
   orderBy,
-  writeBatch
+  writeBatch,
+  deleteField
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { isClientApproved } from '../lib/assetFlow';
@@ -295,7 +296,17 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
       if (editingPost) {
         batch.update(postRef, data);
         if (usable(editingPost.assetId) && editingPost.assetId !== formData.assetId) {
-          batch.update(doc(db, 'assets', editingPost.assetId!), { status: 'available', usedInPostId: null });
+          const old = assets.find(a => a.id === editingPost.assetId);
+          // 把片從這篇拿掉＝小編說這篇不用這支。片若是「排上片日」綁到這篇（plannedPostId）也要一起解掉，
+          // 不然自癒程序（useBoundPostSync）看到「綁定的片通過了、貼文沒片」會立刻掛回去，怎麼拿都拿不掉（11-13 CWORKS）。
+          // 片如果其實已經掛在別篇（usedInPostId 指向別篇），不要把它清成可用 —— 那篇還在用。
+          const usedElsewhere = !!old?.usedInPostId && old.usedInPostId !== editingPost.id;
+          batch.update(doc(db, 'assets', editingPost.assetId!), {
+            ...(usedElsewhere ? {} : { status: 'available', usedInPostId: null }),
+            ...(old?.plannedPostId === editingPost.id
+              ? { plannedPostId: deleteField(), plannedAirDate: deleteField(), plannedAirSetAt: deleteField() }
+              : {}),
+          });
         }
         if (usable(formData.assetId) && editingPost.assetId !== formData.assetId) {
           batch.update(doc(db, 'assets', formData.assetId), { status: 'used', usedInPostId: postRef.id });

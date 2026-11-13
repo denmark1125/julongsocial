@@ -59,3 +59,11 @@ describe('findBoundPostFixes', () => {
     expect(findBoundPostFixes([post('p1')], [second, first])).toEqual([{ kind: 'unbind', assetId: second.id }]);
   });
 });
+
+describe('findBoundPostFixes：片已掛在別篇（11-13 CWORKS 銷冠挑戰）', () => {
+  it('別篇已用這支（usedInPostId 被清掉也一樣）→ 解除綁定，不再掛回來', () => {
+    const a = asset({ vendorId: 'hz', plannedPostId: 'p1', stage: 'finished', flowStage: 'ready', usedInPostId: null as unknown as string });
+    const fixes = findBoundPostFixes([post('p1'), post('pub', { status: 'published', assetId: a.id })], [a]);
+    expect(fixes).toEqual([{ kind: 'unbind', assetId: a.id }]);
+  });
+});

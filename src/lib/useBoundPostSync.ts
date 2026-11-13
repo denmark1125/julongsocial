@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react';
-import { deleteField, doc, writeBatch } from 'firebase/firestore';
+import { deleteField, doc, runTransaction, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Asset, Post } from '../types';
 import { isLiveCollectionLoaded } from './liveData';
-import { findBoundPostFixes } from './boundPosts';
+import { BoundPostFix, findBoundPostFixes } from './boundPosts';
 
 /**
  * 把「毛片綁小編貼文」的差異補上（掛上通過的片／跟著改日期／解除失效的綁定）。規則見 boundPosts.ts。
@@ -28,12 +28,11 @@ export function useBoundPostSync(posts: Post[], assets: Asset[], enabled: boolea
     busy.current = true;
     lastSent.current = signature;
     const batch = writeBatch(db);
+    const attaches: Extract<BoundPostFix, { kind: 'attach' }>[] = [];
     for (const f of fixes) {
       const assetRef = doc(db, 'assets', f.assetId);
       if (f.kind === 'attach') {
-        // 跟貼文管理手動掛素材同一組寫入（PostManagement 存檔那段），兩邊才不會對不起來
-        batch.update(doc(db, 'posts', f.postId), f.toDraft ? { assetId: f.assetId, status: 'draft' } : { assetId: f.assetId });
-        batch.update(assetRef, { status: 'used', usedInPostId: f.postId });
+        attaches.push(f);
       } else if (f.kind === 'sync') {
         // 小編改了貼文日期＝上片日重排，交片期限從現在起算（見 editorQueue.ts 的 deadlineSince）
         batch.update(assetRef, { plannedAirDate: f.date, plannedAirSetAt: new Date().toISOString() });
@@ -41,7 +40,24 @@ export function useBoundPostSync(posts: Post[], assets: Asset[], enabled: boolea
         batch.update(assetRef, { plannedPostId: deleteField(), plannedAirDate: deleteField(), plannedAirSetAt: deleteField() });
       }
     }
+    // ⚠️ 掛片不能照本機快照直接寫：posts 和 assets 是兩條獨立的訂閱，別人「同時」改兩邊時（例如把片從貼文拿掉＋解綁），
+    //    這台可能先收到「貼文沒片了」、還沒收到「綁定已解除」，就把片掛回去（11-13 CWORKS 修好一分鐘又被掛回）。
+    //    所以掛之前到伺服器重讀這兩份，條件還成立才寫。
+    const attachOne = (f: Extract<BoundPostFix, { kind: 'attach' }>) => runTransaction(db, async tx => {
+      const assetRef = doc(db, 'assets', f.assetId);
+      const postRef = doc(db, 'posts', f.postId);
+      const [a, p] = await Promise.all([tx.get(assetRef), tx.get(postRef)]);
+      if (!a.exists() || !p.exists()) return;
+      const asset = a.data() as Asset, post = p.data() as Post;
+      const postFree = !post.assetId || post.assetId === 'to_be_added';
+      const assetFree = !asset.usedInPostId || asset.usedInPostId === f.postId;
+      if (asset.plannedPostId !== f.postId || asset.voidedAt || !postFree || !assetFree || post.status === 'published') return;
+      // 跟貼文管理手動掛素材同一組寫入（PostManagement 存檔那段），兩邊才不會對不起來
+      tx.update(postRef, f.toDraft ? { assetId: f.assetId, status: 'draft' } : { assetId: f.assetId });
+      tx.update(assetRef, { status: 'used', usedInPostId: f.postId });
+    });
     batch.commit()
+      .then(() => Promise.all(attaches.map(attachOne)))
       .catch(error => {
         // 背景程序，失敗不打擾人；下次資料變動會再試
         console.error('同步毛片與小編貼文失敗:', error);

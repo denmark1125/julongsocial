@@ -48,8 +48,10 @@ export function findBoundPostFixes(posts: Post[], assets: Asset[]): BoundPostFix
     }
     seen.add(post.id!);
 
-    // 這支片已經掛在別篇貼文上（小編手動掛的）→ 以小編為準，解除這邊的綁定
-    if (a.usedInPostId && a.usedInPostId !== post.id) {
+    // 這支片已經掛在別篇貼文上（小編手動掛的）→ 以小編為準，解除這邊的綁定。
+    // ⚠️ 不能只看 usedInPostId：小編在別篇掛了同一支、再把這篇的片拿掉時，會把 usedInPostId 清成 null，
+    //    這裡就以為片是空的又掛回來 —— 怎麼拿都拿不掉（11-13 CWORKS「銷冠挑戰陌開機車行」，11/11 已發布那篇才是它）。
+    if ((a.usedInPostId && a.usedInPostId !== post.id) || posts.some(p => p.id !== post.id && p.assetId === a.id)) {
       fixes.push({ kind: 'unbind', assetId: a.id! });
       continue;
     }
