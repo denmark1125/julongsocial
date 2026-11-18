@@ -51,9 +51,9 @@ import TrackingExportModal from './TrackingExportModal';
 import { DismissedHabit, ExtraSlot, MonthlyAdjustment } from '../types';
 import { visibleVendors, trackedVendorsForMonth, getContractTargets, getEffectiveMonthlyTarget, isAssetSelectable, buildPostIndex } from '../lib/vendorStatus';
 import { setPostStatus, togglePostConfirmation, togglePostPlatformPublished } from '../lib/postActions';
-import { canSendCaption, captionStatus, CAPTION_CARDS_MAX } from '../lib/captionReview';
+import { captionStatus, CAPTION_CARDS_MAX } from '../lib/captionReview';
 import { sendCaptionReview } from '../lib/captionReviewClient';
-import CaptionReviewPanel, { CaptionConfirmCell, CaptionStatusChip } from './CaptionReviewPanel';
+import CaptionReviewPanel, { CaptionConfirmCell, CaptionSendIcon, CaptionStatusText } from './CaptionReviewPanel';
 
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -883,8 +883,7 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
                       <div className="text-sm text-gray-500 line-clamp-2 mt-1">{post.content}</div>
                     </td>
                     <td className="p-4 text-center">
-                      <CaptionConfirmCell post={post} vendor={vendor || {}} onToggle={() => toggleConfirmation(post, 'clientConfirmed')}
-                        send={(ps, v) => void sendCaptionReview(ps, v)} />
+                      <CaptionConfirmCell post={post} onToggle={() => toggleConfirmation(post, 'clientConfirmed')} />
                     </td>
                     <td className="p-4 text-center">
                       <button aria-label="切換內部檢核" onClick={() => toggleConfirmation(post, 'internalConfirmed')}>
@@ -893,6 +892,7 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
                     </td>
                     <td className="p-4">
                       <div className="flex space-x-1">
+                        <CaptionSendIcon post={post} onSend={() => void sendCaptionReview([post], vendor || {})} />
                         <button 
                           onClick={() => handleCopyContent(post.content)}
                           className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
@@ -984,7 +984,7 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
                     <span className="block text-[14px] font-bold leading-snug line-clamp-2">{post.title}</span>
                     {boundAssetLabel(post, assets) && <span className="block text-[13px] text-blue-700 truncate mt-0.5">{boundAssetLabel(post, assets)}</span>}
                   </button>
-                  {['sent', 'change_requested', 'client_edited', 'changed_after'].includes(captionStatus(post)) && <div><CaptionStatusChip post={post} /></div>}
+                  <CaptionStatusText post={post} showUnsent={false} className="block" />
                   <div className="flex items-center gap-1.5">
                     {checks.map(c => (
                       <button key={c.label} type="button" onClick={c.onClick} disabled={!c.onClick}
@@ -994,7 +994,7 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
                       </button>
                     ))}
                     <div className="ml-auto flex items-center">
-                      {canSendCaption(post) && <button onClick={() => void sendCaptionReview([post], vendor || {})} className="p-2 text-[#5A5A40] rounded-lg" title="送業主審文案" aria-label="送業主審文案"><Send size={17} /></button>}
+                      <CaptionSendIcon post={post} size={17} onSend={() => void sendCaptionReview([post], vendor || {})} />
                       <button onClick={() => handleCopyContent(post.content)} className="p-2 text-emerald-600 rounded-lg" title="複製文案" aria-label="複製文案"><Copy size={17} /></button>
                       {publishedPostUrl(post) && <a href={publishedPostUrl(post)} target="_blank" rel="noopener noreferrer" className="p-2 text-blue-500" aria-label="打開貼文"><ExternalLink size={17} /></a>}
                       <button onClick={() => setDeletingPostId(post.id!)} aria-label="刪除貼文" className="p-2 text-gray-300 rounded-lg"><Trash2 size={17} /></button>

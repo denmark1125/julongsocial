@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { CheckSquare, Send, Square, Trash2 } from 'lucide-react';
 import { Post } from '../types';
-import type { CaptionSendTarget } from './CaptionSendConfirm';
 import { CAPTION_STATUS_LABEL, CaptionStatus, canSendCaption, captionStatus } from '../lib/captionReview';
 import { addManualFeedback, applyFeedbackAsCaption, removeFeedback, sendCaptionReview } from '../lib/captionReviewClient';
 
@@ -23,43 +22,53 @@ export function CaptionStatusChip({ post, className = '' }: { post: Post; classN
 }
 
 /**
- * 貼文管理表格「客戶確認」那一格（11-18 使用者：飛機放外層，一眼看出哪篇還沒送）。
- * 勾選框照舊可以手動勾（業主在群組口頭說 OK 的）；底下依狀態放飛機／等業主／誰確認。
+ * 貼文管理表格「客戶確認」那一格（11-18 第二版：使用者嫌勾選框＋色塊＋飛機疊三層很亂）。
+ * 只放勾選框＋一行小字狀態；送審的飛機改放「操作」欄，跟複製／編輯／刪除排在一起（CaptionSendIcon）。
  */
-export function CaptionConfirmCell({ post, vendor, onToggle, send }: {
-  post: Post; vendor: CaptionSendTarget; onToggle: () => void;
-  send: (posts: Post[], vendor: CaptionSendTarget) => void;
-}) {
+/** 一行小字的審文案狀態（表格與手機卡片共用；沒什麼好講的回 null） */
+export function CaptionStatusText({ post, showUnsent = true, className = '' }: { post: Post; showUnsent?: boolean; className?: string }) {
   const s = captionStatus(post);
   const cr = post.captionReview || {};
-  const plane = (label: string, enabled = true, hint = '') => (
-    <button type="button" disabled={!enabled} title={hint || undefined} onClick={() => send([post], vendor)}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-bold bg-[#5A5A40] text-white hover:bg-[#4A4A34] disabled:opacity-35 disabled:cursor-not-allowed whitespace-nowrap">
-      <Send size={13} /> {label}
-    </button>
-  );
+  const line: { text: string; cls: string } | null =
+    s === 'sent' ? { text: '等業主確認', cls: 'text-amber-600' }
+      : s === 'change_requested' ? { text: '業主要修改', cls: 'text-rose-600' }
+        : s === 'changed_after' ? { text: '確認後有改過', cls: 'text-amber-600' }
+          : (s === 'approved' || s === 'client_edited') && cr.approvedAt ? { text: `${(cr.approvedByName || '業主').slice(0, 6)} ${mmdd(cr.approvedAt).split(' ')[0]} 確認`, cls: 'text-green-700' }
+            : s === 'unsent' && showUnsent ? { text: '未送審', cls: 'text-gray-400' }
+              : null;
+  return line ? <span className={`text-[12px] font-bold whitespace-nowrap ${line.cls} ${className}`}>{line.text}</span> : null;
+}
+
+export function CaptionConfirmCell({ post, onToggle }: { post: Post; onToggle: () => void }) {
   return (
-    <div className="flex flex-col items-center gap-1.5">
+    <div className="flex flex-col items-center gap-1">
       <button aria-label="切換業主審核" onClick={onToggle}>
         {post.clientConfirmed ? <CheckSquare className="text-green-500" size={20} /> : <Square className="text-gray-300" size={20} />}
       </button>
-      {s === 'published' ? null
-        : post.clientConfirmed && s !== 'changed_after' ? (
-          cr.approvedAt ? <span className="text-[12px] text-green-700 whitespace-nowrap">{cr.approvedByName || '業主'} {mmdd(cr.approvedAt)} 確認</span> : null
-        ) : s === 'sent' ? (
-          <>
-            <CaptionStatusChip post={post} />
-            {cr.sentAt && <span className="text-[12px] text-gray-400 whitespace-nowrap">{mmdd(cr.sentAt)} 送出</span>}
-          </>
-        ) : s === 'empty' ? (
-          <>{plane('送業主審', false, '先寫文案才能送')}<span className="text-[12px] text-gray-400 whitespace-nowrap">先寫文案才能送</span></>
-        ) : (
-          <>
-            {(s === 'change_requested' || s === 'changed_after') && <CaptionStatusChip post={post} />}
-            {plane(cr.sentAt ? '再送一次' : '送業主審')}
-          </>
-        )}
+      <CaptionStatusText post={post} />
     </div>
+  );
+}
+
+/**
+ * 「操作」欄的送審飛機（跟複製／編輯／刪除同一排同一種樣式）。
+ * 沒文案＝灰色按不了；已發布＝留同寬空白（後面的按鈕每列才對得齊）。
+ */
+export function CaptionSendIcon({ post, onSend, size = 16 }: { post: Post; onSend: () => void; size?: number }) {
+  if (post.status === 'published') return <span aria-hidden className="inline-block p-2"><span className="block" style={{ width: size, height: size }} /></span>;
+  if (!canSendCaption(post)) {
+    return <span title="先寫文案才能送業主審" className="inline-block p-2 text-gray-300 cursor-not-allowed"><Send size={size} /></span>;
+  }
+  const s = captionStatus(post);
+  const again = !!post.captionReview?.sentAt;
+  const urge = s === 'unsent' || s === 'change_requested' || s === 'changed_after';
+  return (
+    <button type="button" onClick={onSend} aria-label="送業主審文案"
+      title={s === 'change_requested' ? '業主要修改：改好後再送一次給業主' : again ? '再送一次給業主審文案' : '送業主審文案'}
+      className="relative p-2 text-[#5A5A40] hover:bg-[#5A5A40]/10 rounded-lg transition-colors">
+      <Send size={size} />
+      {urge && <span className={`absolute top-1 right-1 w-2 h-2 rounded-full ${s === 'unsent' ? 'bg-amber-500' : 'bg-rose-500'}`} />}
+    </button>
   );
 }
 
