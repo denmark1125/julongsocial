@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { CheckSquare, Link2, Send, Square, Trash2 } from 'lucide-react';
+import { CheckSquare, Send, Square, Trash2 } from 'lucide-react';
 import { Post } from '../types';
 import type { CaptionSendTarget } from './CaptionSendConfirm';
 import { CAPTION_STATUS_LABEL, CaptionStatus, canSendCaption, captionStatus } from '../lib/captionReview';
-import { addManualFeedback, applyFeedbackAsCaption, copyCaptionPageLink, removeFeedback, sendCaptionReview } from '../lib/captionReviewClient';
+import { addManualFeedback, applyFeedbackAsCaption, removeFeedback, sendCaptionReview } from '../lib/captionReviewClient';
 
 /** 狀態標籤的顏色。跟文案頁業主看到的顏色同一套：橘＝等業主、綠＝確認、紅＝業主要改 */
 export const CAPTION_STATUS_STYLE: Record<CaptionStatus, string> = {
@@ -106,10 +106,6 @@ export default function CaptionReviewPanel({ post, vendorName, unsaved = false, 
           <button type="button" disabled={!sendable} onClick={() => void sendCaptionReview([post], vendorName)}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[14px] font-bold bg-[#5A5A40] text-white disabled:opacity-40 whitespace-nowrap">
             <Send size={14} /> {cr.sentAt ? '再送一次給業主' : '送業主審文案'}
-          </button>
-          <button type="button" onClick={() => void copyCaptionPageLink(post.vendorId, post.targetMonth)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[14px] font-bold bg-white border border-black/10 text-[#5A5A40] whitespace-nowrap">
-            <Link2 size={14} /> 複製客戶端連結
           </button>
         </div>
       )}

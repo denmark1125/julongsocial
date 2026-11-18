@@ -12,7 +12,8 @@
 export type ClientFlow = 'to_edit' | 'revising' | 'client_review' | 'to_upload' | 'ready';
 
 /** 文案在業主眼中的狀態 */
-export type ClientCaptionState = 'preparing' | 'waiting' | 'approved' | 'published';
+/** revising＝業主留言要改、小編還沒重送（11-18 改成在網頁留言，不在 LINE 收） */
+export type ClientCaptionState = 'preparing' | 'waiting' | 'revising' | 'approved' | 'published';
 
 export interface ClientVideo {
   assetId: string;
@@ -70,7 +71,11 @@ export function clientCaptionState(p: any): ClientCaptionState {
   if (p?.status === 'published') return 'published';
   if (p?.clientConfirmed) return 'approved';
   // 小編按過送審才算「等您確認」；沒送審的一律是準備中（就算已經有草稿）
-  return p?.captionReview?.sentAt && str(p?.content).trim() ? 'waiting' : 'preparing';
+  if (!(p?.captionReview?.sentAt && str(p?.content).trim())) return 'preparing';
+  // 業主要改（留言／舊卡片按了要修改）→ 小編重送時會清掉 changeRequestedAt
+  // 跟小編端 captionStatus 的 change_requested 同一條規則：要改的時間在最後一次送審之後
+  const cr = p.captionReview;
+  return cr.changeRequestedAt && cr.changeRequestedAt >= cr.sentAt ? 'revising' : 'waiting';
 }
 
 /**
@@ -192,7 +197,7 @@ export function clientStageLabel(p: Pick<ClientPost, 'flow' | 'captionState' | '
   const film = current === 4 ? { tone: 'scheduled' as const, label: '已排程', detail: when ? `${when} 發布` : '' }
     : p.flow === 'client_review' ? { tone: 'action' as const, label: '等您審片', detail: '' }
       : current === 3 || p.flow === 'to_upload'
-        ? { tone: 'waiting' as const, label: p.flow === 'to_upload' ? '審片已通過' : '準備排程', detail: p.captionState === 'preparing' ? '文案準備中' : '' }
+        ? { tone: 'waiting' as const, label: p.flow === 'to_upload' ? '審片已通過' : '準備排程', detail: p.captionState === 'preparing' ? '文案準備中' : p.captionState === 'revising' ? '文案修改中' : '' }
         : current === 1 ? { tone: 'working' as const, label: p.flow === 'revising' ? '依您的意見修改中' : '剪輯中', detail: '' }
           : { tone: 'idle' as const, label: '等拍攝', detail: '' };
   // 文案可以比影片先好、先審（使用者 11-16：不一定要等影片出來）。只要有文案在等業主，標籤就講文案，

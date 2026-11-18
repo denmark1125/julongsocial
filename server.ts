@@ -20,7 +20,7 @@ import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeF
 import { summarizeFolder } from "./src/lib/rawFolder.js";
 import { buildPendingListMessage, buildReminderMessage, buildReviewNotifyMessage, isPendingQuery, listPendingReviews, pickReviewReminders } from "./src/lib/lineReviewNotify.js";
 import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
-import { buildCaptionReviewMessages, canSendCaption, captionDateLabel, captionReplyText, isMonthKey, parseCaptionPostback, CAPTION_CARDS_MAX, CAPTION_MAX_LEN, FEEDBACK_WINDOW_MINUTES } from "./src/lib/captionReview.js";
+import { buildCaptionReviewMessages, canSendCaption, captionDateLabel, captionReplyText, isMonthKey, parseCaptionPostback, CAPTION_CARDS_MAX, CAPTION_MAX_LEN } from "./src/lib/captionReview.js";
 import { loadClientPortalData } from "./src/lib/clientPortalData.js";
 import { isBookingChange, planShootSync, toCalendarEvent, type TimetreeShootChange } from "./src/lib/shootSync.js";
 import { buildCheckPlan, runPublishAudit } from "./src/lib/publishAuditJob.js";
@@ -2297,11 +2297,10 @@ app.post("/api/webhook/line", async (req: any, res) => {
 // - 送審：小編按鈕 → POST /api/posts/caption-review/send → notify('caption_review') 發到該 IP 的客戶群組
 // - 業主在 LINE 按鈕／打字：handleCaptionLineEvent（由 /api/webhook/line 呼叫）
 // - 文案頁：GET /c/:token（每個 IP 一條固定連結，代碼存 captionLinks；免登入）
-// ⚠️ captionLinks、captionFeedbackWindows 兩個 collection 只有這裡（admin SDK）讀寫，
+// ⚠️ captionLinks collection 只有這裡（admin SDK）讀寫（captionFeedbackWindows 11-18 起不再使用），
 //    firestore.rules 沒有開放＝前端與剪輯師帳號都碰不到，不要去規則裡加。
 // ===============================================================
 const CAPTION_LINKS = "captionLinks";
-const CAPTION_WINDOWS = "captionFeedbackWindows";
 
 const taipeiMonthNow = () => new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 7);
 /** 這篇貼文在文案頁的哪個月：照「歸檔月份」，跟貼文管理同一個口徑（1/29 的片可能算 2 月份） */
@@ -2408,8 +2407,8 @@ app.post("/api/posts/caption-review/link", async (req, res) => {
     if (me.role === 'editor') return res.status(403).json({ error: "沒有權限" });
     const vendorId = String(req.body?.vendorId || '');
     if (!vendorId || !(await adminDb.collection("vendors").doc(vendorId).get()).exists) return res.status(404).json({ error: "找不到這個 IP" });
-    const month = isMonthKey(req.body?.month) ? `?m=${req.body.month}` : '';
-    return res.json({ url: `https://${req.get('host')}/c/${await ensureCaptionToken(vendorId)}${month}` });
+    // 一個 IP 永遠同一條、不帶月份（11-18 使用者：要貼在記事本上固定用；打開預設當月，業主自己切月份）
+    return res.json({ url: `https://${req.get('host')}/c/${await ensureCaptionToken(vendorId)}` });
   } catch (e: any) {
     if (e?.httpStatus) return sendAuthError(res, e);
     console.error("caption review link failed:", e?.message);
@@ -2448,89 +2447,40 @@ async function captionSourceAllowed(src: any, vendorId: string): Promise<boolean
 }
 
 /**
- * LINE 事件裡跟審文案有關的部分。回 true＝已處理完（按鈕）；回 false＝webhook 照原本的流程繼續
- * （文字訊息就算被收成意見也回 false：群組紀錄、「待審」查詢等原本的處理不能被吃掉）。
+ * LINE 事件裡跟審文案有關的部分：只處理卡片上的按鈕（postback）。回 true＝已處理完；回 false＝webhook 照原本的流程繼續。
  *
- * 「要修改」之後的打字怎麼認：以「來源（群組或個人）＋按的那個人」開一個 10 分鐘的收件窗（captionFeedbackWindows）。
- * 只有那個人在那個群組打的字會被收；別人插話、他在別的群組講話都不算。平常群組聊天內容一律不存。
+ * 11-18 拿掉「按要修改後 10 分鐘內打的字收成意見」：業主在群組跟別人聊天、講別篇的事都會被亂收（使用者：這機制危險）。
+ * 改文案一律到客戶端網頁（直接改字或留言），群組聊天內容系統一概不存。
+ * 新卡片只剩「文案確認」一顆 postback；舊卡片的「要修改」只回一句請他開網頁。
  */
 async function handleCaptionLineEvent(event: any): Promise<boolean> {
-  if (!adminDb) return false;
+  if (!adminDb || event?.type !== 'postback') return false;
   const src = event?.source || {};
-  const userId = String(src.userId || '');
-  const sourceId = src.type === 'group' ? String(src.groupId || '') : src.type === 'user' ? userId : '';
-  if (!userId || !sourceId) return false;
-  const winRef = adminDb.collection(CAPTION_WINDOWS).doc(`${sourceId}_${userId}`);
   const reply = async (text: string) => {
     if (!event.replyToken) return;
     try { await sendLineReplyMessage(event.replyToken, { type: "text", text }); } catch (e: any) { console.error("caption reply failed", e?.message); }
   };
-
-  if (event.type === 'postback') {
-    const pb = parseCaptionPostback(event.postback?.data);
-    if (!pb) return false;
-    const ref = adminDb.collection("posts").doc(pb.postId);
-    const snap = await ref.get();
-    if (!snap.exists) { await reply(captionReplyText('gone')); return true; }
-    const p: any = { id: snap.id, ...snap.data() };
-    if (!(await captionSourceAllowed(src, p.vendorId))) { await reply(captionReplyText('wrong_group')); return true; }
-    if (p.status === 'published') { await reply(captionReplyText('published', p)); return true; }
-    const byName = await captionActorName(src);
-    const now = new Date().toISOString();
-    if (pb.action === 'ok') {
-      if (p.clientConfirmed) {
-        await reply(captionReplyText('already', p));
-      } else {
-        // 業主按 OK＝業主審核＋內部檢核一起打勾（11-18 使用者：送出去的就是內部看過的版本，不用再回後台勾）
-        await ref.update({
-          clientConfirmed: true, internalConfirmed: true,
-          "captionReview.approvedAt": now, "captionReview.approvedVia": 'line',
-          "captionReview.approvedByName": byName, "captionReview.approvedContent": String(p.content || ''),
-        });
-        await reply(captionReplyText('ok', p));
-      }
-      await winRef.delete().catch(() => {});
-      return true;
-    }
-    await ref.update({
-      clientConfirmed: false,
-      "captionReview.changeRequestedAt": now, "captionReview.changeRequestedByName": byName,
-      "captionReview.approvedAt": FieldValue.delete(), "captionReview.approvedVia": FieldValue.delete(),
-      "captionReview.approvedByName": FieldValue.delete(), "captionReview.approvedContent": FieldValue.delete(),
-    });
-    await winRef.set({
-      postId: p.id, vendorId: p.vendorId, byName, replied: false,
-      until: new Date(Date.now() + FEEDBACK_WINDOW_MINUTES * 60_000).toISOString(),
-    });
-    await reply(captionReplyText('fix', p));
-    await notifyCaptionFeedback(p, `${byName} 按了「要修改」，他在 LINE 打的意見會記在這篇貼文上`);
-    return true;
-  }
-
-  if (event.type === 'message' && event.message?.type === 'text') {
-    const w = await winRef.get();
-    if (!w.exists) return false;
-    const d: any = w.data();
-    if (!(Date.parse(d.until) > Date.now())) { await winRef.delete().catch(() => {}); return false; }
-    const text = String(event.message.text || '').trim().slice(0, 2000);
-    if (!text) return false;
-    try {
-      await adminDb.collection("posts").doc(String(d.postId)).update({
-        "captionReview.feedback": FieldValue.arrayUnion({ at: new Date().toISOString(), byName: d.byName || '業主', text, via: 'line' }),
-      });
-    } catch (e: any) {
-      console.error("caption feedback save failed", e?.message); // 貼文被刪了
-      await winRef.delete().catch(() => {});
-      return false;
-    }
-    // 只回第一句，後面幾句安靜收下，群組才不會被機器人洗版
-    if (!d.replied) {
-      await winRef.update({ replied: true });
-      await reply(captionReplyText('received'));
-    }
-    return false;
-  }
-  return false;
+  const pb = parseCaptionPostback(event.postback?.data);
+  if (!pb) return false;
+  const ref = adminDb.collection("posts").doc(pb.postId);
+  const snap = await ref.get();
+  if (!snap.exists) { await reply(captionReplyText('gone')); return true; }
+  const p: any = { id: snap.id, ...snap.data() };
+  if (!(await captionSourceAllowed(src, p.vendorId))) { await reply(captionReplyText('wrong_group')); return true; }
+  if (p.status === 'published') { await reply(captionReplyText('published', p)); return true; }
+  if (pb.action === 'fix') { await reply(captionReplyText('fix', p)); return true; }
+  if (p.clientConfirmed) { await reply(captionReplyText('already', p)); return true; }
+  const byName = await captionActorName(src);
+  const now = new Date().toISOString();
+  // 業主確認＝業主審核＋內部檢核一起打勾（11-18 使用者：送出去的就是內部看過的版本，不用再回後台勾）
+  await ref.update({
+    clientConfirmed: true, internalConfirmed: true,
+    "captionReview.approvedAt": now, "captionReview.approvedVia": 'line',
+    "captionReview.approvedByName": byName, "captionReview.approvedContent": String(p.content || ''),
+    "captionReview.changeRequestedAt": FieldValue.delete(), "captionReview.changeRequestedByName": FieldValue.delete(),
+  });
+  await reply(captionReplyText('ok', p));
+  return true;
 }
 
 /**
@@ -2658,6 +2608,48 @@ app.post("/c/:token/edit", async (req, res) => {
   } catch (e: any) {
     console.error("caption page edit failed:", e?.message);
     return res.status(502).json({ error: '儲存失敗' });
+  }
+});
+
+/**
+ * 業主在網頁留言給小編（11-18：取代 LINE「要修改後 10 分鐘內打字」）。
+ * 記在貼文的業主意見、拿掉確認勾、狀態變「依您的意見修改中」，並通知送審的小編。小編改好重送會清掉。
+ */
+app.post("/c/:token/comment", async (req, res) => {
+  try {
+    const text = String(req.body?.text ?? '').replace(/\r\n/g, '\n').trim();
+    if (!text) return res.status(400).json({ error: '請寫要修改的地方' });
+    if (text.length > 2000) return res.status(400).json({ error: '留言最多 2000 字' });
+    const token = String(req.params.token);
+    const postId = String(req.body?.postId || '');
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(postId) || !/^[A-Za-z0-9_-]{1,64}$/.test(token)) return res.status(400).json({ error: '找不到這篇貼文' });
+    const r: any = await adminDb.runTransaction(async (tx: any) => {
+      const link = await tx.get(adminDb.collection(CAPTION_LINKS).doc(token));
+      if (!link.exists) return { status: 404, error: '這個連結已經失效' };
+      const ref = adminDb.collection("posts").doc(postId);
+      const snap = await tx.get(ref);
+      if (!snap.exists || snap.data().vendorId !== link.data().vendorId) return { status: 404, error: '找不到這篇貼文' };
+      const p: any = { id: snap.id, ...snap.data() };
+      if (p.status === 'published') return { status: 409, error: '這篇已經發布了，要調整請直接在群組告訴我們' };
+      if (!p.captionReview?.sentAt && !p.clientConfirmed) return { status: 409, error: '這篇文案還在準備中' };
+      // 一篇最多留 30 則（連結外流被灌爆、每則都會 LINE 通知小編）
+      if ((p.captionReview?.feedback || []).length >= 30) return { status: 429, error: '這篇的留言太多了，請直接在群組告訴我們' };
+      const now = new Date().toISOString();
+      tx.update(ref, {
+        clientConfirmed: false,
+        "captionReview.feedback": FieldValue.arrayUnion({ at: now, byName: '業主（文案頁）', text, via: 'page' }),
+        "captionReview.changeRequestedAt": now, "captionReview.changeRequestedByName": '業主（文案頁）',
+        "captionReview.approvedAt": FieldValue.delete(), "captionReview.approvedVia": FieldValue.delete(),
+        "captionReview.approvedByName": FieldValue.delete(), "captionReview.approvedContent": FieldValue.delete(),
+      });
+      return { status: 200, post: p };
+    });
+    if (r.status !== 200) return res.status(r.status).json({ error: r.error });
+    await notifyCaptionFeedback(r.post, `業主在網頁留言要修改文案：\n「${text.slice(0, 300)}${text.length > 300 ? '…' : ''}」`);
+    return res.json({ ok: true });
+  } catch (e: any) {
+    console.error("caption page comment failed:", e?.message);
+    return res.status(502).json({ error: '送出失敗' });
   }
 });
 

@@ -103,8 +103,6 @@ const CAROUSEL_MAX_BYTES = 45_000;
 const PUSH_MESSAGES_MAX = 4;
 /** LINE carousel 一則最多 12 張 */
 export const CAPTION_CARDS_MAX = 12;
-/** 按「要修改」後，同一個人接下來幾分鐘內打的字算意見 */
-export const FEEDBACK_WINDOW_MINUTES = 10;
 
 const BRAND = '#5A5A40';
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
@@ -167,7 +165,7 @@ function captionBubble(info: CaptionCardInfo) {
         { type: 'text', text: info.title || '(未命名)', weight: 'bold', size: 'md', wrap: true, color: '#222222' },
         { type: 'separator', margin: 'md' },
         { type: 'text', text: full, size: 'md', color: '#333333', wrap: true, margin: 'md' },
-        { type: 'text', text: '文案確認後，我們才會排程發布。', size: 'xs', color: '#8A8A7A', wrap: true, margin: 'lg' },
+        { type: 'text', text: '文案確認後，我們才會排程發布。要修改請按「我要修改」，可以直接改字或留言給我們。', size: 'xs', color: '#8A8A7A', wrap: true, margin: 'lg' },
       ],
     },
     footer: {
@@ -175,10 +173,9 @@ function captionBubble(info: CaptionCardInfo) {
       contents: [
         { type: 'button', style: 'primary', color: '#2F9E5B', height: 'sm',
           action: { type: 'postback', label: '✅ 文案確認，可以發布', data: captionPostbackData('ok', info.postId), displayText: `文案 OK：${when ? `${when} ` : ''}${short}` } },
+        // 改文案一律到網頁（11-18 使用者：LINE 卡片的字不能複製；「按要修改後 10 分鐘內的話收成意見」業主跟別人聊天會錯亂）
         { type: 'button', style: 'secondary', height: 'sm',
-          action: { type: 'postback', label: '💬 要修改（在群組說明）', data: captionPostbackData('fix', info.postId), displayText: `要修改：${when ? `${when} ` : ''}${short}` } },
-        { type: 'button', style: 'link', height: 'sm', color: BRAND,
-          action: { type: 'uri', label: '✏️ 線上直接修改文案', uri: info.pageUrl } },
+          action: { type: 'uri', label: '✏️ 我要修改（改字或留言）', uri: info.pageUrl } },
       ],
     },
   };
@@ -215,7 +212,8 @@ export function captionReplyText(kind: 'ok' | 'already' | 'fix' | 'received' | '
   switch (kind) {
     case 'ok': return `✅ ${name}文案已確認，謝謝！`;
     case 'already': return `${name}文案先前已經確認過了，謝謝！`;
-    case 'fix': return `好的，${name}請直接在這裡打要修改的地方（${FEEDBACK_WINDOW_MINUTES} 分鐘內），我們會轉給小編。`;
+    // 舊卡片（11-18 以前送的）還有「要修改」按鈕：改成請業主開網頁改，不再收群組訊息
+    case 'fix': return `好的！${name}請點卡片下方的「開啟客戶端」，在網頁上直接改字或留言給我們，這樣才不會漏掉。`;
     case 'received': return '收到，已轉給小編，改好會再傳一次給您確認。';
     case 'published': return `${name}已經發布了，要調整請直接告訴我們。`;
     case 'gone': return '這篇貼文已經不在排程裡了，請直接告訴我們要確認哪一篇。';

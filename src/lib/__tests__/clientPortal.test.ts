@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  tiktokProfileUrl, clientCaptionState, clientDayLabel, clientSections, pickLastShoot, socialPlatformOf, toClientStock, clientStageLabel, clientTodoSummary, pickNextShoot, toClientPost, toClientShoot,
+  tiktokProfileUrl, clientCaptionState, clientDayLabel, clientSections, pickLastShoot, socialPlatformOf, toClientStock, clientStageLabel, clientTodoSummary, clientTodo, pickNextShoot, toClientPost, toClientShoot,
 } from '../clientPortal';
 
 // 一篇「什麼內部欄位都有」的貼文：用來確認沒有任何一個漏出去
@@ -91,6 +91,14 @@ describe('clientCaptionState', () => {
     expect(clientCaptionState({ content: '草稿', status: 'draft' })).toBe('preparing');
     expect(clientCaptionState({ content: '草稿', status: 'draft', captionReview: { sentAt: 'x' } })).toBe('waiting');
     expect(clientCaptionState({ content: '', status: 'draft', captionReview: { sentAt: 'x' } })).toBe('preparing');
+  });
+  it('業主留言要改＝依您的意見修改中（不再算等您處理）；確認後回到已確認', () => {
+    const p = { content: '草稿', status: 'draft', captionReview: { sentAt: 'x', changeRequestedAt: 'y' } };
+    expect(clientCaptionState(p)).toBe('revising');
+    expect(clientTodo({ flow: null, captionState: 'revising', status: 'draft' } as any).caption).toBe(false);
+    expect(clientCaptionState({ ...p, clientConfirmed: true })).toBe('approved');
+    // 小編改好重送（送審時間比要改的時間新）→ 回到等您確認
+    expect(clientCaptionState({ ...p, captionReview: { sentAt: '2026-11-18T10:00', changeRequestedAt: '2026-11-18T09:00' } })).toBe('waiting');
   });
 });
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ExternalLink, PenLine, X } from 'lucide-react';
+import { Copy, ExternalLink, MessageSquare, PenLine, X } from 'lucide-react';
 import { VideoSteps } from '../components/VideoProgressSteps';
 import { CAPTION_MAX_LEN } from '../lib/captionReview';
 import { ClientPost, clientDayLabel } from '../lib/clientPortal';
@@ -22,6 +22,14 @@ export default function ClientPostDetail({ post, act, onClose, tiktokUrl = '' }:
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(post.caption);
   const [videoBroken, setVideoBroken] = useState(false);
+  // 留言給小編（11-18：取代 LINE「要修改後 10 分鐘內打字」）
+  const [commenting, setCommenting] = useState(false);
+  const [comment, setComment] = useState('');
+  const [copied, setCopied] = useState(false);
+  const copyCaption = async () => {
+    try { await navigator.clipboard.writeText(post.caption); setCopied(true); window.setTimeout(() => setCopied(false), 2000); }
+    catch { window.alert('這支手機不能直接複製，請長按文字選取'); }
+  };
 
   // 開著詳情時背景不要跟著捲（iPhone 上手指在面板外滑會捲到後面的清單）
   useEffect(() => {
@@ -41,6 +49,8 @@ export default function ClientPostDetail({ post, act, onClose, tiktokUrl = '' }:
     try {
       await act(path, body);
       setEditing(false);
+      setCommenting(false);
+      setComment('');
     } catch (e: any) {
       window.alert(`${e?.message || '送出失敗'}，請再試一次或在 LINE 群組告訴我們`);
     } finally {
@@ -58,7 +68,7 @@ export default function ClientPostDetail({ post, act, onClose, tiktokUrl = '' }:
             {captionWaiting ? (
               <div className="mb-3">
                 <div className="flex items-center gap-2 text-[17px] font-bold text-[#5A5A40]"><PenLine size={18} />文案等您確認</div>
-                <p className="text-[14px] text-gray-600 mt-1">沒問題請按「文案 OK」；要改可以按「我要修改」直接改字，存檔就算確認。</p>
+                <p className="text-[14px] text-gray-600 mt-1">沒問題請按「文案 OK」；要改可以按「我要修改」直接改字（存檔就算確認），或在下方留言告訴我們。</p>
               </div>
             ) : <div className={sectionTitle}>文案</div>}
             {post.captionState === 'preparing' ? (
@@ -81,7 +91,16 @@ export default function ClientPostDetail({ post, act, onClose, tiktokUrl = '' }:
               </>
             ) : (
               <>
-                <div className="text-[16px] leading-relaxed whitespace-pre-wrap break-words bg-[#F7F7F3] border border-[#ECEAE1] rounded-lg p-4">{post.caption}</div>
+                <div className="relative">
+                  <div className="text-[16px] leading-relaxed whitespace-pre-wrap break-words bg-[#F7F7F3] border border-[#ECEAE1] rounded-lg p-4 pr-20 select-text">{post.caption}</div>
+                  <button type="button" onClick={copyCaption}
+                    className="absolute top-2 right-2 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-white border border-[#E4E2D8] text-[13px] font-bold text-gray-600 hover:bg-[#FAFAF7] whitespace-nowrap">
+                    <Copy size={13} /> {copied ? '已複製' : '複製'}
+                  </button>
+                </div>
+                {post.captionState === 'revising' && (
+                  <p className="text-[14px] font-bold text-gray-600 bg-[#F7F7F3] rounded-lg px-3 py-2.5 mt-3">已收到您的意見，我們修改好會再傳給您確認。</p>
+                )}
                 {post.captionState === 'waiting' && (
                   <div className="flex gap-3 mt-3">
                     <button type="button" disabled={!!busy} className={`${btn} ${ACTION.primary}`}
@@ -96,6 +115,27 @@ export default function ClientPostDetail({ post, act, onClose, tiktokUrl = '' }:
                     <span className="text-[14px] font-bold text-[#5A5A40] whitespace-nowrap">{post.editedAfterApproval ? '✓ 您已確認・之後我們有微調文字' : '✓ 您已確認'}</span>
                     <button type="button" className="text-[14px] font-bold text-gray-500 underline underline-offset-2 whitespace-nowrap" onClick={() => setEditing(true)}>還想再改</button>
                   </div>
+                )}
+                {/* 不想自己動手改字：留言告訴小編要改哪裡（記在這一篇上，不會跟群組聊天混在一起） */}
+                {commenting ? (
+                  <div className="mt-4 rounded-lg border border-[#E4E2D8] p-3">
+                    <div className="text-[14px] font-bold text-gray-700 mb-2">留言給小編</div>
+                    <textarea value={comment} onChange={e => setComment(e.target.value)} maxLength={2000} rows={4} autoFocus
+                      placeholder="例如：第二段的價格改成 39,900；最後一句拿掉"
+                      className="w-full rounded-lg border-2 border-[#5A5A40] p-3 text-[16px] leading-relaxed" />
+                    <div className="flex gap-3 mt-2">
+                      <button type="button" disabled={!!busy || !comment.trim()} className={`${btn} ${ACTION.primary}`}
+                        onClick={() => run('comment', '/comment', { postId: post.id, text: comment.trim() })}>
+                        {busy === 'comment' ? '送出中…' : '送出留言'}
+                      </button>
+                      <button type="button" disabled={!!busy} className={`${btn} ${ACTION.secondary}`} onClick={() => { setCommenting(false); setComment(''); }}>取消</button>
+                    </div>
+                  </div>
+                ) : (post.captionState === 'waiting' || post.captionState === 'revising' || post.captionState === 'approved') && (
+                  <button type="button" onClick={() => setCommenting(true)}
+                    className="mt-3 inline-flex items-center gap-1.5 text-[14px] font-bold text-[#5A5A40] underline underline-offset-2">
+                    <MessageSquare size={15} /> {post.captionState === 'revising' ? '還想補充意見' : '不想自己改？留言告訴我們要改哪裡'}
+                  </button>
                 )}
               </>
             )}

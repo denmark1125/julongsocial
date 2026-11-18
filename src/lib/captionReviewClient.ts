@@ -40,15 +40,15 @@ export async function sendCaptionReview(posts: Post[], vendor: CaptionSendTarget
   }
 }
 
-/** 複製這個 IP 的客戶端連結（固定一條，業主可以存起來） */
-export async function copyCaptionPageLink(vendorId: string, month?: string): Promise<void> {
+/** 複製這個 IP 的客戶端固定連結（一個 IP 永遠同一條；在廠商管理的廠商卡片上按） */
+export async function copyCaptionPageLink(vendorId: string): Promise<void> {
   try {
-    const { url } = await call('/api/posts/caption-review/link', { vendorId, month });
+    const { url } = await call('/api/posts/caption-review/link', { vendorId });
     try {
       await navigator.clipboard.writeText(url);
-      toast.success('已複製客戶端連結，可以直接貼給業主');
+      toast.success(`已複製客戶端連結：${url}`, { duration: 6000 });
     } catch {
-      toast(url, { duration: 10000 });
+      toast(url, { duration: 15000 });
     }
   } catch (e: any) {
     toast.error(e?.message || '拿不到連結');

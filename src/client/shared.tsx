@@ -70,7 +70,7 @@ export function filmOf(p: ClientPost, today = taipeiToday()) {
   const stub = p.flow ? ({ flowStage: p.flow, ...FLOW_STAGE_COMPAT[p.flow] } as Asset) : undefined;
   const { current } = videoProgress(p as unknown as Post, stub, today, () => '', p.internal);
   // 文案在等業主時把它當「已確認」來問影片狀態，標籤才不會又講一次文案
-  return clientStageLabel({ ...p, captionState: p.captionState === 'waiting' ? 'approved' : p.captionState }, current);
+  return clientStageLabel({ ...p, captionState: p.captionState === 'waiting' || p.captionState === 'revising' ? 'approved' : p.captionState }, current);
 }
 
 /** 影片狀態標籤（同 StagePill 的樣式，但只講影片） */
@@ -98,6 +98,7 @@ export function CaptionBadge({ post, size = 'md' }: { post: ClientPost; size?: '
     );
   }
   if (post.captionState === 'approved') return <span className="inline-flex items-center gap-1 text-[14px] font-bold text-[#5A5A40] whitespace-nowrap"><Check size={15} strokeWidth={3} />已確認</span>;
+  if (post.captionState === 'revising') return <span className="text-[14px] text-gray-600 whitespace-nowrap">依您的意見修改中</span>;
   return <span className="text-[14px] text-gray-400 whitespace-nowrap">準備中</span>;
 }
 

@@ -66,15 +66,15 @@ describe('postback', () => {
 describe('buildCaptionReviewMessage', () => {
   const bytes = (m: any) => Buffer.byteLength(JSON.stringify(m), 'utf8');
 
-  it('一篇＝一張卡，文案全文都在，三顆按鈕', () => {
+  it('一篇＝一張卡，文案全文都在；兩顆按鈕：確認（postback）＋我要修改（開網頁，不在 LINE 收意見）', () => {
     const m: any = buildCaptionReviewMessage([card({ content: '第一行\n第二行 #tag' })]);
     expect(m.contents.type).toBe('bubble');
     expect(JSON.stringify(m.contents.body)).toContain('第一行\\n第二行 #tag');
     const actions = m.contents.footer.contents.map((b: any) => b.action);
-    expect(actions.map((a: any) => a.type)).toEqual(['postback', 'postback', 'uri']);
+    expect(actions.map((a: any) => a.type)).toEqual(['postback', 'uri']);
     expect(parseCaptionPostback(actions[0].data)).toEqual({ action: 'ok', postId: 'p1' });
-    expect(parseCaptionPostback(actions[1].data)).toEqual({ action: 'fix', postId: 'p1' });
-    expect(actions[2].uri).toContain('p=p1');
+    expect(actions[1].label).toContain('我要修改');
+    expect(actions[1].uri).toContain('p=p1');
   });
 
   it('第二次送審標「修改版」', () => {

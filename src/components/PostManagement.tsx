@@ -42,8 +42,7 @@ import {
   ArrowUp,
   ArrowDown,
   Gift,
-  Send,
-  Link2
+  Send
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { format, isPast, isToday, addDays, parseISO, getDay, setHours, setMinutes, startOfDay, isSameDay, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths, addMonths } from 'date-fns';
@@ -53,7 +52,7 @@ import { DismissedHabit, ExtraSlot, MonthlyAdjustment } from '../types';
 import { visibleVendors, trackedVendorsForMonth, getContractTargets, getEffectiveMonthlyTarget, isAssetSelectable, buildPostIndex } from '../lib/vendorStatus';
 import { setPostStatus, togglePostConfirmation, togglePostPlatformPublished } from '../lib/postActions';
 import { canSendCaption, captionStatus, CAPTION_CARDS_MAX } from '../lib/captionReview';
-import { sendCaptionReview, copyCaptionPageLink } from '../lib/captionReviewClient';
+import { sendCaptionReview } from '../lib/captionReviewClient';
 import CaptionReviewPanel, { CaptionConfirmCell, CaptionStatusChip } from './CaptionReviewPanel';
 
 import { clsx, type ClassValue } from 'clsx';
@@ -701,7 +700,7 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
         ))}
       </div>
 
-      {/* 業主審文案（11-16）：選了某個 IP 才出現——把寫好還沒送審的文案一次送到客戶群組，或複製客戶端連結 */}
+      {/* 業主審文案（11-16）：選了某個 IP 才出現——把寫好還沒送審的文案一次送到客戶群組（客戶端連結 11-18 移到廠商管理） */}
       {selectedVendorId !== 'all' && (() => {
         const vendor = vendors.find(v => v.id === selectedVendorId);
         const unsent = filteredPosts.filter(p => captionStatus(p) === 'unsent')
@@ -712,10 +711,6 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
             <button type="button" disabled={!unsent.length} onClick={() => void sendCaptionReview(unsent, vendor)}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[14px] font-bold bg-[#5A5A40] text-white disabled:opacity-40 whitespace-nowrap">
               <Send size={14} /> {unsent.length ? `把 ${unsent.length} 篇未送審文案一起送業主` : '沒有未送審的文案'}
-            </button>
-            <button type="button" onClick={() => void copyCaptionPageLink(vendor.id!, selectedMonth)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[14px] font-bold bg-white border border-black/10 text-[#5A5A40] whitespace-nowrap">
-              <Link2 size={14} /> 複製客戶端連結
             </button>
           </div>
         );

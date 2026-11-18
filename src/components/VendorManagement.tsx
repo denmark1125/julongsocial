@@ -17,7 +17,8 @@ import {
 import { db, auth } from '../firebase';
 import { Vendor, SocialAccount, OperationType, Editor, PauseRecord, UserProfile, VendorTargetChange, VendorSecrets, socialAccountKey, platformOptionsFor, platformsFromHabits } from '../types';
 import { openFolderPicker, getPickerApiKey, isPickerConfigured } from '../lib/drivePicker';
-import { Plus, Trash2, Edit2, ExternalLink, Shield, X, Eye, EyeOff, Users, ChevronDown, ChevronUp, Settings2, Snowflake, RotateCcw, PowerOff } from 'lucide-react';
+import { Plus, Trash2, Edit2, ExternalLink, Shield, X, Eye, EyeOff, Users, ChevronDown, ChevronUp, Settings2, Snowflake, RotateCcw, PowerOff, Link2 } from 'lucide-react';
+import { copyCaptionPageLink } from '../lib/captionReviewClient';
 import toast from 'react-hot-toast';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -809,6 +810,13 @@ export default function VendorManagement() {
             </div>
 
             <div className="space-y-3">
+              {/* 客戶端固定連結（11-18）：一個 IP 永遠同一條，複製後可以存在記事本、貼給業主 */}
+              {statusTab !== 'ended' && (
+                <button type="button" onClick={() => void copyCaptionPageLink(vendor.id!)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[13px] font-bold bg-white border border-[#5A5A40]/20 text-[#5A5A40] hover:bg-[#5A5A40]/5 whitespace-nowrap">
+                  <Link2 size={14} /> 複製客戶端連結
+                </button>
+              )}
               <div className="flex flex-wrap gap-2 items-center">
                 {statusTab === 'paused' && (
                   <div className="flex items-center text-xs font-bold text-cyan-700 bg-cyan-50 px-2 py-1 rounded-lg border border-cyan-100 w-fit">
