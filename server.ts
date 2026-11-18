@@ -22,6 +22,7 @@ import { buildPendingListMessage, buildReminderMessage, buildReviewNotifyMessage
 import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
 import { isBookingChange, planShootSync, toCalendarEvent, type TimetreeShootChange } from "./src/lib/shootSync.js";
 import { buildCheckPlan, runPublishAudit } from "./src/lib/publishAuditJob.js";
+import { lastShootDate } from "./src/lib/lastShoot.js";
 import { NOTIFY_KIND_MAP, resolveNotifyMode, type NotifyMode, type NotifyRules } from "./src/lib/notify/kinds.js";
 import { textToFlex, finalizeMessages, type FlexOptions } from "./src/lib/notify/flexCard.js";
 import { chaseMessage, chaseTimeFor, directAssetId, pickChases, type ChaseItem, type ChasePost } from "./src/lib/notify/reviewChase.js";
@@ -2556,13 +2557,13 @@ async function buildStockAlertMessage(): Promise<any | null> {
   const today = now.toISOString().slice(0, 10);
   const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-  const lastCompletedShootDate = (vendorId: string): string | null => {
-    const completed = bookings
-      .filter((b: any) => b.vendorId === vendorId && b.status === "completed")
-      .sort((a: any, b: any) => b.scheduledDate.localeCompare(a.scheduledDate));
-    if (completed.length === 0) return null;
-    const [, m, d] = completed[0].scheduledDate.split("-");
-    return `${m}/${d}`;
+  // 「上次拍攝」：預約＋素材拍攝日取最晚（見 src/lib/lastShoot.ts，只看結案預約會把大發 10 月的拍攝漏掉）
+  const twToday = new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const lastShootLabel = (vendorId: string): string | null => {
+    const d = lastShootDate(vendorId, bookings, assets, twToday);
+    if (!d) return null;
+    const [, m, day] = d.split("-");
+    return `${m}/${day}`;
   };
 
   const urgentVendors = vendors
@@ -2592,7 +2593,7 @@ async function buildStockAlertMessage(): Promise<any | null> {
     .slice(0, 12);
 
   const bubbles = shown.map(({ vendor, alert, monthProgress }: any) =>
-    buildStockAlertBubble(vendor, alert, lastCompletedShootDate(vendor.id), monthProgress)
+    buildStockAlertBubble(vendor, alert, lastShootLabel(vendor.id), monthProgress)
   );
 
   // 數字給真的總數，但有截掉就要講，不然看到 12 張會以為就這些。
