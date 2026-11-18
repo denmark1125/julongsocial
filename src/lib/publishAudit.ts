@@ -18,6 +18,12 @@ export type AuditPlatform = 'IG' | 'FB' | 'TikTok';
 /** 每分鐘稽核（Meta API）查得到的平台；TikTok 只能靠機器人抄回來的卡片，另外由 auditTikTok 呼叫（allowTikTok） */
 export const AUDITABLE_PLATFORMS: AuditPlatform[] = ['IG', 'FB'];
 
+/** 這個 IP 的這個平台是不是發在個人帳號、系統不查（vendor.auditSkipPlatforms） */
+export const isAuditSkipped = (skip: string[] | undefined, pf: string) => !!skip?.includes(pf);
+/** 拿掉不查的平台後的貼文（給發布前檢查用，不然個人帳號那邊永遠「後台沒排」） */
+export const withoutSkipped = <T extends { platforms?: string[] }>(p: T, skip: string[] | undefined): T =>
+  skip?.length ? { ...p, platforms: (p.platforms || []).filter(pf => !skip.includes(pf)) } : p;
+
 /** 平台上抓回來的一則貼文 */
 export interface LivePost {
   platform: AuditPlatform;

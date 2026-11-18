@@ -9,6 +9,7 @@ import { isClientApproved } from '../lib/assetFlow';
 import { doc, updateDoc } from 'firebase/firestore';
 import toast from 'react-hot-toast';
 import { db } from '../firebase';
+import CaptionReviewPanel from './CaptionReviewPanel';
 
 interface PostDetailModalProps {
   post: Post;
@@ -277,6 +278,9 @@ export default function PostDetailModal({ post, vendor, asset, onClose, assets, 
                 : <div key={field} className={cls}>{inner}</div>;
             })}
           </div>
+
+          {/* 業主審文案（11-16）：送審、業主意見、修改紀錄 */}
+          {editable && <CaptionReviewPanel post={post} vendorName={vendor?.name || ''} />}
         </div>
 
         {/* Footer */}

@@ -41,7 +41,9 @@ import {
   BellRing,
   ArrowUp,
   ArrowDown,
-  Gift
+  Gift,
+  Send,
+  Link2
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { format, isPast, isToday, addDays, parseISO, getDay, setHours, setMinutes, startOfDay, isSameDay, startOfMonth, endOfMonth, eachMonthOfInterval, subMonths, addMonths } from 'date-fns';
@@ -50,6 +52,9 @@ import TrackingExportModal from './TrackingExportModal';
 import { DismissedHabit, ExtraSlot, MonthlyAdjustment } from '../types';
 import { visibleVendors, trackedVendorsForMonth, getContractTargets, getEffectiveMonthlyTarget, isAssetSelectable, buildPostIndex } from '../lib/vendorStatus';
 import { setPostStatus, togglePostConfirmation, togglePostPlatformPublished } from '../lib/postActions';
+import { canSendCaption, captionStatus, CAPTION_CARDS_MAX } from '../lib/captionReview';
+import { sendCaptionReview, copyCaptionPageLink } from '../lib/captionReviewClient';
+import CaptionReviewPanel, { CaptionStatusChip } from './CaptionReviewPanel';
 
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -285,6 +290,26 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
       const data = Object.fromEntries(
         Object.entries(raw).filter(([, v]) => v !== undefined)
       ) as typeof raw;
+
+      // 業主審文案（11-16）：formData 是「打開視窗那一刻」的整篇貼文。開著視窗的這段時間，業主可能已經在客戶端／LINE
+      // 按了確認或改了字——整包寫回去會把那些蓋掉。所以：
+      // - captionReview 一律不從這裡寫（只有伺服器與 captionReviewClient 寫）
+      // - 業主審核／內部檢核：這個視窗沒有這兩個開關，沒變就不寫，免得把別人剛勾的蓋回舊值
+      // - 文案：資料庫裡的已經跟打開時不同（有人改過）→ 小編沒動文案就保留資料庫的；兩邊都改了先問
+      if (editingPost) {
+        const live = posts.find(p => p.id === editingPost.id);
+        delete (data as any).captionReview;
+        for (const f of ['clientConfirmed', 'internalConfirmed'] as const) {
+          if ((data as any)[f] === editingPost[f]) delete (data as any)[f];
+        }
+        if (live && (live.content || '') !== (editingPost.content || '')) {
+          if ((formData.content || '') === (editingPost.content || '')) {
+            delete (data as any).content;
+          } else if (!window.confirm('你打開這篇之後，文案已經被改過（可能是業主在客戶端改的）。\n\n按「確定」用你現在的版本覆蓋；按「取消」先不存，關掉重開就能看到最新的文案。')) {
+            return;
+          }
+        }
+      }
 
       // 貼文與素材的掛載狀態一定要一起成功或一起失敗。
       // 舊寫法是三個 await 依序打，只要後面那步被規則擋下（例如素材缺欄位驗證不過），
@@ -676,6 +701,26 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
         ))}
       </div>
 
+      {/* 業主審文案（11-16）：選了某個 IP 才出現——把寫好還沒送審的文案一次送到客戶群組，或複製客戶端連結 */}
+      {selectedVendorId !== 'all' && (() => {
+        const vendor = vendors.find(v => v.id === selectedVendorId);
+        const unsent = filteredPosts.filter(p => captionStatus(p) === 'unsent')
+          .sort((a, b) => (a.scheduledAt || '').localeCompare(b.scheduledAt || '')).slice(0, CAPTION_CARDS_MAX);
+        if (!vendor) return null;
+        return (
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" disabled={!unsent.length} onClick={() => void sendCaptionReview(unsent, vendor.name)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[14px] font-bold bg-[#5A5A40] text-white disabled:opacity-40 whitespace-nowrap">
+              <Send size={14} /> {unsent.length ? `把 ${unsent.length} 篇未送審文案一起送業主` : '沒有未送審的文案'}
+            </button>
+            <button type="button" onClick={() => void copyCaptionPageLink(vendor.id!, selectedMonth)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[14px] font-bold bg-white border border-black/10 text-[#5A5A40] whitespace-nowrap">
+              <Link2 size={14} /> 複製客戶端連結
+            </button>
+          </div>
+        );
+      })()}
+
       <div className="bg-white rounded-3xl shadow-sm border border-black/5 overflow-hidden">
         {/* Desktop Table View */}
         <div className="hidden md:block overflow-x-auto">
@@ -846,6 +891,7 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
                       <button aria-label="切換業主審核" onClick={() => toggleConfirmation(post, 'clientConfirmed')}>
                         {post.clientConfirmed ? <CheckSquare className="mx-auto text-green-500" size={20} /> : <Square className="mx-auto text-gray-300" size={20} />}
                       </button>
+                      {['sent', 'change_requested', 'client_edited', 'changed_after'].includes(captionStatus(post)) && <div className="mt-1"><CaptionStatusChip post={post} /></div>}
                     </td>
                     <td className="p-4 text-center">
                       <button aria-label="切換內部檢核" onClick={() => toggleConfirmation(post, 'internalConfirmed')}>
@@ -861,6 +907,16 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
                         >
                           <Copy size={16} />
                         </button>
+                        {canSendCaption(post) && (
+                          <button
+                            onClick={() => void sendCaptionReview([post], vendors.find(v => v.id === post.vendorId)?.name || '')}
+                            className="p-2 text-[#5A5A40] hover:bg-[#5A5A40]/10 rounded-lg transition-colors"
+                            title={post.captionReview?.sentAt ? '再送一次給業主審文案' : '送業主審文案'}
+                            aria-label="送業主審文案"
+                          >
+                            <Send size={16} />
+                          </button>
+                        )}
                         <button 
                           onClick={() => {
                             setEditingPost(post);
@@ -945,6 +1001,7 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
                     <span className="block text-[14px] font-bold leading-snug line-clamp-2">{post.title}</span>
                     {boundAssetLabel(post, assets) && <span className="block text-[13px] text-blue-700 truncate mt-0.5">{boundAssetLabel(post, assets)}</span>}
                   </button>
+                  {['sent', 'change_requested', 'client_edited', 'changed_after'].includes(captionStatus(post)) && <div><CaptionStatusChip post={post} /></div>}
                   <div className="flex items-center gap-1.5">
                     {checks.map(c => (
                       <button key={c.label} type="button" onClick={c.onClick} disabled={!c.onClick}
@@ -954,6 +1011,7 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
                       </button>
                     ))}
                     <div className="ml-auto flex items-center">
+                      {canSendCaption(post) && <button onClick={() => void sendCaptionReview([post], vendor?.name || '')} className="p-2 text-[#5A5A40] rounded-lg" title="送業主審文案" aria-label="送業主審文案"><Send size={17} /></button>}
                       <button onClick={() => handleCopyContent(post.content)} className="p-2 text-emerald-600 rounded-lg" title="複製文案" aria-label="複製文案"><Copy size={17} /></button>
                       {publishedPostUrl(post) && <a href={publishedPostUrl(post)} target="_blank" rel="noopener noreferrer" className="p-2 text-blue-500" aria-label="打開貼文"><ExternalLink size={17} /></a>}
                       <button onClick={() => setDeletingPostId(post.id!)} aria-label="刪除貼文" className="p-2 text-gray-300 rounded-lg"><Trash2 size={17} /></button>
@@ -1396,6 +1454,19 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
                       placeholder="輸入貼文內容..."
                     />
                   </div>
+                  {(() => {
+                    // 業主審文案（11-16）：只有已存在的貼文才有；用資料庫裡最新那一版判斷狀態，文案沒存檔不能送
+                    const live = editingPost?.id ? posts.find(p => p.id === editingPost.id) : undefined;
+                    if (!live) return null;
+                    return (
+                      <CaptionReviewPanel
+                        post={live}
+                        vendorName={vendors.find(v => v.id === live.vendorId)?.name || ''}
+                        unsaved={(formData.content || '') !== (live.content || '')}
+                        onApplyText={text => setFormData({ ...formData, content: text })}
+                      />
+                    );
+                  })()}
                   <div>
                     <label className="block text-base font-medium text-gray-700 mb-1">貼文位置連結 (如 Drive/Notion/社群連結)</label>
                     <div className="relative">

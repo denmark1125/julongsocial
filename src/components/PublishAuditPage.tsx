@@ -258,8 +258,9 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                   </div>
                 )}
                 <div className="flex flex-wrap gap-2">
-                  {cells.map(({ pf, a, status, configured }) => {
-                    const text = !configured && (pf === 'TikTok' || AUDITABLE_PLATFORMS.includes(pf as any))
+                  {cells.map(({ pf, a, status, configured, personal }) => {
+                    const text = personal ? '發在個人帳號，系統不查'
+                      : !configured && (pf === 'TikTok' || AUDITABLE_PLATFORMS.includes(pf as any))
                       ? (pf === 'TikTok' ? '這個 IP 還沒設定 TikTok 帳號' : '這個 IP 還沒設定粉專')
                       : a ? describeAudit(a, p.scheduledAt, vendorName)
                       : pf === 'TikTok' && status === 'pending' ? tiktokNextCheck(p.scheduledAt) : AUDIT_STATUS_LABEL[status];

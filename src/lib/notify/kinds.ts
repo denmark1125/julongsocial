@@ -53,6 +53,9 @@ export const NOTIFY_KINDS: NotifyKindDef[] = [
   { id: 'flow_digest', target: 'owner', label: '每日製作進度整理', description: '每天早上整理昨天的進度：哪些片送客戶審了、哪些已上傳雲端可排程（跟「即時通知」二選一）', audience: 'internal', recipientLabel: '管理者', whenLabel: '每天 09:30', defaultMode: 'personalSwitch', priority: 3 },
   { id: 'flow_event', target: 'owner', label: '製作進度即時通知', description: '跟「每日製作進度整理」同一類，但不等隔天，每有一支片送審或上傳就馬上推一則（兩個二選一）', audience: 'internal', recipientLabel: '管理者', whenLabel: '新片送審／上傳雲端時', defaultMode: 'personalSwitch', priority: 3 },
   { id: 'shoot_sync_alert', target: 'owner', label: 'TimeTree 同步失敗', description: '拍攝行事曆從 TimeTree 同步進系統時出錯，要人去看', audience: 'internal', recipientLabel: '管理者', whenLabel: '同步出錯時', defaultMode: 'personalSwitch', priority: 2 },
+  // ── 業主審文案（2026-11-16）──
+  { id: 'caption_review', target: 'clientGroup', label: '業主審文案', description: '小編寫好文案按「送業主審文案」，客戶群組收到卡片：文案全文＋「文案 OK／要修改」按鈕，也能開網頁看整月排程', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '小編按「送業主審文案」時', defaultMode: 'test', priority: 1 },
+  { id: 'caption_feedback', target: 'staff', label: '業主對文案有意見', description: '業主按了「要修改」或在文案頁改了字，通知送審的那位小編（業主按 OK 不通知）', audience: 'internal', recipientLabel: '送審的小編', whenLabel: '業主按「要修改」／改字時', defaultMode: 'live', priority: 2 },
   // ── 規劃中（之後幾個階段做）──
   { id: 'air_notice', target: 'clientGroup', label: '上片通知', description: '片子確認上線後，通知客戶「影片已於幾點準時發布」', audience: 'client', recipientLabel: '該 IP 的客戶群組', whenLabel: '發布後確認上線＋緩衝 10 分鐘', defaultMode: 'test', priority: 1, planned: true },
   { id: 'review_chase', target: 'staff', label: '內部催片', description: '上片前 48、24 小時片子還沒過業主審（還沒有片／還在剪／客戶要改／客戶還沒審），提醒藏鏡人和 PM 去催', audience: 'internal', recipientLabel: '該 IP 的藏鏡人＋PM（廠商管理勾選的）', whenLabel: '平日 09:30、週末 13:00（上片前 48、24 小時內還沒審完的）', defaultMode: 'test', priority: 2 },

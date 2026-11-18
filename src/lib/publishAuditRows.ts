@@ -1,6 +1,6 @@
 import { addDays, format, parseISO } from 'date-fns';
 import { Asset, Post, Vendor } from '../types';
-import { AUDITABLE_PLATFORMS, type AuditStatus, type PlatformAudit } from './publishAudit';
+import { AUDITABLE_PLATFORMS, isAuditSkipped, withoutSkipped, type AuditStatus, type PlatformAudit } from './publishAudit';
 import { mergeCalendars, precheckAll, type PrecheckResult, type VendorCalendar } from './publishPrecheck';
 import { videoProgress } from '../components/VideoProgressSteps';
 
@@ -28,14 +28,15 @@ export const TONE: Record<AuditStatus, string> = {
   unsupported: 'bg-gray-50 text-gray-300 border-black/5',
 };
 
-export type AuditCell = { pf: string; a: PlatformAudit | undefined; status: AuditStatus; configured: boolean };
+export type AuditCell = { pf: string; a: PlatformAudit | undefined; status: AuditStatus; configured: boolean; personal?: boolean };
 export type AuditRow = { p: Post; v: Vendor | undefined; cells: AuditCell[]; worst: number };
 
 /** 準時 IP 的貼文對上機器人抄回來的後台排程（跟伺服器同一個 precheckAll） */
 export function computePrecheck(precheckDoc: PrecheckDoc | null, posts: Post[], vmap: Map<string, Vendor>): Map<string, PrecheckResult> {
   if (!precheckDoc?.vendors && !precheckDoc?.tiktok) return new Map();
   const cals = mergeCalendars(precheckDoc.vendors, precheckDoc.tiktok);
-  const strictPosts = posts.filter(p => vmap.get(p.vendorId)?.strictTiming && cals[p.vendorId]);
+  const strictPosts = posts.filter(p => vmap.get(p.vendorId)?.strictTiming && cals[p.vendorId])
+    .map(p => withoutSkipped(p, vmap.get(p.vendorId)?.auditSkipPlatforms));
   return new Map(precheckAll(strictPosts as any, cals).map(r => [`${r.postId}|${r.platform}`, r.result]));
 }
 
@@ -54,9 +55,10 @@ export function buildAuditRows(posts: Post[], vmap: Map<string, Vendor>, preview
         const isTikTok = pf === 'TikTok';
         const configured = isTikTok ? !!v?.tiktokBsId : !!v?.metaFbPageId;
         const supported = isTikTok || AUDITABLE_PLATFORMS.includes(pf as any);
-        // 沒設粉專／帳號＝根本沒在查，不能顯示成「等待中」騙人，跟尚未支援的平台一樣灰掉、不計數
-        const status: AuditStatus = !supported || !configured ? 'unsupported' : (a?.status || 'pending');
-        return { pf, a, status, configured };
+        const personal = isAuditSkipped(v?.auditSkipPlatforms, pf);
+        // 沒設粉專／帳號、或發在個人帳號＝根本沒在查，不能顯示成「等待中」騙人，跟尚未支援的平台一樣灰掉、不計數
+        const status: AuditStatus = !supported || !configured || personal ? 'unsupported' : (a?.status || 'pending');
+        return { pf, a: personal ? undefined : a, status, configured, personal };
       });
       const worst = Math.min(...cells.map(c => SEVERITY[c.status]), 99);
       return { p, v, cells, worst };

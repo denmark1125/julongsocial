@@ -96,6 +96,8 @@ function emptyVendorForm() {
     metaIgPageId: '',
     coverMode: 'first_frame' as 'first_frame' | 'custom',
     tiktokBsId: '',
+    tiktokHandle: '',
+    auditSkipPlatforms: [] as string[],
   };
 }
 
@@ -722,6 +724,8 @@ export default function VendorManagement() {
                       metaIgPageId: vendor.metaIgPageId || '',
                       coverMode: vendor.coverMode || 'first_frame',
                       tiktokBsId: vendor.tiktokBsId || '',
+                      tiktokHandle: vendor.tiktokHandle || '',
+                      auditSkipPlatforms: vendor.auditSkipPlatforms || [],
                       // 還沒在這張卡上明確設定的，先帶入「發布習慣」裡已經設好的平台：
                       // 老闆原本就在那裡設過，打開來應該是已經勾好的狀態，不是一張空表。
                       // 按下儲存就會變成這張卡上的正式設定，之後不再依賴發布習慣。
@@ -1379,6 +1383,34 @@ export default function VendorManagement() {
                         placeholder="TikTok Business Suite 帳號 ID（不填＝不檢查 TikTok）"
                         className="flex-1 min-w-0 px-3 py-1.5 bg-white rounded-xl border border-black/5 text-xs focus:outline-none focus:border-[#5A5A40]/30"
                       />
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="shrink-0 w-16 text-xs font-bold text-gray-600 whitespace-nowrap">TikTok 帳號</span>
+                      <input
+                        type="text"
+                        value={formData.tiktokHandle}
+                        onChange={(e) => setFormData({ ...formData, tiktokHandle: e.target.value.trim() })}
+                        placeholder="@ 後面那段，例 dafacar（客戶端「到 TikTok 帳號看」用；也可直接貼帳號網址）"
+                        className="flex-1 min-w-0 px-3 py-1.5 bg-white rounded-xl border border-black/5 text-xs focus:outline-none focus:border-[#5A5A40]/30"
+                      />
+                    </div>
+                    {/* 11-18 廣信：FB 發在孝文個人帳號、系統查不到 → 勾起來就不稽核那個平台，不再天天報「沒看到」 */}
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 w-16 text-xs font-bold text-gray-600 whitespace-nowrap pt-0.5">個人帳號</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          {['IG', 'FB', 'TikTok'].map(pf => (
+                            <label key={pf} className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer whitespace-nowrap">
+                              <input type="checkbox" checked={formData.auditSkipPlatforms.includes(pf)}
+                                onChange={(e) => setFormData({ ...formData, auditSkipPlatforms: e.target.checked
+                                  ? [...formData.auditSkipPlatforms, pf] : formData.auditSkipPlatforms.filter(x => x !== pf) })}
+                                className="rounded border-gray-300 text-[#5A5A40] focus:ring-[#5A5A40]" />
+                              {pf}
+                            </label>
+                          ))}
+                        </div>
+                        <p className="text-[13px] text-gray-400 mt-1">勾＝這個平台發在業主個人帳號，系統查不到，不稽核也不通知</p>
+                      </div>
                     </div>
                     {metaPagesError && <p className="text-[13px] text-red-500">{metaPagesError}</p>}
                     {!metaPages && !metaPagesError && <p className="text-[13px] text-gray-400">讀取粉專清單中…</p>}

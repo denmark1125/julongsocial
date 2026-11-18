@@ -2,6 +2,10 @@
   "version": 2,
   "rewrites": [
     {
+      "source": "/c/:token",
+      "destination": "/client.html"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api"
     },

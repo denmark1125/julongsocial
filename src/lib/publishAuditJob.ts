@@ -2,6 +2,7 @@ import { deriveFlowStage } from '../types.js';
 import {
   AUDIT_STATUS_ICON, AUDITABLE_PLATFORMS, auditOne, describeAudit, findCrossAccountPosts, isSettled, shouldAlert, taipeiDay, taipeiTime,
   taipeiToDate, type CrossAccountHit, type LivePost, type PlatformAudit,
+  isAuditSkipped, withoutSkipped,
 } from './publishAudit.js';
 import { fetchFacebookPosts, fetchInstagramPosts, listMetaPages, type MetaPage } from './metaGraph.js';
 import { describePrecheck, mergeCalendars, PRECHECK_ICON, precheckAll, unmatchedCards, type VendorCalendar } from './publishPrecheck.js';
@@ -63,7 +64,7 @@ function taipeiStamp(d: Date): string {
   return `${taipeiDay(d)}T${taipeiTime(d)}`;
 }
 
-interface VendorInfo { id: string; name: string; strict: boolean; fbPageId?: string; igPageId?: string; tiktokBsId?: string }
+interface VendorInfo { id: string; name: string; strict: boolean; fbPageId?: string; igPageId?: string; tiktokBsId?: string; skip?: string[] }
 
 // IP 名單幾乎不變：同一台伺服器 10 分鐘內重複用，不要每次叫醒都重讀 20 幾筆（省資料庫讀取）
 let vendorCache: { at: number; map: Map<string, VendorInfo> } | null = null;
@@ -82,6 +83,7 @@ async function loadVendorsFresh(db: any): Promise<Map<string, VendorInfo>> {
     return [d.id, {
       id: d.id, name: v.name || d.id, strict: !!v.strictTiming,
       fbPageId: v.metaFbPageId || undefined, igPageId: v.metaIgPageId || v.metaFbPageId || undefined, tiktokBsId: v.tiktokBsId || undefined,
+      skip: Array.isArray(v.auditSkipPlatforms) ? v.auditSkipPlatforms : undefined,
     }];
   }));
 }
@@ -169,6 +171,12 @@ export async function runPublishAudit(deps: JobDeps): Promise<JobResult> {
         if (!AUDITABLE_PLATFORMS.includes(pf as any)) continue;
         const prev: PlatformAudit | undefined = p.publishAudit?.[pf];
         if (isSettled(prev, now, p.scheduledAt)) continue;
+        // 發在個人帳號、系統查不到（廣信 FB）：記一筆「不查」就定案，不找、不推（11-18 天天被報沒看到）
+        if (isAuditSkipped(v.skip, pf)) {
+          if (!dryRun) await db.collection('posts').doc(p.id).update({ [`publishAudit.${pf}`]: { status: 'unsupported', checkedAt: now.toISOString(), forScheduledAt: p.scheduledAt } });
+          result.changed++;
+          continue;
+        }
         if (prev?.livePostId) claimed.delete(prev.livePostId); // 自己上次配到的那則可以再配給自己
 
         let live = await liveOf(p.vendorId);
@@ -457,7 +465,8 @@ async function evaluatePrecheck(db: any, vmap: Map<string, VendorInfo>, now: Dat
   const snap = await db.collection('posts').where('scheduledAt', '>=', `${day}T00:00`).where('scheduledAt', '<=', `${day}T23:59`).get();
   const dayPosts = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }))
     .filter((p: any) => vmap.get(p.vendorId)?.strict && (vmap.get(p.vendorId)?.fbPageId || vmap.get(p.vendorId)?.tiktokBsId));
-  const posts = dayPosts.filter((p: any) => p.scheduledAt > nowStamp); // 已過時間的交給發布後稽核
+  const posts = dayPosts.filter((p: any) => p.scheduledAt > nowStamp) // 已過時間的交給發布後稽核
+    .map((p: any) => withoutSkipped(p, vmap.get(p.vendorId)?.skip));
   const rows = precheckAll(posts, calendars);
   // 「後台排了、系統沒有」只比準時 IP：TikTok 機器人會抄所有帳號，非準時 IP（例 大發）的貼文根本沒放進 dayPosts，
   // 不濾掉就會每張卡都被當成「系統沒排」（11-06 誤報）
@@ -544,7 +553,8 @@ async function auditTikTok(db: any, vmap: Map<string, VendorInfo>, tiktok: Recor
   const from = taipeiStamp(new Date(now.getTime() - 48 * 3600_000));
   const snap = await db.collection('posts').where('scheduledAt', '>=', from).where('scheduledAt', '<=', taipeiStamp(seenAt)).get();
   const posts = snap.docs.map((d: any) => ({ id: d.id, ref: d.ref, ...d.data() }))
-    .filter((p: any) => (p.platforms || []).includes('TikTok') && vmap.get(p.vendorId)?.tiktokBsId && tiktok[p.vendorId]?.ok)
+    .filter((p: any) => (p.platforms || []).includes('TikTok') && vmap.get(p.vendorId)?.tiktokBsId && tiktok[p.vendorId]?.ok
+      && !isAuditSkipped(vmap.get(p.vendorId)?.skip, 'TikTok'))
     .sort((a: any, b: any) => a.scheduledAt.localeCompare(b.scheduledAt));
   const claimed = new Set<string>();
   for (const p of posts) { const a = p.publishAudit?.TikTok; if (a?.livePostId && a.forScheduledAt === p.scheduledAt) claimed.add(a.livePostId); }

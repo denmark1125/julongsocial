@@ -1,4 +1,5 @@
 import type { PublishAudit } from './lib/publishAudit.js';
+import type { CaptionReview } from './lib/captionReview.js';
 
 export interface BillingService {
   name: string;
@@ -421,6 +422,13 @@ export interface Vendor {
   coverMode?: 'first_frame' | 'custom';
   /** TikTok Business Suite 的帳號 ID（bs_id），TikTok 機器人（rpa/tiktok_calendar.py）用它切換帳號 */
   tiktokBsId?: string;
+  /** TikTok 帳號名稱（tiktok.com/@ 後面那段）。客戶端已發布的貼文用它連到帳號首頁（TikTok 拿不到單篇網址，11-18） */
+  tiktokHandle?: string;
+  /**
+   * 發在業主個人帳號、系統查不到的平台（11-18 廣信：FB 粉專是空殼，FB 實際發在孝文個人帳號，稽核天天報「沒看到」）。
+   * 列在這裡的平台：發布稽核、發布前檢查、日報都跳過，畫面寫「發在個人帳號，系統不查」。
+   */
+  auditSkipPlatforms?: string[];
   defaultPlatforms?: VendorDefaultPlatforms; // 這個 IP 預設的發布平台（依內容形式分開），新增貼文時自動帶入；見 VendorDefaultPlatforms
   status?: 'active' | 'paused' | 'ended'; // 不填視同 active
   pausedUntil?: string;     // YYYY-MM-DD，冷凍期預計恢復日（僅 status='paused' 時有意義）
@@ -469,6 +477,11 @@ export interface Post {
    * status：ok＝封面是第一幀；mismatch＝不是（推 LINE）；review＝封面另外設計的 IP，請目視；skipped／error
    */
   coverCheck?: Record<string, { status: 'ok' | 'mismatch' | 'review' | 'skipped' | 'error'; distance?: number; coverUrl?: string; livePostId?: string; checkedAt?: string; note?: string; alertedAt?: string }>;
+  /**
+   * 業主審文案的過程（2026-11-16）：何時送審、業主怎麼確認的、業主意見、改字前的版本。見 src/lib/captionReview.ts。
+   * ⚠️「業主確認了沒」仍然只看 clientConfirmed；這裡是補充紀錄，畫面狀態一律用 captionStatus(post) 推。
+   */
+  captionReview?: CaptionReview;
 }
 
 export type AssetType = 'video' | 'post';
