@@ -54,7 +54,7 @@ import { visibleVendors, trackedVendorsForMonth, getContractTargets, getEffectiv
 import { setPostStatus, togglePostConfirmation, togglePostPlatformPublished } from '../lib/postActions';
 import { canSendCaption, captionStatus, CAPTION_CARDS_MAX } from '../lib/captionReview';
 import { sendCaptionReview, copyCaptionPageLink } from '../lib/captionReviewClient';
-import CaptionReviewPanel, { CaptionStatusChip } from './CaptionReviewPanel';
+import CaptionReviewPanel, { CaptionConfirmCell, CaptionStatusChip } from './CaptionReviewPanel';
 
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -709,7 +709,7 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
         if (!vendor) return null;
         return (
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" disabled={!unsent.length} onClick={() => void sendCaptionReview(unsent, vendor.name)}
+            <button type="button" disabled={!unsent.length} onClick={() => void sendCaptionReview(unsent, vendor)}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[14px] font-bold bg-[#5A5A40] text-white disabled:opacity-40 whitespace-nowrap">
               <Send size={14} /> {unsent.length ? `把 ${unsent.length} 篇未送審文案一起送業主` : '沒有未送審的文案'}
             </button>
@@ -888,10 +888,8 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
                       <div className="text-sm text-gray-500 line-clamp-2 mt-1">{post.content}</div>
                     </td>
                     <td className="p-4 text-center">
-                      <button aria-label="切換業主審核" onClick={() => toggleConfirmation(post, 'clientConfirmed')}>
-                        {post.clientConfirmed ? <CheckSquare className="mx-auto text-green-500" size={20} /> : <Square className="mx-auto text-gray-300" size={20} />}
-                      </button>
-                      {['sent', 'change_requested', 'client_edited', 'changed_after'].includes(captionStatus(post)) && <div className="mt-1"><CaptionStatusChip post={post} /></div>}
+                      <CaptionConfirmCell post={post} vendor={vendor || {}} onToggle={() => toggleConfirmation(post, 'clientConfirmed')}
+                        send={(ps, v) => void sendCaptionReview(ps, v)} />
                     </td>
                     <td className="p-4 text-center">
                       <button aria-label="切換內部檢核" onClick={() => toggleConfirmation(post, 'internalConfirmed')}>
@@ -907,16 +905,6 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
                         >
                           <Copy size={16} />
                         </button>
-                        {canSendCaption(post) && (
-                          <button
-                            onClick={() => void sendCaptionReview([post], vendors.find(v => v.id === post.vendorId)?.name || '')}
-                            className="p-2 text-[#5A5A40] hover:bg-[#5A5A40]/10 rounded-lg transition-colors"
-                            title={post.captionReview?.sentAt ? '再送一次給業主審文案' : '送業主審文案'}
-                            aria-label="送業主審文案"
-                          >
-                            <Send size={16} />
-                          </button>
-                        )}
                         <button 
                           onClick={() => {
                             setEditingPost(post);
@@ -1011,7 +999,7 @@ export default function PostManagement({ prefill, onPrefillConsumed, focusPostId
                       </button>
                     ))}
                     <div className="ml-auto flex items-center">
-                      {canSendCaption(post) && <button onClick={() => void sendCaptionReview([post], vendor?.name || '')} className="p-2 text-[#5A5A40] rounded-lg" title="送業主審文案" aria-label="送業主審文案"><Send size={17} /></button>}
+                      {canSendCaption(post) && <button onClick={() => void sendCaptionReview([post], vendor || {})} className="p-2 text-[#5A5A40] rounded-lg" title="送業主審文案" aria-label="送業主審文案"><Send size={17} /></button>}
                       <button onClick={() => handleCopyContent(post.content)} className="p-2 text-emerald-600 rounded-lg" title="複製文案" aria-label="複製文案"><Copy size={17} /></button>
                       {publishedPostUrl(post) && <a href={publishedPostUrl(post)} target="_blank" rel="noopener noreferrer" className="p-2 text-blue-500" aria-label="打開貼文"><ExternalLink size={17} /></a>}
                       <button onClick={() => setDeletingPostId(post.id!)} aria-label="刪除貼文" className="p-2 text-gray-300 rounded-lg"><Trash2 size={17} /></button>

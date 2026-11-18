@@ -94,9 +94,13 @@ export function canSendCaption(p: PostLike): boolean {
 
 /** IG 文案上限 */
 export const CAPTION_MAX_LEN = 2200;
-/** 卡片裡最多放幾個字（超過截斷、請對方開網頁看全文）。多篇一起送時每篇更短，整則才不會超過 LINE 的 50KB */
-const CARD_TEXT_SINGLE = 1500;
-const CARD_TEXT_MULTI = 700;
+/**
+ * 卡片一律放文案全文、不截斷（11-18 使用者：業主審的就是全文，不能叫他另外開網頁）。
+ * 2,200 字一張約 7KB，遠低於單張 30KB；多篇時一則 carousel 的 50KB 裝不下就拆成好幾則（同一次推播最多 5 則）。
+ */
+const CAROUSEL_MAX_BYTES = 45_000;
+// LINE 一次推播最多 5 則；測試模式前面會多一則「［測試］…」，所以卡片最多 4 則
+const PUSH_MESSAGES_MAX = 4;
 /** LINE carousel 一則最多 12 張 */
 export const CAPTION_CARDS_MAX = 12;
 /** 按「要修改」後，同一個人接下來幾分鐘內打的字算意見 */
@@ -141,11 +145,11 @@ export interface CaptionCardInfo {
 
 const clip = (t: string, n: number) => (t.length > n ? `${t.slice(0, n)}…` : t);
 
-function captionBubble(info: CaptionCardInfo, textMax: number) {
+function captionBubble(info: CaptionCardInfo) {
   const when = captionDateLabel(info.scheduledAt);
-  const sub = [when, (info.platforms || []).join('／')].filter(Boolean).join('・') || '上片日未定';
+  // 時間是「預計」：文案確認之後才會排程發布（11-18 使用者：寫「20:00 發布」像已經定了）
+  const sub = [when ? `預計 ${when} 上片` : '上片日未定', (info.platforms || []).join('／')].filter(Boolean).join('・');
   const full = String(info.content || '').trim();
-  const cut = full.length > textMax;
   const short = clip(info.title || '(未命名)', 20);
   return {
     type: 'bubble',
@@ -162,41 +166,47 @@ function captionBubble(info: CaptionCardInfo, textMax: number) {
       contents: [
         { type: 'text', text: info.title || '(未命名)', weight: 'bold', size: 'md', wrap: true, color: '#222222' },
         { type: 'separator', margin: 'md' },
-        { type: 'text', text: cut ? `${full.slice(0, textMax)}…` : full, size: 'md', color: '#333333', wrap: true, margin: 'md' },
-        ...(cut ? [{ type: 'text', text: '（文案較長，全文請按下方「開啟客戶端」）', size: 'xs', color: '#8A8A7A', wrap: true, margin: 'md' }] : []),
+        { type: 'text', text: full, size: 'md', color: '#333333', wrap: true, margin: 'md' },
+        { type: 'text', text: '文案確認後，我們才會排程發布。', size: 'xs', color: '#8A8A7A', wrap: true, margin: 'lg' },
       ],
     },
     footer: {
       type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '12px',
       contents: [
         { type: 'button', style: 'primary', color: '#2F9E5B', height: 'sm',
-          action: { type: 'postback', label: '✅ 文案 OK', data: captionPostbackData('ok', info.postId), displayText: `文案 OK：${when ? `${when} ` : ''}${short}` } },
+          action: { type: 'postback', label: '✅ 文案確認，可以發布', data: captionPostbackData('ok', info.postId), displayText: `文案 OK：${when ? `${when} ` : ''}${short}` } },
         { type: 'button', style: 'secondary', height: 'sm',
-          action: { type: 'postback', label: '✏️ 要修改', data: captionPostbackData('fix', info.postId), displayText: `要修改：${when ? `${when} ` : ''}${short}` } },
+          action: { type: 'postback', label: '💬 要修改（在群組說明）', data: captionPostbackData('fix', info.postId), displayText: `要修改：${when ? `${when} ` : ''}${short}` } },
         { type: 'button', style: 'link', height: 'sm', color: BRAND,
-          action: { type: 'uri', label: '開啟客戶端（排程／改字）', uri: info.pageUrl } },
+          action: { type: 'uri', label: '✏️ 線上直接修改文案', uri: info.pageUrl } },
       ],
     },
   };
 }
 
-/** 一篇＝一張卡；多篇＝左右滑（只扣一次額度）。超過 12 篇的呼叫端要先切 */
-export function buildCaptionReviewMessage(items: CaptionCardInfo[]) {
+/**
+ * 一篇＝一張卡；多篇＝左右滑。全文不截斷，所以一則 carousel 裝不下（50KB）時拆成好幾則，
+ * 一次推播送出（最多 5 則、只扣一次額度）。超過 12 篇的呼叫端要先切。
+ */
+export function buildCaptionReviewMessages(items: CaptionCardInfo[]) {
   const list = items.slice(0, CAPTION_CARDS_MAX);
-  const first = list[0];
-  if (!first) return null;
-  if (list.length === 1) {
-    return {
-      type: 'flex',
-      altText: clip(`文案確認：${first.vendorName}｜${first.title}`, 300),
-      contents: captionBubble(first, CARD_TEXT_SINGLE),
-    };
+  if (!list.length) return [];
+  const enc = new TextEncoder();
+  const bubbles = list.map(i => { const b = captionBubble(i); return { info: i, b, size: enc.encode(JSON.stringify(b)).length }; });
+  const groups: typeof bubbles[] = [];
+  for (const x of bubbles) {
+    const g = groups[groups.length - 1];
+    if (g && g.reduce((n, y) => n + y.size, 0) + x.size <= CAROUSEL_MAX_BYTES) g.push(x); else groups.push([x]);
   }
-  return {
-    type: 'flex',
-    altText: clip(`文案確認：${first.vendorName} ${list.length} 篇，請左右滑逐篇確認`, 300),
-    contents: { type: 'carousel', contents: list.map(i => captionBubble(i, CARD_TEXT_MULTI)) },
-  };
+  const total = list.length;
+  return groups.slice(0, PUSH_MESSAGES_MAX).map(g => g.length === 1
+    ? { type: 'flex', altText: clip(`文案確認：${g[0].info.vendorName}｜${g[0].info.title}`, 300), contents: g[0].b }
+    : { type: 'flex', altText: clip(`文案確認：${g[0].info.vendorName} ${total} 篇，請左右滑逐篇確認`, 300), contents: { type: 'carousel', contents: g.map(x => x.b) } });
+}
+
+/** 舊介面：只回第一則（測試與單篇用） */
+export function buildCaptionReviewMessage(items: CaptionCardInfo[]) {
+  return buildCaptionReviewMessages(items)[0] || null;
 }
 
 /** 業主按完按鈕後機器人在群組回的那句（回覆不扣額度） */

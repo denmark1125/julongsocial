@@ -20,7 +20,7 @@ import { isDriveConfigured, getQuota, ensureFolder, ensureBatchFolder, sanitizeF
 import { summarizeFolder } from "./src/lib/rawFolder.js";
 import { buildPendingListMessage, buildReminderMessage, buildReviewNotifyMessage, isPendingQuery, listPendingReviews, pickReviewReminders } from "./src/lib/lineReviewNotify.js";
 import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
-import { buildCaptionReviewMessage, canSendCaption, captionDateLabel, captionReplyText, isMonthKey, parseCaptionPostback, CAPTION_CARDS_MAX, CAPTION_MAX_LEN, FEEDBACK_WINDOW_MINUTES } from "./src/lib/captionReview.js";
+import { buildCaptionReviewMessages, canSendCaption, captionDateLabel, captionReplyText, isMonthKey, parseCaptionPostback, CAPTION_CARDS_MAX, CAPTION_MAX_LEN, FEEDBACK_WINDOW_MINUTES } from "./src/lib/captionReview.js";
 import { loadClientPortalData } from "./src/lib/clientPortalData.js";
 import { isBookingChange, planShootSync, toCalendarEvent, type TimetreeShootChange } from "./src/lib/shootSync.js";
 import { buildCheckPlan, runPublishAudit } from "./src/lib/publishAuditJob.js";
@@ -2361,17 +2361,17 @@ app.post("/api/posts/caption-review/send", async (req, res) => {
 
     const token = await ensureCaptionToken(vendorId);
     const base = `https://${req.get('host')}`;
-    const message: any = buildCaptionReviewMessage(posts.map(p => ({
+    const messages: any[] = buildCaptionReviewMessages(posts.map(p => ({
       postId: p.id, vendorName: vendor.name || '', title: p.title || '', content: p.content || '',
       scheduledAt: p.scheduledAt, platforms: p.platforms, sendCount: (p.captionReview?.sendCount || 0) + 1,
       pageUrl: `${base}/c/${token}?m=${captionPostMonth(p)}&p=${p.id}`,
     })));
     // 卡片被 LINE 拒絕時 notify() 會改發這段純文字（沒有按鈕，但文案與連結都還在）
-    message._fallbackText = (`文案確認｜${vendor.name || ''}\n\n` + posts.map(p =>
+    messages[0]._fallbackText = (`文案確認｜${vendor.name || ''}\n\n` + posts.map(p =>
       `${captionDateLabel(p.scheduledAt)} ${p.title || ''}\n${p.content || ''}`).join('\n\n────\n\n')).slice(0, 4500)
       + `\n\n確認或修改請開：${base}/c/${token}`;
     const r = await notify("caption_review", [{ type: "group", id: String(vendor.clientLineGroupId), label: `客戶群組（${vendor.name || ''}）` }],
-      [message], `${vendor.name || ''}：${posts.length} 篇文案送業主確認`);
+      messages, `${vendor.name || ''}：${posts.length} 篇文案送業主確認`);
     if (r.mode === 'off') return res.status(409).json({ error: "「業主審文案」通知目前是關閉的，請到「LINE 串接管理 → 通知規則」打開" });
     if (!r.sent) return res.status(502).json({ error: "LINE 沒有發出去，請到通知中心看原因" });
 
@@ -2481,8 +2481,9 @@ async function handleCaptionLineEvent(event: any): Promise<boolean> {
       if (p.clientConfirmed) {
         await reply(captionReplyText('already', p));
       } else {
+        // 業主按 OK＝業主審核＋內部檢核一起打勾（11-18 使用者：送出去的就是內部看過的版本，不用再回後台勾）
         await ref.update({
-          clientConfirmed: true,
+          clientConfirmed: true, internalConfirmed: true,
           "captionReview.approvedAt": now, "captionReview.approvedVia": 'line',
           "captionReview.approvedByName": byName, "captionReview.approvedContent": String(p.content || ''),
         });
@@ -2618,7 +2619,7 @@ async function captionPageWrite(token: string, postId: string, newContent: strin
     const edited = newContent !== null && newContent !== before;
     if (newContent === null && p.clientConfirmed) return { status: 200, post: p, edited: false };
     tx.update(ref, {
-      clientConfirmed: true,
+      clientConfirmed: true, internalConfirmed: true, // 同 LINE 按 OK：業主確認＝兩個勾一起打（11-18）
       ...(edited ? {
         content: newContent,
         "captionReview.history": [...(p.captionReview?.history || []), { at: now, by: 'client', byName: '業主（文案頁）', before }].slice(-20),

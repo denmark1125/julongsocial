@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { auth, db } from '../firebase';
 import { Post } from '../types';
 import type { CaptionFeedback } from './captionReview';
+import { askCaptionSend, type CaptionSendTarget } from '../components/CaptionSendConfirm';
 
 /**
  * 業主審文案：小編端的動作（送審、複製文案頁連結、整理業主意見）。規格見 src/lib/captionReview.ts。
@@ -22,10 +23,10 @@ async function call(path: string, body: Record<string, unknown>) {
 }
 
 /** 把文案送到該 IP 的客戶 LINE 群組。會先跳確認（發出去就收不回來）。回 true＝有送出 */
-export async function sendCaptionReview(posts: Post[], vendorName: string): Promise<boolean> {
+export async function sendCaptionReview(posts: Post[], vendor: CaptionSendTarget | string): Promise<boolean> {
   if (!posts.length) return false;
-  const what = posts.length === 1 ? `「${posts[0].title}」的文案` : `${posts.length} 篇文案`;
-  if (!window.confirm(`確定把${what}送到「${vendorName}」的客戶 LINE 群組請業主確認嗎？`)) return false;
+  // 防呆視窗（11-18）：寫清楚送給誰、哪幾篇、是不是重送
+  if (!(await askCaptionSend(posts, typeof vendor === 'string' ? { name: vendor } : vendor))) return false;
   const t = toast.loading('送出中…');
   try {
     const r = await call('/api/posts/caption-review/send', { postIds: posts.map(p => p.id) });

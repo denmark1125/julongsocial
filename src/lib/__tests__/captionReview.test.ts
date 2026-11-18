@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildCaptionReviewMessage, canSendCaption, captionDateLabel, captionPostbackData,
+  buildCaptionReviewMessage, buildCaptionReviewMessages, canSendCaption, captionDateLabel, captionPostbackData,
   captionStatus, parseCaptionPostback, shiftMonth, isMonthKey, CAPTION_CARDS_MAX,
 } from '../captionReview';
 
@@ -82,18 +82,27 @@ describe('buildCaptionReviewMessage', () => {
     expect(m.contents.header.contents[0].text).toContain('修改版');
   });
 
-  it('2,200 字（IG 上限）的文案：截斷並提示開網頁，單張不超過 LINE 的 30KB', () => {
-    const m: any = buildCaptionReviewMessage([card({ content: '字'.repeat(2200) })]);
-    expect(JSON.stringify(m)).toContain('全文請按下方');
+  it('2,200 字（IG 上限）的文案：全文不截斷，單張不超過 LINE 的 30KB', () => {
+    const m: any = buildCaptionReviewMessage([card({ content: '字'.repeat(2199) + '尾' })]);
+    expect(JSON.stringify(m)).toContain('字'.repeat(2199) + '尾');
     expect(bytes(m.contents)).toBeLessThan(30_000);
   });
 
-  it('12 篇長文案一起送：整則不超過 LINE 的 50KB，超過 12 篇只取前 12', () => {
+  it('上片時間寫「預計」，並說明確認後才排程', () => {
+    const m: any = buildCaptionReviewMessage([card({ scheduledAt: '2026-11-21T20:00' })]);
+    expect(m.contents.header.contents[1].text).toContain('預計 11/21（六）20:00 上片');
+    expect(JSON.stringify(m.contents.body)).toContain('確認後，我們才會排程發布');
+  });
+
+  it('12 篇長文案一起送：全文都在、拆成幾則，每則不超過 50KB、最多 4 則；超過 12 篇只取前 12', () => {
     const items = Array.from({ length: 15 }, (_, i) => card({ postId: `p${i}`, content: '字'.repeat(2200), title: '題'.repeat(60) }));
-    const m: any = buildCaptionReviewMessage(items);
-    expect(m.contents.type).toBe('carousel');
-    expect(m.contents.contents).toHaveLength(CAPTION_CARDS_MAX);
-    expect(bytes(m.contents)).toBeLessThan(50_000);
+    const ms: any[] = buildCaptionReviewMessages(items);
+    expect(ms.length).toBeGreaterThan(1);
+    expect(ms.length).toBeLessThanOrEqual(4);
+    const cards = ms.flatMap(m => m.contents.type === 'carousel' ? m.contents.contents : [m.contents]);
+    expect(cards).toHaveLength(CAPTION_CARDS_MAX);
+    for (const m of ms) expect(bytes(m.contents)).toBeLessThan(50_000);
+    expect(JSON.stringify(cards[11])).toContain('字'.repeat(2200));
   });
 
   it('按鈕文字與 altText 不超過 LINE 上限（label 40、displayText 300、altText 400）', () => {

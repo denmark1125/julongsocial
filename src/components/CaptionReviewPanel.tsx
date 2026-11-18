@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Link2, Send, Trash2 } from 'lucide-react';
+import { CheckSquare, Link2, Send, Square, Trash2 } from 'lucide-react';
 import { Post } from '../types';
+import type { CaptionSendTarget } from './CaptionSendConfirm';
 import { CAPTION_STATUS_LABEL, CaptionStatus, canSendCaption, captionStatus } from '../lib/captionReview';
 import { addManualFeedback, applyFeedbackAsCaption, copyCaptionPageLink, removeFeedback, sendCaptionReview } from '../lib/captionReviewClient';
 
@@ -19,6 +20,47 @@ export const CAPTION_STATUS_STYLE: Record<CaptionStatus, string> = {
 export function CaptionStatusChip({ post, className = '' }: { post: Post; className?: string }) {
   const s = captionStatus(post);
   return <span className={`inline-block px-2 py-0.5 rounded-lg text-[12px] font-bold whitespace-nowrap ${CAPTION_STATUS_STYLE[s]} ${className}`}>{CAPTION_STATUS_LABEL[s]}</span>;
+}
+
+/**
+ * 貼文管理表格「客戶確認」那一格（11-18 使用者：飛機放外層，一眼看出哪篇還沒送）。
+ * 勾選框照舊可以手動勾（業主在群組口頭說 OK 的）；底下依狀態放飛機／等業主／誰確認。
+ */
+export function CaptionConfirmCell({ post, vendor, onToggle, send }: {
+  post: Post; vendor: CaptionSendTarget; onToggle: () => void;
+  send: (posts: Post[], vendor: CaptionSendTarget) => void;
+}) {
+  const s = captionStatus(post);
+  const cr = post.captionReview || {};
+  const plane = (label: string, enabled = true, hint = '') => (
+    <button type="button" disabled={!enabled} title={hint || undefined} onClick={() => send([post], vendor)}
+      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-bold bg-[#5A5A40] text-white hover:bg-[#4A4A34] disabled:opacity-35 disabled:cursor-not-allowed whitespace-nowrap">
+      <Send size={13} /> {label}
+    </button>
+  );
+  return (
+    <div className="flex flex-col items-center gap-1.5">
+      <button aria-label="切換業主審核" onClick={onToggle}>
+        {post.clientConfirmed ? <CheckSquare className="text-green-500" size={20} /> : <Square className="text-gray-300" size={20} />}
+      </button>
+      {s === 'published' ? null
+        : post.clientConfirmed && s !== 'changed_after' ? (
+          cr.approvedAt ? <span className="text-[12px] text-green-700 whitespace-nowrap">{cr.approvedByName || '業主'} {mmdd(cr.approvedAt)} 確認</span> : null
+        ) : s === 'sent' ? (
+          <>
+            <CaptionStatusChip post={post} />
+            {cr.sentAt && <span className="text-[12px] text-gray-400 whitespace-nowrap">{mmdd(cr.sentAt)} 送出</span>}
+          </>
+        ) : s === 'empty' ? (
+          <>{plane('送業主審', false, '先寫文案才能送')}<span className="text-[12px] text-gray-400 whitespace-nowrap">先寫文案才能送</span></>
+        ) : (
+          <>
+            {(s === 'change_requested' || s === 'changed_after') && <CaptionStatusChip post={post} />}
+            {plane(cr.sentAt ? '再送一次' : '送業主審')}
+          </>
+        )}
+    </div>
+  );
 }
 
 const mmdd = (iso: string) => {
