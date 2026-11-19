@@ -11,7 +11,7 @@
 import { deriveFlowStage } from '../types.js';
 import { getAvailableVideoAssets } from './vendorStatus.js';
 import {
-  pickLastShoot, pickNextShoot, tiktokProfileUrl, toClientPost, toClientShoot, toClientStock,
+  buildClientNotices, pickLastShoot, pickNextShoot, tiktokProfileUrl, toClientPost, toClientShoot, toClientStock,
   type ClientFlow, type ClientPortalData, type ClientShoot, type ClientVideo,
 } from './clientPortal.js';
 
@@ -23,6 +23,8 @@ export interface ClientPortalDeps {
   isInternal: (asset: any) => Promise<boolean>;
   /** 台灣今天 YYYY-MM-DD（測試可固定） */
   today?: string;
+  /** 現在時間（測試可固定；通知只列近 30 天） */
+  now?: Date;
 }
 
 /**
@@ -84,5 +86,9 @@ export async function loadClientPortalData(vendorId: string, month: string, deps
     lastShoot: pickLastShoot(allShoots, today, allAssets.filter(a => !a.voidedAt).map(a => String(a.filmingDate || '').slice(0, 10))),
     stock,
     tiktokUrl: tiktokProfileUrl(vendorSnap.data()?.tiktokHandle),
+    // 通知用同一批資料推，不多讀資料庫
+    notices: buildClientNotices(allPosts, allAssets, shootSnap.docs.map((d: any) => d.data()), {
+      now: deps.now || new Date(), today, flowOf: a => deriveFlowStage(a),
+    }),
   };
 }

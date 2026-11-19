@@ -152,30 +152,34 @@ function captionBubble(info: CaptionCardInfo) {
   return {
     type: 'bubble',
     size: 'mega',
+    // 11-19 使用者：卡片要美化、按鈕上的核取方框（✅ emoji）很醜 → 不用 emoji、不用 LINE 預設按鈕，
+    // 改成自己畫的圓角色塊（跟客戶端網頁同一個橄欖綠），文案放進淺米色底框，跟說明文字分得開
     header: {
-      type: 'box', layout: 'vertical', backgroundColor: BRAND, paddingAll: '16px',
+      type: 'box', layout: 'vertical', backgroundColor: BRAND, paddingAll: '18px', paddingBottom: '16px',
       contents: [
-        { type: 'text', text: `📝 文案確認｜${info.vendorName || ''}${(info.sendCount || 1) > 1 ? '（修改版）' : ''}`, color: '#FFFFFF', weight: 'bold', size: 'md', wrap: true },
-        { type: 'text', text: sub, color: '#E8E8DC', size: 'sm', margin: 'xs', wrap: true },
+        { type: 'text', text: `${info.vendorName || ''}｜文案確認${(info.sendCount || 1) > 1 ? '（修改版）' : ''}`, color: '#FFFFFF', weight: 'bold', size: 'md', wrap: true },
+        { type: 'text', text: sub, color: '#DCDACB', size: 'sm', margin: 'sm', wrap: true },
       ],
     },
     body: {
-      type: 'box', layout: 'vertical', paddingAll: '16px',
+      type: 'box', layout: 'vertical', paddingAll: '18px', paddingBottom: '8px',
       contents: [
-        { type: 'text', text: info.title || '(未命名)', weight: 'bold', size: 'md', wrap: true, color: '#222222' },
-        { type: 'separator', margin: 'md' },
-        { type: 'text', text: full, size: 'md', color: '#333333', wrap: true, margin: 'md' },
-        { type: 'text', text: '文案確認後，我們才會排程發布。要修改請按「我要修改」，可以直接改字或留言給我們。', size: 'xs', color: '#8A8A7A', wrap: true, margin: 'lg' },
+        { type: 'text', text: info.title || '(未命名)', weight: 'bold', size: 'lg', wrap: true, color: '#1F1F1A' },
+        { type: 'box', layout: 'vertical', margin: 'lg', backgroundColor: '#F6F5EF', cornerRadius: '10px', paddingAll: '14px',
+          contents: [{ type: 'text', text: full, size: 'md', color: '#33332B', wrap: true, lineSpacing: '6px' }] },
+        { type: 'text', text: '文案確認後，我們才會排程發布。要改字或留言，請按「我要修改」到網頁上操作。', size: 'xs', color: '#8A8A7A', wrap: true, margin: 'lg' },
       ],
     },
     footer: {
-      type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '12px',
+      type: 'box', layout: 'vertical', spacing: 'md', paddingAll: '18px', paddingTop: '12px',
       contents: [
-        { type: 'button', style: 'primary', color: '#2F9E5B', height: 'sm',
-          action: { type: 'postback', label: '✅ 文案確認，可以發布', data: captionPostbackData('ok', info.postId), displayText: `文案 OK：${when ? `${when} ` : ''}${short}` } },
+        { type: 'box', layout: 'vertical', backgroundColor: BRAND, cornerRadius: '8px', paddingAll: '13px',
+          action: { type: 'postback', label: '文案沒問題，可以發布', data: captionPostbackData('ok', info.postId), displayText: `文案 OK：${when ? `${when} ` : ''}${short}` },
+          contents: [{ type: 'text', text: '文案沒問題，可以發布', color: '#FFFFFF', weight: 'bold', size: 'md', align: 'center' }] },
         // 改文案一律到網頁（11-18 使用者：LINE 卡片的字不能複製；「按要修改後 10 分鐘內的話收成意見」業主跟別人聊天會錯亂）
-        { type: 'button', style: 'secondary', height: 'sm',
-          action: { type: 'uri', label: '✏️ 我要修改（改字或留言）', uri: info.pageUrl } },
+        { type: 'box', layout: 'vertical', backgroundColor: '#FFFFFF', borderColor: BRAND, borderWidth: '1px', cornerRadius: '8px', paddingAll: '12px',
+          action: { type: 'uri', label: '我要修改（改字或留言）', uri: info.pageUrl },
+          contents: [{ type: 'text', text: '我要修改（改字或留言）', color: BRAND, weight: 'bold', size: 'md', align: 'center' }] },
       ],
     },
   };
@@ -210,7 +214,7 @@ export function buildCaptionReviewMessage(items: CaptionCardInfo[]) {
 export function captionReplyText(kind: 'ok' | 'already' | 'fix' | 'received' | 'published' | 'gone' | 'wrong_group', p?: PostLike): string {
   const name = p ? `${captionDateLabel(p.scheduledAt) ? `${captionDateLabel(p.scheduledAt)} ` : ''}《${clip(p.title || '未命名', 30)}》` : '';
   switch (kind) {
-    case 'ok': return `✅ ${name}文案已確認，謝謝！`;
+    case 'ok': return `${name}文案已確認，謝謝！我們會依排程發布。`;
     case 'already': return `${name}文案先前已經確認過了，謝謝！`;
     // 舊卡片（11-18 以前送的）還有「要修改」按鈕：改成請業主開網頁改，不再收群組訊息
     case 'fix': return `好的！${name}請點卡片下方的「開啟客戶端」，在網頁上直接改字或留言給我們，這樣才不會漏掉。`;

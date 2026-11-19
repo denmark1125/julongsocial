@@ -1,14 +1,15 @@
-import React from 'react';
-import { Camera } from 'lucide-react';
-import { ClientPortalData, ClientPost } from '../lib/clientPortal';
-import { LINE, cellTone, hhmm, needsYou, stageOf, taipeiToday } from './shared';
-import PostSections from './PostSections';
+import React, { useEffect, useState } from 'react';
+import { Camera, ChevronRight } from 'lucide-react';
+import { ClientPortalData, ClientPost, clientDayLabel } from '../lib/clientPortal';
+import { LINE, StagePill, hhmm, needsYou, stageOf, taipeiToday } from './shared';
 
 const WEEK = ['日', '一', '二', '三', '四', '五', '六'];
 
 /**
- * 上片行事曆（主角）。電腦：整月大格，格子裡直接寫時間＋片名＋狀態；手機：一欄只有約 50px 塞不下片名，
- * 格子放時間色塊，下面接「本月排程」清單（作法同剪輯師端 EditorSchedule）。拍攝日用藍色標在同一個月曆上。
+ * 上片行事曆。電腦：整月大格，格子裡直接寫時間＋片名＋狀態。
+ * 手機（11-19 使用者：格子裡的時間色塊根本看不出內容）：一欄只有約 50px，改成「格子只標記、點一天看那天」——
+ * 格子放日期＋小圓點（橄欖綠＝要您處理、灰＝其他、淡灰＝已發布）＋拍攝小相機；月曆下面列「選到的那一天」的貼文與拍攝，字級照正常大小。
+ * 預設選今天（今天不在這個月就選這個月第一個有排程的日子）。
  */
 export default function ClientCalendar({ data, onOpen }: { data: ClientPortalData; onOpen: (p: ClientPost) => void }) {
   const [y, m] = data.month.split('-').map(Number);
@@ -22,6 +23,18 @@ export default function ClientCalendar({ data, onOpen }: { data: ClientPortalDat
   const cells: (number | null)[] = [...Array(firstDow).fill(null), ...Array.from({ length: daysInMonth }, (_, i) => i + 1)];
   while (cells.length % 7) cells.push(null);
 
+  // 手機選到的那一天
+  const pickDefault = () => {
+    if (today.slice(0, 7) === data.month) return Number(today.slice(8, 10));
+    const days = [...sorted.map(p => p.scheduledAt.slice(0, 10)), ...data.shoots.map(x => x.date)]
+      .filter(d => d.slice(0, 7) === data.month).sort();
+    return days.length ? Number(days[0].slice(8, 10)) : 1;
+  };
+  const [sel, setSel] = useState(pickDefault);
+  useEffect(() => { setSel(pickDefault()); }, [data.month]); // eslint-disable-line react-hooks/exhaustive-deps
+  const selPosts = postsOn(sel);
+  const selShoots = shootsOn(sel);
+
   return (
     <div className="space-y-4">
       <div className={`bg-white rounded-xl border ${LINE} overflow-hidden`}>
@@ -30,35 +43,46 @@ export default function ClientCalendar({ data, onOpen }: { data: ClientPortalDat
         </div>
         <div className="grid grid-cols-7">
           {cells.map((d, i) => {
-            if (d === null) return <div key={`x${i}`} className="min-h-[64px] md:min-h-[120px] border-b border-r border-[#EFEDE5] bg-[#FAFAF7]" />;
+            if (d === null) return <div key={`x${i}`} className="min-h-[56px] md:min-h-[120px] border-b border-r border-[#EFEDE5] bg-[#FAFAF7]" />;
             const isToday = key(d) === today;
+            const ps = postsOn(d);
+            const ss = shootsOn(d);
+            const isSel = d === sel;
             return (
-              <div key={d} className="min-h-[64px] md:min-h-[120px] border-b border-r border-[#EFEDE5] p-1 md:p-2 min-w-0">
-                <div className={`inline-flex items-center justify-center text-[13px] md:text-[14px] font-bold rounded-full w-6 h-6 md:w-7 md:h-7 ${isToday ? 'bg-[#5A5A40] text-white' : 'text-gray-600'}`}>{d}</div>
-                <div className="mt-1 space-y-1">
-                  {shootsOn(d).map((s, k) => (
-                    <div key={`s${k}`} className="flex items-center justify-center md:justify-start gap-1 rounded-md bg-[#EFEEE8] text-gray-600 px-1 md:px-2 py-0.5 text-[12px] font-medium whitespace-nowrap overflow-hidden">
-                      <Camera size={12} className="shrink-0" />
-                      {/* 手機一欄約 48px 放不下時間，只標「拍」；時間看上面的「下次拍攝」或電腦版 */}
-                      <span className="md:hidden">拍</span>
-                      <span className="hidden md:inline truncate">拍攝{s.time ? ` ${s.time}` : ''}</span>
-                    </div>
-                  ))}
-                  {postsOn(d).map(p => (
-                    <button key={p.id} type="button" onClick={() => onOpen(p)} className="block w-full text-left min-w-0">
-                      {/* 手機：只放時間色塊 */}
-                      <span className={`md:hidden block rounded-md px-1 py-0.5 text-[12px] font-bold text-center whitespace-nowrap ${cellTone(p)}`}>{hhmm(p) || '上片'}</span>
-                      {/* 電腦：時間＋片名＋狀態 */}
-                      {/* 電腦：左邊一條細線（要您處理＝橄欖綠、其餘灰）＋時間＋片名＋狀態字，不再一格一張小卡 */}
-                      <span className={`hidden md:block border-l-[3px] rounded-r-md px-2 py-1 transition-colors hover:bg-[#F2F1EA] ${needsYou(p) ? 'border-[#5A5A40] bg-[#5A5A40]/[0.06]' : 'border-[#CFCDC2] bg-[#FAFAF7]'}`}>
-                        <span className="flex items-baseline gap-1.5 min-w-0">
-                          <span className="text-[12px] text-gray-500 tabular-nums shrink-0">{hhmm(p)}</span>
-                          <span className={`text-[12px] font-bold truncate ${needsYou(p) ? 'text-[#5A5A40]' : 'text-gray-500'}`}>{stageOf(p).label}</span>
+              <div key={d} className="min-h-[56px] md:min-h-[120px] border-b border-r border-[#EFEDE5] min-w-0">
+                {/* 手機：整格是一顆按鈕，點了下面列這一天 */}
+                <button type="button" onClick={() => setSel(d)} aria-label={`${m} 月 ${d} 日，${ps.length} 篇貼文${ss.length ? '，有拍攝' : ''}`}
+                  className={`md:hidden w-full h-full min-h-[56px] flex flex-col items-center pt-1.5 gap-1 transition-colors ${isSel ? 'bg-[#5A5A40]/10' : 'active:bg-[#F2F1EA]'}`}>
+                  <span className={`inline-flex items-center justify-center text-[14px] font-bold rounded-full w-7 h-7 ${isToday ? 'bg-[#5A5A40] text-white' : isSel ? 'text-[#5A5A40]' : 'text-gray-700'}`}>{d}</span>
+                  <span className="flex items-center gap-[3px] h-3">
+                    {ss.length > 0 && <Camera size={11} className="text-gray-500" />}
+                    {ps.slice(0, 3).map(p => (
+                      <span key={p.id} className={`w-[6px] h-[6px] rounded-full ${needsYou(p) ? 'bg-[#5A5A40]' : p.status === 'published' ? 'bg-[#C9C7BB]' : 'bg-gray-400'}`} />
+                    ))}
+                    {ps.length > 3 && <span className="text-[10px] leading-none text-gray-500">+</span>}
+                  </span>
+                </button>
+                {/* 電腦：格子裡直接寫（左邊細線：要您處理＝橄欖綠、其餘灰） */}
+                <div className="hidden md:block p-2">
+                  <div className={`inline-flex items-center justify-center text-[14px] font-bold rounded-full w-7 h-7 ${isToday ? 'bg-[#5A5A40] text-white' : 'text-gray-600'}`}>{d}</div>
+                  <div className="mt-1 space-y-1">
+                    {ss.map((x, k) => (
+                      <div key={`s${k}`} className="flex items-center gap-1 rounded-md bg-[#EFEEE8] text-gray-600 px-2 py-0.5 text-[12px] font-medium whitespace-nowrap overflow-hidden">
+                        <Camera size={12} className="shrink-0" /><span className="truncate">拍攝{x.time ? ` ${x.time}` : ''}</span>
+                      </div>
+                    ))}
+                    {ps.map(p => (
+                      <button key={p.id} type="button" onClick={() => onOpen(p)} className="block w-full text-left min-w-0">
+                        <span className={`block border-l-[3px] rounded-r-md px-2 py-1 transition-colors hover:bg-[#F2F1EA] ${needsYou(p) ? 'border-[#5A5A40] bg-[#5A5A40]/[0.06]' : 'border-[#CFCDC2] bg-[#FAFAF7]'}`}>
+                          <span className="flex items-baseline gap-1.5 min-w-0">
+                            <span className="text-[12px] text-gray-500 tabular-nums shrink-0">{hhmm(p)}</span>
+                            <span className={`text-[12px] font-bold truncate ${needsYou(p) ? 'text-[#5A5A40]' : 'text-gray-500'}`}>{stageOf(p).label}</span>
+                          </span>
+                          <span className="block text-[14px] font-medium text-gray-900 truncate">{p.title || '（未命名）'}</span>
                         </span>
-                        <span className="block text-[14px] font-medium text-gray-900 truncate">{p.title || '（未命名）'}</span>
-                      </span>
-                    </button>
-                  ))}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             );
@@ -66,10 +90,32 @@ export default function ClientCalendar({ data, onOpen }: { data: ClientPortalDat
         </div>
       </div>
 
-      {/* 手機的清單；電腦月曆格子裡已經有完整資訊，就不重複列 */}
-      <div className="md:hidden space-y-3">
-        {/* 等您處理 → 接下來 → 已發布（收起來）。11-16 使用者：照日期從月初排，已發布佔滿上面，要處理的反而在最下面 */}
-        <PostSections posts={data.posts} onOpen={onOpen} />
+      {/* 手機：選到的那一天（電腦月曆格子裡已經有完整資訊，不重複列） */}
+      <div className={`md:hidden bg-white rounded-xl border ${LINE} overflow-hidden`}>
+        <div className="px-4 py-3 border-b border-[#EFEDE5] flex items-baseline gap-2">
+          <span className="text-[16px] font-bold">{clientDayLabel(key(sel))}</span>
+          {key(sel) === today && <span className="text-[13px] font-bold text-[#5A5A40]">今天</span>}
+          <span className="text-[13px] text-gray-400 ml-auto">{selPosts.length ? `${selPosts.length} 篇貼文` : ''}</span>
+        </div>
+        {selShoots.map((x, k) => (
+          <div key={`s${k}`} className="flex items-center gap-3 px-4 py-3 border-b border-[#F2F1EC] text-[15px] text-gray-700">
+            <span className="w-12 shrink-0 tabular-nums text-gray-500">{x.time || '整天'}</span>
+            <Camera size={16} className="shrink-0 text-gray-500" />
+            <span className="font-medium">{x.done ? '拍攝（已完成）' : '拍攝'}</span>
+          </div>
+        ))}
+        {selPosts.map(p => (
+          <button key={p.id} type="button" onClick={() => onOpen(p)}
+            className={`w-full flex items-center gap-3 px-4 py-3 border-b border-[#F2F1EC] last:border-b-0 text-left active:bg-[#FAFAF7] ${needsYou(p) ? 'bg-[#5A5A40]/[0.04]' : ''}`}>
+            <span className="w-12 shrink-0 tabular-nums text-[15px] text-gray-500">{hhmm(p) || '—'}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[15px] font-bold text-gray-900 truncate">{p.title || '（未命名）'}</span>
+              <span className="block mt-1"><StagePill post={p} size="sm" /></span>
+            </span>
+            <ChevronRight size={18} className="shrink-0 text-gray-300" />
+          </button>
+        ))}
+        {!selPosts.length && !selShoots.length && <p className="px-4 py-6 text-center text-[14px] text-gray-400">這天沒有排程</p>}
       </div>
       {sorted.length === 0 && <p className="hidden md:block text-center text-gray-400 py-4 text-[15px]">這個月還沒有排程</p>}
     </div>

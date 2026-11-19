@@ -6,6 +6,7 @@ import ClientCalendar from './ClientCalendar';
 import ClientPostList from './ClientPostList';
 import ClientPostDetail from './ClientPostDetail';
 import StockPanel from './StockPanel';
+import NoticeBell from './NoticeBell';
 import { ACTION, LINE } from './shared';
 
 /**
@@ -77,6 +78,11 @@ export default function ClientPortal() {
     if (isMonthKey(m) && m !== month && !data?.posts.some(p => p.id === postId)) setMonth(m);
     openPost(postId);
   };
+  // 通知可能是別的月份的貼文：先換到那個月再打開
+  const openNoticePost = (postId: string, m?: string) => {
+    if (m && isMonthKey(m) && m !== month && !data?.posts.some(p => p.id === postId)) setMonth(m);
+    openPost(postId);
+  };
   useEffect(() => {
     const onPop = () => setOpenId(new URLSearchParams(window.location.search).get('p') || '');
     window.addEventListener('popstate', onPop);
@@ -116,20 +122,31 @@ export default function ClientPortal() {
     </button>
   );
 
+  const monthSwitch = (
+    <div className={`inline-flex items-center border ${LINE} rounded-lg`}>
+      <button type="button" aria-label="上個月" onClick={() => setMonth(shiftMonth(month, -1))} className="p-2 text-gray-600 hover:bg-[#F5F5F0] rounded-l-lg"><ChevronLeft size={18} /></button>
+      <span className={`px-3 text-[15px] font-bold whitespace-nowrap tabular-nums border-x ${LINE} py-1.5`}>{y} 年 {m} 月</span>
+      <button type="button" aria-label="下個月" onClick={() => setMonth(shiftMonth(month, 1))} className="p-2 text-gray-600 hover:bg-[#F5F5F0] rounded-r-lg"><ChevronRight size={18} /></button>
+    </div>
+  );
+
   return (
     <div className="min-h-dvh bg-[#F6F6F2] text-gray-900">
-      {/* 頂部列：白底細線，品牌＋IP 名稱在左、月份在右 */}
+      {/* 頂部列：白底細線，品牌＋IP 名稱在左；右邊電腦是「月份＋鈴鐺」，手機鈴鐺固定在標題右邊、月份換到下一行
+          （11-19：手機寬度不夠時鈴鐺被擠到第二行左邊，通知清單往左超出螢幕） */}
       <header className={`bg-white border-b ${LINE}`}>
-        <div className="max-w-6xl mx-auto px-4 md:px-8 py-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[13px] font-medium text-gray-500 tracking-wide">聚浪行銷・客戶專區</div>
-            <h1 className="serif text-[22px] md:text-[26px] font-bold leading-tight truncate">{data?.vendorName || '　'}</h1>
+        <div className="max-w-6xl mx-auto px-4 md:px-8 py-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium text-gray-500 tracking-wide">聚浪行銷・客戶專區</div>
+              <h1 className="serif text-[22px] md:text-[26px] font-bold leading-tight truncate">{data?.vendorName || '　'}</h1>
+            </div>
+            <div className="shrink-0 flex items-center gap-2">
+              <div className="hidden md:block">{monthSwitch}</div>
+              {data && <NoticeBell notices={data.notices || []} storageKey={`jl-notice-seen:${token()}`} onOpenPost={openNoticePost} />}
+            </div>
           </div>
-          <div className={`flex items-center border ${LINE} rounded-lg`}>
-            <button type="button" aria-label="上個月" onClick={() => setMonth(shiftMonth(month, -1))} className="p-2 text-gray-600 hover:bg-[#F5F5F0] rounded-l-lg"><ChevronLeft size={18} /></button>
-            <span className={`px-3 text-[15px] font-bold whitespace-nowrap tabular-nums border-x ${LINE} py-1.5`}>{y} 年 {m} 月</span>
-            <button type="button" aria-label="下個月" onClick={() => setMonth(shiftMonth(month, 1))} className="p-2 text-gray-600 hover:bg-[#F5F5F0] rounded-r-lg"><ChevronRight size={18} /></button>
-          </div>
+          <div className="md:hidden mt-3">{monthSwitch}</div>
         </div>
       </header>
 

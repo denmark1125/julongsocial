@@ -63,6 +63,94 @@ export interface ClientPortalData {
   stock: ClientStock;
   /** 這個 IP 的 TikTok 帳號首頁；沒設定是空字串（TikTok 拿不到單篇網址，只能連首頁） */
   tiktokUrl: string;
+  /** 通知（右上角鈴鐺）：近 30 天、不分月份、新的在前 */
+  notices: ClientNotice[];
+}
+
+/**
+ * 客戶端通知（11-19）：業主打開頁面時右上角鈴鐺＋一次提示，不佔版面。
+ * 全部由現有資料推出來（送審時間、審片檔上傳時間、發布、拍攝預約），不另外存一份通知。
+ * billing＝之後的付款通知，先留型別。已讀與否存在業主自己的瀏覽器（沒有登入帳號）。
+ */
+export type ClientNoticeKind = 'caption' | 'video' | 'published' | 'shoot' | 'billing';
+export interface ClientNotice {
+  id: string;
+  kind: ClientNoticeKind;
+  /** ISO 時間（排序、算「幾小時前」用） */
+  at: string;
+  title: string;
+  /** 第二行：哪一篇／哪一天 */
+  detail: string;
+  /** 點了打開哪一篇（拍攝通知沒有） */
+  postId?: string;
+  /** 那一篇在哪個月（點通知要換月份才找得到） */
+  month?: string;
+  /** 要業主做的事已經做完（確認過、審過）：清單上灰掉，不算「等您處理」 */
+  done: boolean;
+}
+
+const NOTICE_DAYS = 30;
+const NOTICE_MAX = 30;
+/** scheduledAt 是台灣時間字面值 'YYYY-MM-DDTHH:mm' → ISO */
+const taipeiIso = (local: string) => (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(local) ? new Date(`${local.slice(0, 16)}:00+08:00`).toISOString() : '');
+
+export function buildClientNotices(
+  posts: any[], assets: any[], bookings: any[],
+  opts: { now: Date; today: string; flowOf: (asset: any) => ClientFlow | null },
+): ClientNotice[] {
+  const since = opts.now.getTime() - NOTICE_DAYS * 86400_000;
+  const recent = (iso: string) => { const t = Date.parse(iso); return Number.isFinite(t) && t >= since && t <= opts.now.getTime() + 60_000; };
+  const monthOf = (p: any) => (/^\d{4}-\d{2}/.test(str(p?.scheduledAt)) ? str(p.scheduledAt).slice(0, 7) : str(p?.targetMonth));
+  const label = (p: any) => `${clientDayLabel(str(p?.scheduledAt)) || '上片日未定'}《${str(p?.title) || '未命名'}》`;
+  const out: ClientNotice[] = [];
+
+  for (const p of posts) {
+    const cr = p?.captionReview || {};
+    // 文案送審（小編按飛機）：每次送審一則；重送＝修改版
+    if (str(cr.sentAt) && recent(cr.sentAt) && p.status !== 'published') {
+      const state = clientCaptionState(p);
+      out.push({
+        id: `cap_${p.id}_${cr.sentAt}`, kind: 'caption', at: cr.sentAt,
+        title: (Number(cr.sendCount) || 1) > 1 ? '修改後的文案等您確認' : '文案等您確認',
+        detail: label(p), postId: p.id, month: monthOf(p), done: state !== 'waiting',
+      });
+    }
+    // 已發布：以實際發出時間為準，查不到用排定時間
+    if (p.status === 'published') {
+      const actual = Object.values<any>(p.publishAudit || {}).map(a => str(a?.actualAt)).filter(Boolean).sort()[0];
+      const at = actual || taipeiIso(str(p.scheduledAt));
+      if (at && recent(at)) {
+        out.push({ id: `pub_${p.id}`, kind: 'published', at, title: '貼文已發布', detail: label(p), postId: p.id, month: monthOf(p), done: true });
+      }
+    }
+  }
+
+  // 審片：剪輯師每交一版審片檔一則；掛在哪篇貼文就點開哪篇
+  const postOfAsset = new Map<string, any>();
+  for (const p of posts) if (p.assetId && p.assetId !== 'to_be_added') postOfAsset.set(String(p.assetId), p);
+  const postById = new Map(posts.map(p => [p.id, p]));
+  for (const a of assets) {
+    if (a?.voidedAt) continue;
+    const latest = (a.reviewFiles || [])[(a.reviewFiles?.length || 0) - 1];
+    if (!latest || !recent(str(latest.uploadedAt))) continue;
+    const p = postOfAsset.get(a.id) || (a.plannedPostId ? postById.get(a.plannedPostId) : undefined);
+    if (!p || p.status === 'published') continue;
+    const v = Number(latest.version) || 1;
+    out.push({
+      id: `vid_${a.id}_${v}`, kind: 'video', at: latest.uploadedAt,
+      title: v > 1 ? `影片第 ${v} 版等您審片` : '影片等您審片',
+      detail: label(p), postId: p.id, month: monthOf(p), done: opts.flowOf(a) !== 'client_review',
+    });
+  }
+
+  // 拍攝預約：還沒拍的才提醒
+  for (const b of bookings) {
+    const s = toClientShoot(b);
+    if (!s || s.done || s.date < opts.today || !recent(str(b?.createdAt))) continue;
+    out.push({ id: `shoot_${s.date}_${s.time}`, kind: 'shoot', at: b.createdAt, title: '拍攝已排定', detail: `${clientDayLabel(s.date)}${s.time ? ` ${s.time}` : ''}`, done: true });
+  }
+
+  return out.sort((a, b) => b.at.localeCompare(a.at)).slice(0, NOTICE_MAX);
 }
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');

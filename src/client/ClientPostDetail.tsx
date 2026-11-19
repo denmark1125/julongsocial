@@ -68,7 +68,7 @@ export default function ClientPostDetail({ post, act, onClose, tiktokUrl = '' }:
             {captionWaiting ? (
               <div className="mb-3">
                 <div className="flex items-center gap-2 text-[17px] font-bold text-[#5A5A40]"><PenLine size={18} />文案等您確認</div>
-                <p className="text-[14px] text-gray-600 mt-1">沒問題請按「文案 OK」；要改可以按「我要修改」直接改字（存檔就算確認），或在下方留言告訴我們。</p>
+                <p className="text-[14px] text-gray-600 mt-1">沒問題請按「文案 OK」；要改可以按「我要修改」自己改字（存檔就算確認），或按「請我們代為修改」，寫下要改的地方。</p>
               </div>
             ) : <div className={sectionTitle}>文案</div>}
             {post.captionState === 'preparing' ? (
@@ -119,14 +119,14 @@ export default function ClientPostDetail({ post, act, onClose, tiktokUrl = '' }:
                 {/* 不想自己動手改字：留言告訴小編要改哪裡（記在這一篇上，不會跟群組聊天混在一起） */}
                 {commenting ? (
                   <div className="mt-4 rounded-lg border border-[#E4E2D8] p-3">
-                    <div className="text-[14px] font-bold text-gray-700 mb-2">留言給小編</div>
+                    <div className="text-[14px] font-bold text-gray-700 mb-2">請寫下要修改的地方，我們改好會再請您確認</div>
                     <textarea value={comment} onChange={e => setComment(e.target.value)} maxLength={2000} rows={4} autoFocus
                       placeholder="例如：第二段的價格改成 39,900；最後一句拿掉"
                       className="w-full rounded-lg border-2 border-[#5A5A40] p-3 text-[16px] leading-relaxed" />
                     <div className="flex gap-3 mt-2">
                       <button type="button" disabled={!!busy || !comment.trim()} className={`${btn} ${ACTION.primary}`}
                         onClick={() => run('comment', '/comment', { postId: post.id, text: comment.trim() })}>
-                        {busy === 'comment' ? '送出中…' : '送出留言'}
+                        {busy === 'comment' ? '送出中…' : '送出修改意見'}
                       </button>
                       <button type="button" disabled={!!busy} className={`${btn} ${ACTION.secondary}`} onClick={() => { setCommenting(false); setComment(''); }}>取消</button>
                     </div>
@@ -134,7 +134,7 @@ export default function ClientPostDetail({ post, act, onClose, tiktokUrl = '' }:
                 ) : (post.captionState === 'waiting' || post.captionState === 'revising' || post.captionState === 'approved') && (
                   <button type="button" onClick={() => setCommenting(true)}
                     className="mt-3 inline-flex items-center gap-1.5 text-[14px] font-bold text-[#5A5A40] underline underline-offset-2">
-                    <MessageSquare size={15} /> {post.captionState === 'revising' ? '還想補充意見' : '不想自己改？留言告訴我們要改哪裡'}
+                    <MessageSquare size={15} /> {post.captionState === 'revising' ? '補充修改意見' : post.captionState === 'approved' ? '還有想調整的地方' : '請我們代為修改'}
                   </button>
                 )}
               </>
@@ -144,7 +144,9 @@ export default function ClientPostDetail({ post, act, onClose, tiktokUrl = '' }:
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-end md:items-center justify-center md:p-6" onClick={onClose}>
-      <div className="bg-white w-full md:max-w-xl rounded-t-2xl md:rounded-2xl max-h-[92dvh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+      {/* 手機：從頂部下方 12px 開始、固定撐滿（11-19 使用者：LINE 內建瀏覽器上下各有工具列，92% 高度看起來從畫面一半才開始，很怪）；
+          電腦維持置中視窗 */}
+      <div className="bg-white w-full md:max-w-xl rounded-t-2xl md:rounded-2xl h-[calc(100dvh-0.75rem)] md:h-auto md:max-h-[92dvh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="shrink-0 px-5 pt-5 pb-4 border-b border-[#E4E2D8]">
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1">
