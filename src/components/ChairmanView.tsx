@@ -1,3 +1,4 @@
+import { isShootDone, isShootUpcoming } from '../lib/shootSync';
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, updateDoc, writeBatch } from 'firebase/firestore';
 import { addDays, addMonths, addWeeks, format, parseISO, startOfMonth, startOfWeek } from 'date-fns';
@@ -95,7 +96,7 @@ function DeficitTab() {
   const totalOwed = rows.reduce((s, r) => s + r.owed, 0);
   const owingCount = rows.filter(r => r.owed > 0).length;
   const weekEnd = format(addDays(new Date(), 7), 'yyyy-MM-dd');
-  const shootsSoon = bookings.filter(b => b.status === 'booked' && b.scheduledDate >= today && b.scheduledDate <= weekEnd).length;
+  const shootsSoon = bookings.filter(b => isShootUpcoming(b, today) && b.scheduledDate <= weekEnd).length;
 
   if (rows.length === 0) return <Card className="py-16 text-center text-gray-400">資料載入中…</Card>;
 
@@ -540,8 +541,8 @@ function CalendarTab({ roomy = false }: { roomy?: boolean }) {
       else add(p.vendorId, date, past ? 'missed' : 'planned');
     }
     for (const b of bookings) {
-      if (b.status === 'booked') add(b.vendorId, b.scheduledDate, 'shoot');
-      else if (b.status === 'completed') add(b.vendorId, b.scheduledDate, 'shot');
+      // 拍過沒看日期（11-19）
+      if (b.status === 'booked' || b.status === 'completed') add(b.vendorId, b.scheduledDate, isShootDone(b, today) ? 'shot' : 'shoot');
     }
     return map;
   }, [posts, bookings, days, today]);
@@ -653,7 +654,7 @@ function CalendarTab({ roomy = false }: { roomy?: boolean }) {
               {dayShoots.map(b => (
                 <div key={b.id} className="rounded-2xl bg-[#F5F5F0] px-4 py-3 flex items-center gap-2 text-[15px]">
                   <Camera size={16} className="text-[#5A5A40]" />
-                  <b>{b.status === 'completed' ? '已拍攝' : '拍攝'}</b>
+                  <b>{isShootDone(b, today) ? '已拍攝' : '拍攝'}</b>
                   <span className="text-gray-500">{[b.startTime, b.location, b.crew].filter(Boolean).join('・')}</span>
                 </div>
               ))}

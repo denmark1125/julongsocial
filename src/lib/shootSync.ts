@@ -121,11 +121,21 @@ export function planShootSync(
   return { op: 'create', data };
 }
 
-/** 上傳素材自動核銷時要挑哪一筆：最早一筆已到期的；都還沒到就挑最早的（沿用舊行為） */
-export function pickBookingToResolve<T extends Pick<ShootBooking, 'scheduledDate'>>(booked: T[], today: string): T | null {
-  const sorted = [...booked].sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate));
-  return sorted.find(b => b.scheduledDate <= today) || sorted[0] || null;
+/**
+ * 這場拍攝算不算拍過（11-19 使用者定案：看日期，不看「完成」按鈕，上傳素材也不再自動勾）。
+ * 沒取消、沒延期，日子在今天以前＝拍過；今天的要有人按完成才算；之後的一律是待拍。
+ */
+/** 還沒拍、接下來要拍的（今天也算，除非今天已按完成） */
+export function isShootUpcoming(b: { status?: string; scheduledDate?: string }, today: string): boolean {
+  return (b.status === 'booked' || b.status === 'completed') && String(b.scheduledDate || '') >= today && !isShootDone(b, today);
 }
+
+export function isShootDone(b: { status?: string; scheduledDate?: string }, today: string): boolean {
+  if (b.status !== 'booked' && b.status !== 'completed') return false;
+  const d = String(b.scheduledDate || '');
+  return d < today || (d === today && b.status === 'completed');
+}
+
 
 /** calendarEvents 的寫入內容；拍攝要進 shootBookings 的不放這裡，免得行事曆同一場出現兩次 */
 export function toCalendarEvent(change: TimetreeShootChange): Omit<CalendarEvent, 'id'> | null {

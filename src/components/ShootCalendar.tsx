@@ -1,3 +1,4 @@
+import { isShootDone, isShootUpcoming } from '../lib/shootSync';
 import React, { useEffect, useMemo, useState } from 'react';
 import { addDoc, collection, deleteDoc, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import { addDays, addMonths, endOfMonth, endOfWeek, format, isSameMonth, startOfMonth, startOfWeek } from 'date-fns';
@@ -116,7 +117,7 @@ export default function ShootCalendar() {
   }, [bookings, events, hidden, showOthers, from, to, vendors]);
 
   const upcoming = bookings
-    .filter(b => b.status === 'booked' && b.scheduledDate >= today)
+    .filter(b => isShootUpcoming(b, today))
     .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate) || (a.startTime || '').localeCompare(b.startTime || ''))
     .slice(0, 20);
 
@@ -288,13 +289,13 @@ export default function ShootCalendar() {
                 {/* 手機格子太窄，只畫色點；桌機才放標籤（固定一行截斷，中文換行會斷出孤字） */}
                 <div className="flex flex-wrap gap-0.5 sm:hidden">
                   {items.slice(0, 6).map((it, i) => (
-                    <span key={i} className={cn('w-1.5 h-1.5 rounded-full', it.kind === 'booking' ? (it.booking.status === 'completed' ? 'bg-green-500' : 'bg-[#5A5A40]') : EVENT_STYLE[it.event.category].split(' ')[0])} />
+                    <span key={i} className={cn('w-1.5 h-1.5 rounded-full', it.kind === 'booking' ? (isShootDone(it.booking, today) ? 'bg-green-500' : 'bg-[#5A5A40]') : EVENT_STYLE[it.event.category].split(' ')[0])} />
                   ))}
                 </div>
                 <div className="hidden sm:flex flex-col gap-0.5 min-w-0">
                   {items.slice(0, 3).map((it, i) => (
                     <span key={i} className={cn('block truncate whitespace-nowrap rounded px-1 py-0.5 text-[12px] leading-tight',
-                      it.kind === 'booking' ? BOOKING_STYLE[it.booking.status as 'booked' | 'completed'] : EVENT_STYLE[it.event.category])}>
+                      it.kind === 'booking' ? BOOKING_STYLE[isShootDone(it.booking, today) ? 'completed' : 'booked'] : EVENT_STYLE[it.event.category])}>
                       {it.time ? `${it.time} ` : ''}{it.label}
                     </span>
                   ))}
@@ -318,8 +319,8 @@ export default function ShootCalendar() {
               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-[#F5F5F0] text-left text-sm hover:bg-[#ECEBE3]">
               <span className="font-mono text-gray-500 w-12 shrink-0">{it.time || '整天'}</span>
               <span className={cn('px-2 py-0.5 rounded-full text-[12px] font-bold whitespace-nowrap shrink-0',
-                it.kind === 'booking' ? BOOKING_STYLE[it.booking.status as 'booked' | 'completed'] : EVENT_STYLE[it.event.category])}>
-                {it.kind === 'booking' ? (it.booking.status === 'completed' ? '已拍' : '拍攝') : it.event.category}
+                it.kind === 'booking' ? BOOKING_STYLE[isShootDone(it.booking, today) ? 'completed' : 'booked'] : EVENT_STYLE[it.event.category])}>
+                {it.kind === 'booking' ? (isShootDone(it.booking, today) ? '已拍' : '拍攝') : it.event.category}
               </span>
               <span className="truncate min-w-0 flex-1">
                 {it.label}

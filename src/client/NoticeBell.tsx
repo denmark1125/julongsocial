@@ -85,7 +85,7 @@ export default function NoticeBell({ notices, storageKey, onOpenPost }: {
         className={`relative p-2 rounded-lg border border-[#E4E2D8] text-gray-600 hover:bg-[#F5F5F0] ${open ? 'bg-[#F5F5F0]' : ''}`}>
         <Bell size={18} />
         {unread.length > 0 && (
-          <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#D9483B] text-white text-[11px] font-bold leading-[18px] text-center tabular-nums">
+          <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#D9483B] text-white text-[12px] font-bold leading-[18px] text-center tabular-nums">
             {unread.length > 9 ? '9+' : unread.length}
           </span>
         )}
@@ -94,12 +94,12 @@ export default function NoticeBell({ notices, storageKey, onOpenPost }: {
       {open && (
         <div className="absolute right-0 top-full mt-2 w-[calc(100vw-1.5rem)] max-w-[380px] z-40 bg-white rounded-xl border border-[#E4E2D8] shadow-xl overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-[#EFEDE5]">
-            <span className="text-[15px] font-bold">通知</span>
+            <span className="text-[17px] font-bold">通知</span>
             <button type="button" aria-label="關閉" onClick={close} className="p-1 -m-1 text-gray-400 hover:text-gray-600"><X size={18} /></button>
           </div>
           <div className="max-h-[min(65vh,520px)] overflow-y-auto">
             {notices.length === 0 ? (
-              <p className="px-4 py-10 text-center text-[14px] text-gray-400">最近 30 天沒有通知</p>
+              <p className="px-4 py-10 text-center text-[16px] text-gray-400">最近 30 天沒有通知</p>
             ) : notices.map(n => {
               const clickable = !!n.postId;
               const body = (
@@ -107,11 +107,11 @@ export default function NoticeBell({ notices, storageKey, onOpenPost }: {
                   <span className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${n.done ? 'bg-[#F2F1EC] text-gray-400' : 'bg-[#5A5A40]/10 text-[#5A5A40]'}`}>{ICON[n.kind]}</span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2">
-                      <span className={`text-[14px] font-bold truncate ${n.done ? 'text-gray-500' : 'text-gray-900'}`}>{n.title}</span>
-                      {n.done && (n.kind === 'caption' || n.kind === 'video') && <span className="shrink-0 text-[12px] text-gray-400">已處理</span>}
+                      <span className={`text-[16px] font-bold truncate ${n.done ? 'text-gray-500' : 'text-gray-900'}`}>{n.title}</span>
+                      {n.done && (n.kind === 'caption' || n.kind === 'video') && <span className="shrink-0 text-[14px] text-gray-400">已處理</span>}
                     </span>
-                    <span className="block text-[13px] text-gray-500 truncate">{n.detail}</span>
-                    <span className="block text-[12px] text-gray-400 mt-0.5">{ago(n.at, now)}</span>
+                    <span className="block text-[15px] text-gray-500 truncate">{n.detail}</span>
+                    <span className="block text-[14px] text-gray-400 mt-0.5">{ago(n.at, now)}</span>
                   </span>
                   {isNew(n) && <span aria-label="新" className="shrink-0 mt-1.5 w-2 h-2 rounded-full bg-[#D9483B]" />}
                 </>
@@ -129,8 +129,8 @@ export default function NoticeBell({ notices, storageKey, onOpenPost }: {
       {toast && !open && (
         <div role="status" className="fixed left-1/2 -translate-x-1/2 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-50 w-[calc(100%-2rem)] max-w-md bg-[#2F2F25] text-white rounded-xl shadow-2xl px-4 py-3 flex items-center gap-3">
           <Bell size={18} className="shrink-0 text-[#E9E6D5]" />
-          <span className="min-w-0 flex-1 text-[14px] leading-snug">{summary}</span>
-          <button type="button" onClick={show} className="shrink-0 px-3 py-1.5 rounded-lg bg-white text-[#2F2F25] text-[13px] font-bold">查看</button>
+          <span className="min-w-0 flex-1 text-[16px] leading-snug">{summary}</span>
+          <button type="button" onClick={show} className="shrink-0 px-3 py-1.5 rounded-lg bg-white text-[#2F2F25] text-[15px] font-bold">查看</button>
           <button type="button" aria-label="關閉" onClick={() => setToast(false)} className="shrink-0 p-1 text-white/60 hover:text-white"><X size={16} /></button>
         </div>
       )}

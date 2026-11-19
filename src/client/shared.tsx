@@ -44,13 +44,13 @@ export function stageOf(p: ClientPost, today = taipeiToday()) {
 /** 狀態標籤：要業主動手的＝橄欖綠實心；其餘＝灰字＋小圓點（已發布的點是橄欖綠，其他灰） */
 export function StagePill({ post, size = 'md', noDetail = false }: { post: ClientPost; size?: 'sm' | 'md'; noDetail?: boolean }) {
   const s = stageOf(post);
-  const fs = size === 'sm' ? 'text-[12px]' : 'text-[13px]';
+  const fs = size === 'sm' ? 'text-[14px]' : 'text-[15px]';
   const detail = !noDetail && s.detail
     ? <span className={`text-gray-500 truncate min-w-0 ${fs}`}>{s.detail}</span> : null;
   if (s.tone === 'action') {
     return (
       <span className="inline-flex items-center gap-2 min-w-0">
-        <span className={`inline-flex items-center shrink-0 rounded-md font-bold whitespace-nowrap ${ACTION.pill} ${size === 'sm' ? 'px-1.5 py-0.5 text-[12px]' : 'px-2 py-0.5 text-[13px]'}`}>{s.label}</span>
+        <span className={`inline-flex items-center shrink-0 rounded-md font-bold whitespace-nowrap ${ACTION.pill} ${size === 'sm' ? 'px-1.5 py-0.5 text-[14px]' : 'px-2 py-0.5 text-[15px]'}`}>{s.label}</span>
         {detail}
       </span>
     );
@@ -76,30 +76,30 @@ export function filmOf(p: ClientPost, today = taipeiToday()) {
 /** 影片狀態標籤（同 StagePill 的樣式，但只講影片） */
 export function FilmPill({ post, noDetail = false }: { post: ClientPost; noDetail?: boolean }) {
   const s = filmOf(post);
-  if (s.tone === 'action') return <span className={`inline-flex items-center shrink-0 rounded-md px-2 py-0.5 text-[13px] font-bold whitespace-nowrap ${ACTION.pill}`}>{s.label}</span>;
+  if (s.tone === 'action') return <span className={`inline-flex items-center shrink-0 rounded-md px-2 py-0.5 text-[15px] font-bold whitespace-nowrap ${ACTION.pill}`}>{s.label}</span>;
   return (
     <span className="inline-flex items-center gap-2 min-w-0">
-      <span className="inline-flex items-center gap-1.5 shrink-0 text-[13px] font-bold text-gray-700 whitespace-nowrap">
+      <span className="inline-flex items-center gap-1.5 shrink-0 text-[15px] font-bold text-gray-700 whitespace-nowrap">
         <span className={`w-1.5 h-1.5 rounded-full ${s.tone === 'done' ? 'bg-[#5A5A40]' : 'bg-gray-400'}`} />{s.label}
       </span>
-      {!noDetail && s.detail && <span className="text-[13px] text-gray-500 truncate min-w-0">{s.detail}</span>}
+      {!noDetail && s.detail && <span className="text-[15px] text-gray-500 truncate min-w-0">{s.detail}</span>}
     </span>
   );
 }
 
 /** 文案狀態：等業主確認＝橄欖綠實心大標籤（整頁最醒目）；已確認＝綠勾；準備中＝灰字 */
 export function CaptionBadge({ post, size = 'md' }: { post: ClientPost; size?: 'md' | 'lg' }) {
-  if (post.status === 'published') return <span className="text-[13px] text-gray-400 whitespace-nowrap">已發布</span>;
+  if (post.status === 'published') return <span className="text-[15px] text-gray-400 whitespace-nowrap">已發布</span>;
   if (post.captionState === 'waiting') {
     return (
-      <span className={`inline-flex items-center gap-1.5 rounded-md font-bold whitespace-nowrap ${ACTION.pill} ${size === 'lg' ? 'px-3 py-1.5 text-[15px]' : 'px-2.5 py-1 text-[14px]'}`}>
+      <span className={`inline-flex items-center gap-1.5 rounded-md font-bold whitespace-nowrap ${ACTION.pill} ${size === 'lg' ? 'px-3 py-1.5 text-[17px]' : 'px-2.5 py-1 text-[16px]'}`}>
         <PenLine size={size === 'lg' ? 16 : 14} />等您確認
       </span>
     );
   }
-  if (post.captionState === 'approved') return <span className="inline-flex items-center gap-1 text-[14px] font-bold text-[#5A5A40] whitespace-nowrap"><Check size={15} strokeWidth={3} />已確認</span>;
-  if (post.captionState === 'revising') return <span className="text-[14px] text-gray-600 whitespace-nowrap">依您的意見修改中</span>;
-  return <span className="text-[14px] text-gray-400 whitespace-nowrap">準備中</span>;
+  if (post.captionState === 'approved') return <span className="inline-flex items-center gap-1 text-[16px] font-bold text-[#5A5A40] whitespace-nowrap"><Check size={15} strokeWidth={3} />已確認</span>;
+  if (post.captionState === 'revising') return <span className="text-[16px] text-gray-600 whitespace-nowrap">依您的意見修改中</span>;
+  return <span className="text-[16px] text-gray-400 whitespace-nowrap">準備中</span>;
 }
 
 /** 手機月曆格子的時間色塊：要處理＝橄欖綠，其餘中性 */

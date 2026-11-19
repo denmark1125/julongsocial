@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { CheckSquare, Send, Square, Trash2 } from 'lucide-react';
 import { Post } from '../types';
 import { CAPTION_STATUS_LABEL, CaptionStatus, canSendCaption, captionStatus } from '../lib/captionReview';
+import { diffChangesInContext, diffText } from '../lib/textDiff';
 import { addManualFeedback, applyFeedbackAsCaption, removeFeedback, sendCaptionReview } from '../lib/captionReviewClient';
 
 /** 狀態標籤的顏色。跟文案頁業主看到的顏色同一套：橘＝等業主、綠＝確認、紅＝業主要改 */
@@ -76,6 +77,42 @@ const mmdd = (iso: string) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '' : `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
+
+/**
+ * 一筆修改紀錄：上面列「改了哪幾處」（刪掉的紅色刪除線 → 加上的綠底），
+ * 下面可展開整篇對照（沒變的字灰色、改的地方標色），不用自己兩篇對著找。
+ */
+function HistoryItem({ who, at, before, after }: { who: string; at: string; before: string; after: string }) {
+  const [full, setFull] = useState(false);
+  const parts = diffText(before, after);
+  const changes = diffChangesInContext(before, after);
+  const del = (t: string) => <span className="bg-rose-50 text-rose-700 line-through decoration-rose-400 rounded px-0.5">{t}</span>;
+  const add = (t: string) => <span className="bg-emerald-50 text-emerald-800 font-bold rounded px-0.5">{t}</span>;
+  return (
+    <div className="bg-white rounded-xl border border-black/5 p-3">
+      <div className="text-[12px] text-gray-400">{who}・{at}・{changes.length ? `改了 ${changes.length} 處` : '沒有改字'}</div>
+      {changes.length > 0 && (
+        <ul className="mt-2 space-y-1.5">
+          {changes.slice(0, 8).map((c, k) => (
+            <li key={k} className="text-[13px] leading-relaxed whitespace-pre-wrap break-words pl-2 border-l-2 border-gray-200">
+              {/* 前後文灰色，改的地方：刪掉的紅色刪除線、加上的綠底 */}
+              <span className="text-gray-400">{c.pre && `…${c.pre}`}</span>{c.del && del(c.del)}{c.add && add(c.add)}<span className="text-gray-400">{c.post && `${c.post}…`}</span>
+            </li>
+          ))}
+          {changes.length > 8 && <li className="text-[12px] text-gray-400">…還有 {changes.length - 8} 處，請看整篇對照</li>}
+        </ul>
+      )}
+      <button type="button" onClick={() => setFull(v => !v)} className="mt-2 text-[12px] font-bold text-[#5A5A40] underline underline-offset-2">
+        {full ? '收起整篇對照' : '看整篇對照'}
+      </button>
+      {full && (
+        <div className="mt-2 text-[13px] text-gray-500 whitespace-pre-wrap break-words leading-relaxed">
+          {parts.map((p, k) => p.type === 'same' ? <span key={k}>{p.text}</span> : <React.Fragment key={k}>{p.type === 'del' ? del(p.text) : add(p.text)}</React.Fragment>)}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * 貼文上的「業主審文案」區塊（2026-11-16）：狀態、送審、業主意見、修改紀錄。
@@ -161,12 +198,9 @@ export default function CaptionReviewPanel({ post, vendorName, unsaved = false, 
         <details>
           <summary className="text-[13px] font-bold text-gray-500 cursor-pointer">修改紀錄（{history.length}）</summary>
           <div className="space-y-2 mt-2">
-            {[...history].reverse().map((h, i) => (
-              <div key={`${h.at}-${i}`} className="bg-white rounded-xl border border-black/5 p-3">
-                <div className="text-[12px] text-gray-400">{h.by === 'client' ? '業主改字' : `${h.byName || '小編'}套用業主意見`}・{mmdd(h.at)}・改之前是：</div>
-                <div className="text-[13px] text-gray-600 whitespace-pre-wrap break-words mt-1">{h.before || '（空白）'}</div>
-              </div>
-            ))}
+            {/* 11-19 使用者：要看得出改了哪裡 → 跟「下一版」逐字比對，刪掉的紅色刪除線、加上的綠底 */}
+            {history.map((h, i) => ({ h, after: h.after ?? (i + 1 < history.length ? history[i + 1].before : String(post.content || '')) }))
+              .reverse().map(({ h, after }, i) => <React.Fragment key={`${h.at}-${i}`}><HistoryItem who={h.by === 'client' ? '業主改字' : `${h.byName || '小編'}套用業主意見`} at={mmdd(h.at)} before={h.before || ''} after={after} /></React.Fragment>)}
           </div>
         </details>
       )}

@@ -1,3 +1,4 @@
+import { isShootUpcoming } from '../lib/shootSync';
 import React, { useEffect, useMemo, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { addDays, format, getDay, parseISO } from 'date-fns';
@@ -102,7 +103,7 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
   const overdueShoots = deficitRows.filter(r => r.overdue);
   const horizon = format(addDays(now, 14), 'yyyy-MM-dd');
   const upcomingShoots = bookings
-    .filter(b => b.status === 'booked' && b.scheduledDate >= today && b.scheduledDate <= horizon)
+    .filter(b => isShootUpcoming(b, today) && b.scheduledDate <= horizon)
     .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate) || (a.startTime || '').localeCompare(b.startTime || ''));
 
   // ── 3. 近 7 天 ──
@@ -276,7 +277,7 @@ export default function Dashboard({ setActiveTab, currentUserRole }: { setActive
           <div className="grid grid-cols-1 sm:grid-cols-7 gap-2">
             {days.map((d, i) => {
               const dayPosts = posts.filter(p => (p.scheduledAt || '').slice(0, 10) === d && vmap.has(p.vendorId)).sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
-              const dayShoots = bookings.filter(b => b.status === 'booked' && b.scheduledDate === d).sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+              const dayShoots = bookings.filter(b => (b.status === 'booked' || b.status === 'completed') && b.scheduledDate === d).sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
               const dayMissing = missing.filter(m => m.date === d);
               return (
                 <div key={d} className={cn('rounded-2xl p-2 min-w-0 space-y-1', i === 0 ? 'bg-[#5A5A40]/[0.07] ring-1 ring-[#5A5A40]/20' : 'bg-[#F5F5F0]')}>

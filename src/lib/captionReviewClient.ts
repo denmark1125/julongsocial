@@ -81,7 +81,7 @@ export async function applyFeedbackAsCaption(post: Post, text: string): Promise<
       content: text,
       'captionReview.history': [
         ...(post.captionReview?.history || []),
-        { at: new Date().toISOString(), by: 'staff', byName: auth.currentUser?.displayName || '', before: post.content || '' },
+        { at: new Date().toISOString(), by: 'staff', byName: auth.currentUser?.displayName || '', before: post.content || '', after: text },
       ].slice(-20),
     });
     toast.success('已用業主這段取代文案，記得再送一次給業主確認');

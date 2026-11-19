@@ -1,3 +1,4 @@
+import { isShootUpcoming } from './shootSync';
 import { Asset, Post, ShootBooking, Vendor } from '../types';
 import {
   getAvailableVideoAssets,
@@ -60,7 +61,8 @@ export function buildDeficitRows(
       // 用共用的getOwedVideoCount(內部已無條件進位)，不要自己重算，避免跟Dashboard/LINE推播的欠片數字對不起來
       const owed = getOwedVideoCount(v, posts, assets, stock, currentMonth);
       const booked = bookings
-        .filter(b => b.vendorId === v.id && b.status === 'booked')
+        // 看日期（11-19）：只列接下來要拍的；日子過了就算拍過，不再有「逾期沒結」
+        .filter(b => b.vendorId === v.id && isShootUpcoming(b, today))
         .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate) || (a.startTime || '').localeCompare(b.startTime || ''));
       const active = booked[0] || null;
       // TimeTree 匯入後同一個 IP 常同時有好幾場約好的拍攝，卡片只顯示最近一場，其他給個數量

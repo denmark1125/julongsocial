@@ -9,7 +9,7 @@ import { ACTION, CaptionBadge, FilmPill, LINE, hhmm, needsYou, stageOf, taipeiTo
  * 一篇一列、整月照上片時間由早到晚，中間畫「今天」分隔線；要業主處理的列在原位標橄欖綠，不另外搬到最上面
  * （頂部「等您處理」橫條負責提醒）。已發布的在今天以前、預設收起來。手機版維持卡片（PostSections）。
  */
-const COLS = 'grid grid-cols-[108px_48px_96px_minmax(0,1fr)_196px_168px_112px_16px] items-center gap-x-4';
+const COLS = 'grid grid-cols-[116px_52px_80px_minmax(0,1fr)_212px_204px_124px_16px] items-center gap-x-4';
 const dateOf = (p: ClientPost) => p.scheduledAt.slice(0, 10);
 const asc = (a: ClientPost, b: ClientPost) => (a.scheduledAt || '9').localeCompare(b.scheduledAt || '9');
 
@@ -27,7 +27,7 @@ function MiniSteps({ current }: { current: number }) {
           <React.Fragment key={s}>
             {i > 0 && <span className={`w-2.5 h-[2px] ${i <= current ? 'bg-[#5A5A40]' : 'bg-gray-200'}`} />}
             <span title={s}
-              className={`w-5 h-5 rounded-full flex items-center justify-center text-[11px] font-bold border-2 ${
+              className={`w-5 h-5 rounded-full flex items-center justify-center text-[12px] font-bold border-2 ${
                 i === current ? 'bg-orange-500 border-orange-500 text-white'
                   : i < current ? 'bg-[#5A5A40] border-[#5A5A40] text-white' : 'bg-white border-gray-200 text-gray-300'}`}>
               {i < current ? <Check size={11} strokeWidth={3} /> : i + 1}
@@ -35,7 +35,7 @@ function MiniSteps({ current }: { current: number }) {
           </React.Fragment>
         ))}
       </div>
-      <span className={`text-[13px] font-bold whitespace-nowrap ${finished ? 'text-[#5A5A40]' : 'text-orange-700'}`}>{label}</span>
+      <span className={`text-[15px] font-bold whitespace-nowrap ${finished ? 'text-[#5A5A40]' : 'text-orange-700'}`}>{label}</span>
     </div>
   );
 }
@@ -47,10 +47,10 @@ function Row({ post, onOpen }: { post: ClientPost; onOpen: (p: ClientPost) => vo
     <button type="button" onClick={() => onOpen(post)}
       className={`${COLS} w-full text-left px-5 py-3 border-t border-[#EFEDE5] transition-colors hover:bg-[#FAFAF7] relative ${you ? 'bg-[#5A5A40]/[0.04]' : ''}`}>
       {you && <span className="absolute left-0 top-0 bottom-0 w-[3px] bg-[#5A5A40]" />}
-      <span className="text-[15px] font-medium text-gray-900 tabular-nums whitespace-nowrap">{clientDayLabel(dateOf(post)) || '未定'}</span>
-      <span className="text-[15px] tabular-nums text-gray-600 whitespace-nowrap">{hhmm(post) || '—'}</span>
-      <span className="text-[13px] text-gray-500 truncate">{post.platforms.join('／') || '—'}</span>
-      <span className="text-[15px] font-bold text-gray-900 truncate">{post.title || '（未命名）'}</span>
+      <span className="text-[17px] font-medium text-gray-900 tabular-nums whitespace-nowrap">{clientDayLabel(dateOf(post)) || '未定'}</span>
+      <span className="text-[17px] tabular-nums text-gray-600 whitespace-nowrap">{hhmm(post) || '—'}</span>
+      <span className="text-[15px] text-gray-500 truncate">{post.platforms.join('／') || '—'}</span>
+      <span className="text-[17px] font-bold text-gray-900 truncate">{post.title || '（未命名）'}</span>
       <MiniSteps current={s.current} />
       {/* 影片狀態一欄、文案一欄（11-18 使用者：文案審核最重要，要獨立、明顯）；都單行，每列等高 */}
       <span className="min-w-0 truncate"><FilmPill post={post} /></span>
@@ -81,7 +81,7 @@ export default function PostTable({ posts, onOpen, mode = 'timeline' }: {
   const onlyDone = !rest.length;
 
   const header = (
-    <div className={`${COLS} px-5 py-2.5 bg-[#FAFAF7] text-[13px] font-medium text-gray-500`}>
+    <div className={`${COLS} px-5 py-2.5 bg-[#FAFAF7] text-[15px] font-medium text-gray-500`}>
       <span>上片日期</span><span>時間</span><span>平台</span><span>標題</span><span>進度</span><span>影片</span><span>文案</span><span />
     </div>
   );
@@ -94,7 +94,7 @@ export default function PostTable({ posts, onOpen, mode = 'timeline' }: {
         <>
           {done.length > 0 && !onlyDone && (
             <button type="button" onClick={() => setShowDone(v => !v)}
-              className="w-full flex items-center gap-2 px-5 py-2.5 border-t border-[#EFEDE5] text-[14px] text-gray-500 hover:bg-[#FAFAF7]">
+              className="w-full flex items-center gap-2 px-5 py-2.5 border-t border-[#EFEDE5] text-[16px] text-gray-500 hover:bg-[#FAFAF7]">
               <ChevronDown size={16} className={showDone ? 'rotate-180 transition-transform' : 'transition-transform'} />
               <span className="font-bold">已發布 {done.length} 篇</span>
               <span className="text-gray-400">{showDone ? '收起' : '展開'}</span>
@@ -104,7 +104,7 @@ export default function PostTable({ posts, onOpen, mode = 'timeline' }: {
           {rows(past)}
           {showToday && (
             <div className="flex items-center gap-3 px-5 py-1.5 border-t border-[#EFEDE5]">
-              <span className={`text-[13px] font-bold whitespace-nowrap ${ACTION.text}`}>今天 {clientDayLabel(today)}</span>
+              <span className={`text-[15px] font-bold whitespace-nowrap ${ACTION.text}`}>今天 {clientDayLabel(today)}</span>
               <span className="flex-1 h-[2px] bg-[#5A5A40]/40 rounded-full" />
             </div>
           )}

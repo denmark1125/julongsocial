@@ -146,7 +146,7 @@ export function buildClientNotices(
   // 拍攝預約：還沒拍的才提醒
   for (const b of bookings) {
     const s = toClientShoot(b);
-    if (!s || s.done || s.date < opts.today || !recent(str(b?.createdAt))) continue;
+    if (!s || s.date < opts.today || !recent(str(b?.createdAt))) continue;
     out.push({ id: `shoot_${s.date}_${s.time}`, kind: 'shoot', at: b.createdAt, title: '拍攝已排定', detail: `${clientDayLabel(s.date)}${s.time ? ` ${s.time}` : ''}`, done: true });
   }
 
@@ -245,7 +245,8 @@ export function toClientShoot(b: any): ClientShoot | null {
 }
 
 export function pickNextShoot(shoots: ClientShoot[], today: string): ClientShoot | null {
-  return shoots.filter(s => !s.done && s.date >= today).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0] || null;
+  // 看日期（11-19）：今天以後的都是接下來的拍攝；今天的還沒按完成也算
+  return shoots.filter(s => s.date > today || (s.date === today && !s.done)).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))[0] || null;
 }
 
 /**
@@ -257,7 +258,8 @@ export function pickLastShoot(shoots: ClientShoot[], today: string, filmedDates:
   const filmed = filmedDates
     .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && d <= today)
     .map(date => ({ date, time: '', done: true }));
-  return [...shoots.filter(s => s.done || s.date < today), ...filmed]
+  // 看日期（11-19）：日子過了就是拍過；今天的要按了完成才算（未來的被誤標完成也不算）
+  return [...shoots.filter(s => s.date < today || (s.date === today && s.done)), ...filmed]
     .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time))[0] || null;
 }
 

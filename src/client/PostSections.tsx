@@ -26,10 +26,10 @@ export default function PostSections({ posts, onOpen, showCaption = false, twoCo
     </div>
   );
   const title = (text: string, n: number, cls = 'text-gray-600') => (
-    <h2 className={`text-[15px] font-bold px-1 whitespace-nowrap ${cls}`}>{text}<span className="ml-1.5 font-normal text-gray-400">{n}</span></h2>
+    <h2 className={`text-[17px] font-bold px-1 whitespace-nowrap ${cls}`}>{text}<span className="ml-1.5 font-normal text-gray-400">{n}</span></h2>
   );
 
-  if (!posts.length) return <p className="text-center text-gray-400 py-10 text-[15px]">這個月還沒有排程</p>;
+  if (!posts.length) return <p className="text-center text-gray-400 py-10 text-[17px]">這個月還沒有排程</p>;
 
   return (
     <div className="space-y-5">
@@ -39,9 +39,9 @@ export default function PostSections({ posts, onOpen, showCaption = false, twoCo
         <section className="space-y-3">
           {onlyDone ? title('已發布', done.length) : (
             <button type="button" onClick={() => setShowDone(v => !v)}
-              className="w-full flex items-center justify-between bg-white rounded-xl border border-[#E4E2D8] px-4 py-3 text-[15px] font-bold text-gray-600">
+              className="w-full flex items-center justify-between bg-white rounded-xl border border-[#E4E2D8] px-4 py-3 text-[17px] font-bold text-gray-600">
               <span className="whitespace-nowrap">已發布<span className="ml-1.5 font-normal text-gray-400">{done.length}</span></span>
-              <span className="flex items-center gap-1 text-[14px] font-normal text-gray-400 whitespace-nowrap">
+              <span className="flex items-center gap-1 text-[16px] font-normal text-gray-400 whitespace-nowrap">
                 {showDone ? '收起' : '展開'}<ChevronDown size={18} className={showDone ? 'rotate-180 transition-transform' : 'transition-transform'} />
               </span>
             </button>

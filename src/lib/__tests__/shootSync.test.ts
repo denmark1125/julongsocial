@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickBookingToResolve, planShootSync, toTaipeiDateTime } from '../shootSync';
+import { isShootDone, planShootSync, toTaipeiDateTime } from '../shootSync';
 import type { ShootBooking } from '../../types';
 
 const NOW = '2026-10-29T12:00:00.000Z';
@@ -61,14 +61,14 @@ describe('planShootSync 刪除', () => {
   it('沒對應 → 不動', () => expect(planShootSync({ uuid: 'zz', action: 'delete' }, null, [bk({})], TODAY, NOW).op).toBe('none'));
 });
 
-describe('pickBookingToResolve', () => {
-  it('挑已到期最早的，不是未來那筆', () => {
-    expect(pickBookingToResolve([{ scheduledDate: '2026-11-20' }, { scheduledDate: '2026-10-28' }], TODAY)?.scheduledDate).toBe('2026-10-28');
+describe('isShootDone（看日期）', () => {
+  it('過了＝拍過；今天要按完成；未來一律待拍；取消延期不算', () => {
+    expect(isShootDone({ status: 'booked', scheduledDate: '2026-10-28' }, TODAY)).toBe(true);
+    expect(isShootDone({ status: 'booked', scheduledDate: TODAY }, TODAY)).toBe(false);
+    expect(isShootDone({ status: 'completed', scheduledDate: TODAY }, TODAY)).toBe(true);
+    expect(isShootDone({ status: 'completed', scheduledDate: '2026-12-19' }, TODAY)).toBe(false);
+    expect(isShootDone({ status: 'cancelled', scheduledDate: '2026-10-01' }, TODAY)).toBe(false);
   });
-  it('都還沒到 → 最早的（舊行為）', () => {
-    expect(pickBookingToResolve([{ scheduledDate: '2026-11-20' }, { scheduledDate: '2026-11-03' }], TODAY)?.scheduledDate).toBe('2026-11-03');
-  });
-  it('沒有 → null', () => expect(pickBookingToResolve([], TODAY)).toBeNull());
 });
 
 import { parseTitleSuffix, toCalendarEvent, isBookingChange } from '../shootSync';

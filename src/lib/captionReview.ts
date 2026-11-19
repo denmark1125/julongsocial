@@ -27,6 +27,8 @@ export interface CaptionHistoryEntry {
   byName?: string;
   /** 改之前的文案 */
   before: string;
+  /** 改之後的文案（11-19 起才有；舊紀錄用下一筆的 before／目前文案推） */
+  after?: string;
 }
 
 export interface CaptionReview {
@@ -152,8 +154,7 @@ function captionBubble(info: CaptionCardInfo) {
   return {
     type: 'bubble',
     size: 'mega',
-    // 11-19 使用者：卡片要美化、按鈕上的核取方框（✅ emoji）很醜 → 不用 emoji、不用 LINE 預設按鈕，
-    // 改成自己畫的圓角色塊（跟客戶端網頁同一個橄欖綠），文案放進淺米色底框，跟說明文字分得開
+    // 11-19：文案放進淺米色底框跟說明分開；標題列拿掉 emoji（按鈕的 ✅ 保留，見 footer）
     header: {
       type: 'box', layout: 'vertical', backgroundColor: BRAND, paddingAll: '18px', paddingBottom: '16px',
       contents: [
@@ -170,16 +171,15 @@ function captionBubble(info: CaptionCardInfo) {
         { type: 'text', text: '文案確認後，我們才會排程發布。要改字或留言，請按「我要修改」到網頁上操作。', size: 'xs', color: '#8A8A7A', wrap: true, margin: 'lg' },
       ],
     },
+    // 按鈕維持 LINE 原生樣式＋圖示（11-19 使用者：自己畫的橄欖綠色塊看不清楚，舊的綠色＋✅ 比較清楚）
     footer: {
-      type: 'box', layout: 'vertical', spacing: 'md', paddingAll: '18px', paddingTop: '12px',
+      type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '12px',
       contents: [
-        { type: 'box', layout: 'vertical', backgroundColor: BRAND, cornerRadius: '8px', paddingAll: '13px',
-          action: { type: 'postback', label: '文案沒問題，可以發布', data: captionPostbackData('ok', info.postId), displayText: `文案 OK：${when ? `${when} ` : ''}${short}` },
-          contents: [{ type: 'text', text: '文案沒問題，可以發布', color: '#FFFFFF', weight: 'bold', size: 'md', align: 'center' }] },
+        { type: 'button', style: 'primary', color: '#2F9E5B', height: 'sm',
+          action: { type: 'postback', label: '✅ 文案確認，可以發布', data: captionPostbackData('ok', info.postId), displayText: `文案 OK：${when ? `${when} ` : ''}${short}` } },
         // 改文案一律到網頁（11-18 使用者：LINE 卡片的字不能複製；「按要修改後 10 分鐘內的話收成意見」業主跟別人聊天會錯亂）
-        { type: 'box', layout: 'vertical', backgroundColor: '#FFFFFF', borderColor: BRAND, borderWidth: '1px', cornerRadius: '8px', paddingAll: '12px',
-          action: { type: 'uri', label: '我要修改（改字或留言）', uri: info.pageUrl },
-          contents: [{ type: 'text', text: '我要修改（改字或留言）', color: BRAND, weight: 'bold', size: 'md', align: 'center' }] },
+        { type: 'button', style: 'secondary', height: 'sm',
+          action: { type: 'uri', label: '✏️ 我要修改（改字或留言）', uri: info.pageUrl } },
       ],
     },
   };

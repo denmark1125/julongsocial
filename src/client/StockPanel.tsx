@@ -37,8 +37,8 @@ export default function StockPanel({ stock, lastShoot, nextShoot, onOpenPost }: 
     <section className={`bg-white rounded-xl border ${LINE}`}>
       <div className="flex flex-col md:flex-row md:items-stretch">
         <div className={`px-4 md:px-5 pt-3 md:py-3 flex md:flex-col justify-between md:justify-center gap-1 md:border-r ${LINE} md:w-[150px] shrink-0`}>
-          <span className="text-[13px] font-medium text-gray-500 whitespace-nowrap">目前庫存</span>
-          <span className="text-[15px] font-bold whitespace-nowrap tabular-nums">共 {stock.total} 支</span>
+          <span className="text-[15px] font-medium text-gray-500 whitespace-nowrap">目前庫存</span>
+          <span className="text-[17px] font-bold whitespace-nowrap tabular-nums">共 {stock.total} 支</span>
         </div>
         <div className="grid grid-cols-3 flex-1 min-w-0">
           {BUCKETS.map((b, i) => {
@@ -47,10 +47,10 @@ export default function StockPanel({ stock, lastShoot, nextShoot, onOpenPost }: 
             return (
               <button key={b.id} type="button" disabled={!n} onClick={() => setOpen(on ? '' : b.id)}
                 className={`relative px-4 md:px-5 py-3 text-left transition-colors enabled:hover:bg-[#FAFAF7] ${i ? `border-l ${LINE}` : ''}`}>
-                <div className="text-[13px] font-medium text-gray-500 whitespace-nowrap">{b.label}</div>
+                <div className="text-[15px] font-medium text-gray-500 whitespace-nowrap">{b.label}</div>
                 <div className={`flex items-baseline gap-1 whitespace-nowrap ${n ? 'text-gray-900' : 'text-gray-300'}`}>
-                  <span className="text-[22px] font-bold tabular-nums leading-tight">{n}</span>
-                  <span className="text-[13px] font-medium">支</span>
+                  <span className="text-[24px] font-bold tabular-nums leading-tight">{n}</span>
+                  <span className="text-[15px] font-medium">支</span>
                   {n > 0 && <ChevronDown size={14} className={`ml-0.5 text-gray-400 transition-transform ${on ? 'rotate-180' : ''}`} />}
                 </div>
                 {on && <span className="absolute left-0 right-0 bottom-0 h-[3px] bg-[#5A5A40]" />}
@@ -60,7 +60,7 @@ export default function StockPanel({ stock, lastShoot, nextShoot, onOpenPost }: 
         </div>
         {(lastShoot || nextShoot) && (
           // 手機一行放不下上次＋下次：各自一段，放不下就換行，不截字
-          <div className={`px-4 md:px-5 py-2.5 md:py-3 border-t md:border-t-0 md:border-l ${LINE} flex md:flex-col justify-center gap-x-4 gap-y-0.5 text-[13px] text-gray-600 shrink-0`}>
+          <div className={`px-4 md:px-5 py-2.5 md:py-3 border-t md:border-t-0 md:border-l ${LINE} flex flex-wrap md:flex-nowrap md:flex-col md:justify-center gap-x-4 gap-y-0.5 text-[15px] text-gray-600 shrink-0`}>
             <span className="flex items-center gap-1.5 text-gray-500 font-medium whitespace-nowrap"><Camera size={14} />拍攝</span>
             {lastShoot && <span className="whitespace-nowrap">上次 {shootText(lastShoot)}</span>}
             {nextShoot && <span className="whitespace-nowrap">下次 {shootText(nextShoot)}</span>}
@@ -75,8 +75,8 @@ export default function StockPanel({ stock, lastShoot, nextShoot, onOpenPost }: 
               <>
                 {/* 手機一行放不下片名＋上片日（11-17 大發實測片名只剩 3 個字）：手機上下兩行，電腦同一行 */}
                 <span className="min-w-0 flex-1 flex flex-col md:flex-row md:items-center md:gap-3">
-                  <span className="min-w-0 md:flex-1 truncate text-[15px] font-medium text-gray-900">{it.title}</span>
-                  <span className={`shrink-0 text-[13px] whitespace-nowrap tabular-nums ${it.airDate ? 'text-gray-700 font-medium' : 'text-gray-400'}`}>{airLabel(it)}</span>
+                  <span className="min-w-0 md:flex-1 truncate text-[17px] font-medium text-gray-900">{it.title}</span>
+                  <span className={`shrink-0 text-[15px] whitespace-nowrap tabular-nums ${it.airDate ? 'text-gray-700 font-medium' : 'text-gray-400'}`}>{airLabel(it)}</span>
                 </span>
                 {it.postId && <ChevronRight size={16} className="shrink-0 text-gray-300" />}
               </>

@@ -28,7 +28,6 @@ import { getWorkingEditorId, canReassignEditor, getAssetEditorOwner } from '../l
 import { isPickerConfigured } from '../lib/drivePicker';
 import { ASSET_CATEGORIES, ASSET_CATEGORY_DATALIST_ID } from '../lib/assetCategories';
 import { driveFolderIdFromUrl } from '../lib/driveNaming';
-import { pickBookingToResolve } from '../lib/shootSync';
 import EditingBrief from './EditingBrief';
 import RawStatus from './RawStatus';
 import PreviewLinkButton from './PreviewLinkButton';
@@ -261,43 +260,7 @@ export default function AssetDatabase() {
     }
   };
 
-  // 藏鏡人上傳素材＝拍攝真的完成了；不能靠他們額外記得回「拍攝進度」頁按完成，
-  // 直接在這裡自動核銷該廠商目前有效的預約，交件數跟著這批上傳累加。
-  const autoResolveBooking = async (vendorId: string) => {
-    const today = new Date().toISOString().split('T')[0];
-    try {
-      const bookedSnap = await getDocs(query(
-        collection(db, 'shootBookings'),
-        where('vendorId', '==', vendorId),
-        where('status', '==', 'booked')
-      ));
-      // TimeTree 匯入後同一個 IP 常有好幾筆未來的預約；docs[0] 沒有順序，可能把下個月那筆核銷掉
-      const target = pickBookingToResolve(
-        bookedSnap.docs.map(d => ({ id: d.id, scheduledDate: (d.data() as ShootBooking).scheduledDate })),
-        format(new Date(), 'yyyy-MM-dd')
-      );
-      if (target) {
-        await updateDoc(doc(db, 'shootBookings', target.id), {
-          status: 'completed',
-          deliveredCount: 1,
-          resolvedAt: new Date().toISOString()
-        });
-        return;
-      }
-      const completedSnap = await getDocs(query(
-        collection(db, 'shootBookings'),
-        where('vendorId', '==', vendorId),
-        where('status', '==', 'completed')
-      ));
-      const sameDay = completedSnap.docs.find(d => (d.data() as ShootBooking).resolvedAt?.startsWith(today));
-      if (sameDay) {
-        const cur = (sameDay.data() as ShootBooking).deliveredCount || 0;
-        await updateDoc(doc(db, 'shootBookings', sameDay.id), { deliveredCount: cur + 1 });
-      }
-    } catch (error) {
-      console.error('autoResolveBooking failed', error);
-    }
-  };
+
 
   const newAssetIsRawVideo = newAsset.type === 'video' && newAsset.stage === 'raw' && !!newAsset.vendorId;
   const newAssetPostCandidates = newAssetIsRawVideo ? waitingPostsFor(newAsset.vendorId, posts, assets) : [];
@@ -328,9 +291,6 @@ export default function AssetDatabase() {
         // 剪輯師讀不到 users 文件，名字要快照下來，他才知道有問題找誰
         createdByName: me?.displayName || me?.username || ''
       });
-      if (newAsset.type === 'video') {
-        await autoResolveBooking(newAsset.vendorId);
-      }
       toast.success(newAsset.stage === 'raw' ? '原始素材已建檔' : '素材已上架');
       setNewAsset({ 
         title: '', 
@@ -1648,6 +1608,7 @@ ${after}`)) return;
                     value={newAsset.filmingDate}
                     onChange={(e) => setNewAsset({...newAsset, filmingDate: e.target.value})}
                   />
+                  <p className="text-[12px] text-gray-400 ml-1">補傳以前拍的片，請改成當初拍的日子（客戶端的「上次拍攝」看這裡）</p>
                 </div>
               </div>
 

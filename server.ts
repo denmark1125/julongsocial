@@ -21,8 +21,9 @@ import { summarizeFolder } from "./src/lib/rawFolder.js";
 import { buildPendingListMessage, buildReminderMessage, buildReviewNotifyMessage, isPendingQuery, listPendingReviews, pickReviewReminders } from "./src/lib/lineReviewNotify.js";
 import { BROLL_FOLDER_NAME, driveFolderIdFromUrl } from "./src/lib/driveNaming.js";
 import { buildCaptionReviewMessages, canSendCaption, captionDateLabel, captionReplyText, isMonthKey, parseCaptionPostback, CAPTION_CARDS_MAX, CAPTION_MAX_LEN } from "./src/lib/captionReview.js";
+import { diffSummaryLines } from "./src/lib/textDiff.js";
 import { loadClientPortalData } from "./src/lib/clientPortalData.js";
-import { isBookingChange, planShootSync, toCalendarEvent, type TimetreeShootChange } from "./src/lib/shootSync.js";
+import { isBookingChange, isShootUpcoming, planShootSync, toCalendarEvent, type TimetreeShootChange } from "./src/lib/shootSync.js";
 import { buildCheckPlan, runPublishAudit } from "./src/lib/publishAuditJob.js";
 import { lastShootDate } from "./src/lib/lastShoot.js";
 import { NOTIFY_KIND_MAP, resolveNotifyMode, type NotifyMode, type NotifyRules } from "./src/lib/notify/kinds.js";
@@ -611,32 +612,7 @@ app.post("/api/drive/record-library-uploads", async (req, res) => {
   }
 });
 
-/**
- * 拍攝預約核銷。跟 AssetDatabase.tsx 的 autoResolveBooking 同一套規則：
- * 有 booked 就結掉它，否則把今天已結的那筆交件數 +1。
- * ⚠️ 核銷失敗不能讓上傳整個失敗 —— 檔案跟素材都已經好了，所以只記 log。
- */
-async function autoResolveShootBooking(vendorId: string): Promise<void> {
-  const today = new Date().toISOString().split('T')[0];
-  try {
-    const booked = await adminDb.collection("shootBookings")
-      .where("vendorId", "==", vendorId).where("status", "==", "booked").get();
-    if (!booked.empty) {
-      await booked.docs[0].ref.update({
-        status: 'completed', deliveredCount: 1, resolvedAt: new Date().toISOString(),
-      });
-      return;
-    }
-    const done = await adminDb.collection("shootBookings")
-      .where("vendorId", "==", vendorId).where("status", "==", "completed").get();
-    const sameDay = done.docs.find(d => String(d.data()?.resolvedAt || '').startsWith(today));
-    if (sameDay) {
-      await sameDay.ref.update({ deliveredCount: (sameDay.data()?.deliveredCount || 0) + 1 });
-    }
-  } catch (e: any) {
-    console.error('autoResolveShootBooking failed', e?.message);
-  }
-}
+/* 11-19：上傳素材不再自動核銷拍攝預約（拍過沒＝看日期，見 src/lib/shootSync.ts isShootDone） */
 
 /**
  * 收尾：把這次上傳的每一組登記成 ERP 的一支素材。
@@ -778,8 +754,6 @@ app.post("/api/drive/commit-groups", async (req, res) => {
         const rawCheck = await checkRawFolder(groupFolderId, false);
         if (rawCheck) await assetRef.update({ rawCheck });
 
-        // 拍攝預約核銷：跟畫面上人工建檔的行為一致，一支素材算一次交件
-        await autoResolveShootBooking(vendorId);
 
         created.push({
           assetId: assetRef.id, name: groupName,
@@ -906,8 +880,6 @@ app.post("/api/drive/claim-folders", async (req, res) => {
       }
     }
 
-    // 拍攝預約核銷：跟人工建檔與 commit-groups 一致，整批算一次
-    if (created.length) await autoResolveShootBooking(vendorId);
 
     return res.json({ created, skipped, failed });
   } catch (e: any) {
@@ -2332,7 +2304,7 @@ async function notifyCaptionFeedback(post: any, what: string) {
     const vendor = (await adminDb.collection("vendors").doc(String(post.vendorId)).get()).data() || {};
     const targets = await userTargetByUid(String(post.captionReview?.sentByUid || post.createdBy || ''));
     const when = captionDateLabel(post.scheduledAt);
-    const text = `📝 ${vendor.name || ''}｜${when ? `${when} ` : ''}《${String(post.title || '未命名').slice(0, 40)}》\n${what}`;
+    const text = `📝 ${vendor.name || ''}｜${when ? `${when} ` : ''}《${String(post.title || '未命名').slice(0, 20)}》\n${what}`;
     await notify("caption_feedback", targets, [{ type: "text", text }], text.replace(/\n/g, ' '));
   } catch (e: any) {
     console.error("caption feedback notify failed", e?.message);
@@ -2572,7 +2544,7 @@ async function captionPageWrite(token: string, postId: string, newContent: strin
       clientConfirmed: true, internalConfirmed: true, // 同 LINE 按 OK：業主確認＝兩個勾一起打（11-18）
       ...(edited ? {
         content: newContent,
-        "captionReview.history": [...(p.captionReview?.history || []), { at: now, by: 'client', byName: '業主（文案頁）', before }].slice(-20),
+        "captionReview.history": [...(p.captionReview?.history || []), { at: now, by: 'client', byName: '業主（文案頁）', before, after: newContent }].slice(-20),
       } : {}),
       "captionReview.approvedAt": now,
       "captionReview.approvedVia": edited ? 'page_edit' : 'page',
@@ -2603,7 +2575,8 @@ app.post("/c/:token/edit", async (req, res) => {
     if (content.length > CAPTION_MAX_LEN) return res.status(400).json({ error: `文案最多 ${CAPTION_MAX_LEN} 字` });
     const r: any = await captionPageWrite(String(req.params.token), String(req.body?.postId || ''), content);
     if (r.status !== 200) return res.status(r.status).json({ error: r.error });
-    if (r.edited) await notifyCaptionFeedback(r.post, '業主在文案頁改了文案並確認，改之前的版本留在貼文的「修改紀錄」');
+    // 11-19 使用者嫌太長：直接列改了哪裡（最多 3 處），不再解釋修改紀錄在哪
+    if (r.edited) await notifyCaptionFeedback(r.post, ['業主改了文案並確認：', ...diffSummaryLines(String(r.post.content || ''), content).map(l => `・${l}`)].join('\n'));
     return res.json({ ok: true });
   } catch (e: any) {
     console.error("caption page edit failed:", e?.message);
@@ -2948,8 +2921,7 @@ async function buildStockAlertMessage(): Promise<any | null> {
       const owed = getOwedVideoCount(vendor, posts, assets, vendorAssets.length);
       const alert = getVideoStockAlert(vendor, vendorAssets, owed);
       const hasUpcomingBooking = bookings.some((b: any) =>
-        b.vendorId === vendor.id && b.status === "booked" &&
-        b.scheduledDate >= today && b.scheduledDate <= sevenDaysFromNow
+        b.vendorId === vendor.id && isShootUpcoming(b, today) && b.scheduledDate <= sevenDaysFromNow
       );
       const monthEntry = getDeficitBreakdown(vendor, posts, assets, month).monthlyShortfalls.find((e: any) => e.month === month);
       const monthProgress = { target: monthEntry?.target ?? 0, delivered: monthEntry?.delivered ?? 0 };

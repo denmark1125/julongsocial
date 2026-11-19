@@ -7,6 +7,7 @@ import ClientPostList from './ClientPostList';
 import ClientPostDetail from './ClientPostDetail';
 import StockPanel from './StockPanel';
 import NoticeBell from './NoticeBell';
+import Logo from '../components/Logo';
 import { ACTION, LINE } from './shared';
 
 /**
@@ -106,8 +107,8 @@ export default function ClientPortal() {
     return (
       <div className="min-h-dvh bg-[#F5F5F0] flex items-center justify-center p-8 text-center">
         <div>
-          <p className="text-[18px] font-bold text-gray-700">{error}</p>
-          <p className="text-[15px] text-gray-500 mt-2">有問題請直接在 LINE 群組告訴我們。</p>
+          <p className="text-[20px] font-bold text-gray-700">{error}</p>
+          <p className="text-[17px] text-gray-500 mt-2">有問題請直接在 LINE 群組告訴我們。</p>
         </div>
       </div>
     );
@@ -116,7 +117,7 @@ export default function ClientPortal() {
   // 分頁用底線（正式網頁的分頁樣式），不用膠囊（11-18 使用者：像 App 不像正式網頁）
   const tabBtn = (id: 'calendar' | 'posts', label: string) => (
     <button type="button" onClick={() => setTab(id)}
-      className={`relative px-1 pb-3 pt-1 text-[16px] whitespace-nowrap transition-colors ${tab === id ? 'font-bold text-gray-900' : 'font-medium text-gray-500 hover:text-gray-800'}`}>
+      className={`relative px-1 pb-3 pt-1 text-[18px] whitespace-nowrap transition-colors ${tab === id ? 'font-bold text-gray-900' : 'font-medium text-gray-500 hover:text-gray-800'}`}>
       {label}
       {tab === id && <span className="absolute left-0 right-0 -bottom-px h-[3px] rounded-t bg-[#5A5A40]" />}
     </button>
@@ -125,7 +126,7 @@ export default function ClientPortal() {
   const monthSwitch = (
     <div className={`inline-flex items-center border ${LINE} rounded-lg`}>
       <button type="button" aria-label="上個月" onClick={() => setMonth(shiftMonth(month, -1))} className="p-2 text-gray-600 hover:bg-[#F5F5F0] rounded-l-lg"><ChevronLeft size={18} /></button>
-      <span className={`px-3 text-[15px] font-bold whitespace-nowrap tabular-nums border-x ${LINE} py-1.5`}>{y} 年 {m} 月</span>
+      <span className={`px-3 text-[17px] font-bold whitespace-nowrap tabular-nums border-x ${LINE} py-1.5`}>{y} 年 {m} 月</span>
       <button type="button" aria-label="下個月" onClick={() => setMonth(shiftMonth(month, 1))} className="p-2 text-gray-600 hover:bg-[#F5F5F0] rounded-r-lg"><ChevronRight size={18} /></button>
     </div>
   );
@@ -135,11 +136,12 @@ export default function ClientPortal() {
       {/* 頂部列：白底細線，品牌＋IP 名稱在左；右邊電腦是「月份＋鈴鐺」，手機鈴鐺固定在標題右邊、月份換到下一行
           （11-19：手機寬度不夠時鈴鐺被擠到第二行左邊，通知清單往左超出螢幕） */}
       <header className={`bg-white border-b ${LINE}`}>
-        <div className="max-w-6xl mx-auto px-4 md:px-8 py-4">
+        <div className="max-w-7xl mx-auto px-4 md:px-8 py-4">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-[13px] font-medium text-gray-500 tracking-wide">聚浪行銷・客戶專區</div>
-              <h1 className="serif text-[22px] md:text-[26px] font-bold leading-tight truncate">{data?.vendorName || '　'}</h1>
+              {/* 聚浪 logo（11-19 使用者要求；跟公司後台同一個圖） */}
+              <div className="flex items-center gap-1.5 text-[15px] font-medium text-gray-500 tracking-wide"><Logo className="w-6 h-6 shrink-0" showText={false} />聚浪行銷・客戶專區</div>
+              <h1 className="serif text-[24px] md:text-[28px] font-bold leading-tight truncate">{data?.vendorName || '　'}</h1>
             </div>
             <div className="shrink-0 flex items-center gap-2">
               <div className="hidden md:block">{monthSwitch}</div>
@@ -150,15 +152,15 @@ export default function ClientPortal() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 md:px-8 pt-5 pb-[calc(2.5rem+env(safe-area-inset-bottom))] space-y-4">
+      <main className="max-w-7xl mx-auto px-4 md:px-8 pt-5 pb-[calc(2.5rem+env(safe-area-inset-bottom))] space-y-4">
         {data && todo.video + todo.caption > 0 && (
           <button type="button" onClick={() => openPost(todo.firstId)}
             className={`w-full flex items-center gap-3 text-left rounded-xl px-4 py-3 hover:bg-[#FAFAF7] ${ACTION.banner}`}>
-            <span className={`shrink-0 text-[14px] font-bold whitespace-nowrap ${ACTION.bannerTag}`}>等您處理</span>
-            <span className="min-w-0 flex-1 text-[15px] font-medium leading-snug">
+            <span className={`shrink-0 text-[16px] font-bold whitespace-nowrap ${ACTION.bannerTag}`}>等您處理</span>
+            <span className="min-w-0 flex-1 text-[17px] font-medium leading-snug">
               {[todo.caption ? `${todo.caption} 篇文案等您確認` : '', todo.video ? `${todo.video} 支影片等您審片` : ''].filter(Boolean).join('、')}
             </span>
-            <span className="hidden sm:inline shrink-0 text-[14px] font-bold text-[#5A5A40] whitespace-nowrap">前往處理</span>
+            <span className="hidden sm:inline shrink-0 text-[16px] font-bold text-[#5A5A40] whitespace-nowrap">前往處理</span>
             <ChevronRight size={16} className="shrink-0 text-[#5A5A40]" />
           </button>
         )}
@@ -174,14 +176,14 @@ export default function ClientPortal() {
         </nav>
 
         {!data ? (
-          <p className="text-center text-gray-400 py-16 text-[15px]">讀取中…</p>
+          <p className="text-center text-gray-400 py-16 text-[17px]">讀取中…</p>
         ) : tab === 'calendar' ? (
           <ClientCalendar data={data} onOpen={(p: ClientPost) => openPost(p.id)} />
         ) : (
           <ClientPostList posts={data.posts} onOpen={(p: ClientPost) => openPost(p.id)} />
         )}
 
-        <p className="text-center text-[13px] text-gray-400 pt-4">有任何問題，請直接在 LINE 群組告訴我們</p>
+        <p className="text-center text-[15px] text-gray-400 pt-4">有任何問題，請直接在 LINE 群組告訴我們</p>
       </main>
 
       {/* 換一篇、或狀態變了（剛按完確認）就重建，裡面的編輯中狀態才不會留著 */}

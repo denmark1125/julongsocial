@@ -26,18 +26,18 @@ export default function ClientPostList({ posts, onOpen }: { posts: ClientPost[];
         <div className="inline-flex rounded-lg border border-[#D9D7CC] bg-white overflow-hidden">
           {chips.map((c, i) => (
             <button key={c.id} type="button" onClick={() => setFilter(c.id)}
-              className={`px-3.5 py-1.5 text-[14px] whitespace-nowrap transition-colors ${i ? 'border-l border-[#D9D7CC]' : ''} ${filter === c.id ? 'bg-[#5A5A40] text-white font-bold' : 'text-gray-600 font-medium hover:bg-[#F5F5F0]'}`}>
+              className={`px-3.5 py-1.5 text-[16px] whitespace-nowrap transition-colors ${i ? 'border-l border-[#D9D7CC]' : ''} ${filter === c.id ? 'bg-[#5A5A40] text-white font-bold' : 'text-gray-600 font-medium hover:bg-[#F5F5F0]'}`}>
               {c.label}
             </button>
           ))}
         </div>
       </div>
       {shown.length === 0 && filter !== 'all' ? (
-        <p className="text-center text-gray-400 py-10 text-[15px]">
+        <p className="text-center text-gray-400 py-10 text-[17px]">
           {filter === 'todo' ? '目前沒有需要您處理的事' : '這個月還沒有發布的貼文'}
         </p>
       ) : sorted.length === 0 ? (
-        <p className="text-center text-gray-400 py-10 text-[15px]">這個月還沒有排程</p>
+        <p className="text-center text-gray-400 py-10 text-[17px]">這個月還沒有排程</p>
       ) : (
         <>
           {/* 電腦版：表格照時間排（11-18）；手機版：維持卡片 */}
