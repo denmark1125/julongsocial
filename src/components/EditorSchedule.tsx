@@ -204,6 +204,10 @@ export default function EditorSchedule({ userProfile, onOpenVendorQueue }: {
   const itemsByDay = useMemo(() => {
     const map = new Map<string, ScheduleItem[]>();
     const push = (item: ScheduleItem) => {
+      // 別人負責的格子（內部剪輯／其他剪輯師）整格不顯示（11-20 使用者：剪輯師會知道我們找誰剪，
+      // 「內部剪輯中・不用你剪」也很沒禮貌）。剪輯師只看得到自己的片和還沒有片的日子
+      const kind = cellKind.get(item.id);
+      if (kind === 'internal' || kind === 'others') return;
       const key = format(item.date, 'yyyy-MM-dd');
       const list = map.get(key);
       if (list) list.push(item);
@@ -244,7 +248,7 @@ export default function EditorSchedule({ userProfile, onOpenVendorQueue }: {
 
     for (const list of map.values()) list.sort((a, b) => a.date.getTime() - b.date.getTime());
     return map;
-  }, [posts, monthSlots, shownVendors, monthStart, monthEnd]);
+  }, [posts, monthSlots, shownVendors, monthStart, monthEnd, cellKind]);
 
   const calendarDays = useMemo(() => {
     const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
