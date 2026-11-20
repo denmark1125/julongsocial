@@ -11,6 +11,7 @@ import { assetOfPost, auditCounts, auditProgress, buildAuditRows, captionChecks,
 import {
   AUDIT_STATUS_ICON, AUDIT_STATUS_LABEL, AUDITABLE_PLATFORMS, describeAudit, type AuditStatus, type PlatformAudit,
 } from '../lib/publishAudit';
+import { finishedLink } from '../lib/finishedLink';
 import { describePrecheck, mergeCalendars, unmatchedCards, type VendorCalendar } from '../lib/publishPrecheck';
 
 /**
@@ -187,6 +188,16 @@ export default function PublishAuditPage({ isEngineer = false }: { isEngineer?: 
                   {p.autoPublished?.missingConfirm && <span className="text-[12px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 font-bold whitespace-nowrap" title="影片已經上線，但系統裡內部檢核或業主審核沒有勾">發了但沒勾審核</span>}
                   {!(p.content || '').trim() && p.status !== 'published' && <span className="text-[12px] px-2 py-0.5 rounded-full bg-red-50 text-red-600 font-bold whitespace-nowrap" title="系統裡這則還沒有文案，發的時候很容易忘了貼（11-05 好正點）">系統還沒填文案</span>}
                   <span className="text-[14px] text-gray-500 truncate min-w-0">{p.title}</span>
+                  {/* 11-20 使用者：排片時直接點開成片，不用再跑去行事曆（跟行事曆同一套連結規則） */}
+                  {(() => {
+                    const link = asset && finishedLink(asset);
+                    return link && (
+                      <a href={link.url} target="_blank" rel="noopener noreferrer" title={link.label}
+                        className="ml-auto shrink-0 self-center flex items-center gap-1 px-2.5 py-1 text-[13px] font-bold text-[#5A5A40] bg-white border border-black/10 hover:bg-[#5A5A40]/10 rounded-lg whitespace-nowrap">
+                        <ExternalLink size={13} /> {link.label.startsWith('看成片') ? '看成片' : link.label}
+                      </a>
+                    );
+                  })()}
                 </div>
                 <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 py-1">
                   <div className="w-full max-w-[400px]"><VideoSteps current={prog.current} /></div>
