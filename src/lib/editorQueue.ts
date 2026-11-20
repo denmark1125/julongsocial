@@ -365,38 +365,27 @@ export function buildEditorQueue(opts: {
   stocked.sort(byDate);
   settled.sort(byDate);
 
-  // 主清單照「交片期限」排，不照上片日排：同事指定的交片日可能比推算的早或晚。
-  // 急件之間也照期限排；急件沒有期限的排在急件最前面（「現在就要」）。
+  // 2026-11-20 使用者：「急件排最上面無庸置疑，但下面要依照日期排，他才知道要剪誰」。
+  // 主清單＝急件最前，其餘**照畫面上那一列顯示的日期**由近到遠（有片＝送審期限、沒片＝上片日，見 QueueRow）。
+  // ⚠️ 拿掉了兩條會讓日期跳號的舊規則：
+  //    ① 10-06「沒片排在有片後面」——沒片的 10/18 會排在有片的 11/30 後面，看起來亂。
+  //    ② 10-07「同一家 IP 照剪輯順序重排位置」——整列連日期一起搬，畫面上日期就倒過來。
+  //    剪輯順序仍然有效：自動遞補時第 1 支本來就分到最早的空格（free.sort(rawOrder)），日期自然照順序。
+  const shownDate = (r: EditorQueueRow) => (r.kind === 'no_material' ? r.date : r.deadline) ?? r.date;
   rows.sort((x, y) => {
     if (x.urgent !== y.urgent) return x.urgent ? -1 : 1;
-    // 沒片的排在有片可剪的後面，彼此照畫面上顯示的上片日排
-    if ((x.kind === 'no_material') !== (y.kind === 'no_material')) return x.kind === 'no_material' ? 1 : -1;
-    if (x.kind === 'no_material') return byDate(x, y);
-    if (!x.deadline || !y.deadline) {
-      if (!x.deadline && !y.deadline) return 0;
-      return !x.deadline ? -1 : 1;
+    const dx = shownDate(x), dy = shownDate(y);
+    // 急件沒有期限＝「現在就要」，排在最前；一般列沒日期的排最後
+    if (!dx || !dy) {
+      if (!dx && !dy) return 0;
+      return x.urgent ? (!dx ? -1 : 1) : (!dx ? 1 : -1);
     }
-    if (x.deadline.getTime() !== y.deadline.getTime()) return x.deadline.getTime() - y.deadline.getTime();
-    // 同一天好幾個 IP：有片可剪的排前面，剪輯師先看到能動手的
+    if (dx.getTime() !== dy.getTime()) return dx.getTime() - dy.getTime();
+    // 同一天：有片可剪的排前面，剪輯師先看到能動手的；再來照上片日
     if ((x.kind === 'to_edit') !== (y.kind === 'to_edit')) return x.kind === 'to_edit' ? -1 : 1;
-    return 0;
+    return (x.date?.getTime() || 0) - (y.date?.getTime() || 0);
   });
-
-  // 同一個 IP 的待剪列，畫面上的先後一律照同事排的剪輯順序（剪輯師卡片上的「順序 N」）。
-  // 上面照期限排完之後，同一家的片可能倒過來：急件之間照期限、同事指定交片日也會插隊，
-  // 結果「順序 2」排在「順序 1」上面（2026-10-07 極酵文創兩支急件）。
-  // 做法：各 IP 保留它原本佔的那幾個位置，只在那幾個位置之間照順序重新放 ——
-  // 跨 IP 的交錯不變，急件也仍在最上面（急件在順序裡本來就排最前，佔的也正好是最上面那幾格）。
-  // ⚠️ 同事親手排了上片日的列（'air'）不參與：日子是人定的，換位置會讓期限跟那支片對不上。
-  const slotsByVendor = new Map<string, number[]>();
-  rows.forEach((r, i) => {
-    if (r.kind === 'to_edit' && r.asset && r.deadlineSource !== 'air') slotsByVendor.set(r.vendorId, [...(slotsByVendor.get(r.vendorId) || []), i]);
-  });
-  const reordered = [...rows];
-  slotsByVendor.forEach(slots => {
-    const ordered = slots.map(i => rows[i]).sort((x, y) => rawOrder(x.asset!, y.asset!));
-    slots.forEach((slot, k) => { reordered[slot] = ordered[k]; });
-  });
+  const reordered = rows;
 
   return { rows: reordered, stocked, settled, unassigned };
 }

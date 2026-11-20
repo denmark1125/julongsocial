@@ -86,26 +86,34 @@ describe('rankByVendor（剪輯師清單上的「順序 N」）', () => {
   });
 });
 
-describe('剪輯師清單：同一個 IP 的列照剪輯順序排', () => {
-  it('兩支急件期限倒過來時，畫面仍是順序 1 在上（極酵文創 10/07）', () => {
+describe('剪輯師清單：急件最上面，其餘照畫面上的日期排（2026-11-20）', () => {
+  it('兩支急件：照期限先後，不再照剪輯順序搬位置（日期才不會倒過來）', () => {
     const first = asset({ vendorId: 'jy', title: '順序1', isUrgent: true, editOrder: 1, editDueDate: '2026-10-20' });
     const second = asset({ vendorId: 'jy', title: '順序2', isUrgent: true, editOrder: 2, editDueDate: '2026-10-09' });
 
     const q = buildEditorQueue({ demands: [], pendingAssets: [second, first] });
 
-    expect(q.rows.map(r => r.asset?.title)).toEqual(['順序1', '順序2']);
+    expect(q.rows.map(r => r.asset?.title)).toEqual(['順序2', '順序1']);
   });
 
-  it('跨 IP 的交錯位置不變，只在同一家佔的位置之間調換', () => {
+  it('沒指定交片日時，剪輯順序第 1 支自然分到較早的日子', () => {
     const demands = [demand('a', day(10, 10)), demand('b', day(10, 12)), demand('a', day(10, 14))];
     const a1 = asset({ vendorId: 'a', title: 'a順序1', editOrder: 1 });
-    const a2 = asset({ vendorId: 'a', title: 'a順序2', editOrder: 2, editDueDate: '2026-10-01' }); // 指定交片日插隊
+    const a2 = asset({ vendorId: 'a', title: 'a順序2', editOrder: 2 });
     const b1 = asset({ vendorId: 'b', title: 'b順序1' });
 
     const q = buildEditorQueue({ demands, pendingAssets: [a1, a2, b1] });
-    const titles = q.rows.filter(r => r.kind === 'to_edit').map(r => r.asset!.title);
 
-    expect(titles.filter(t => t.startsWith('a'))).toEqual(['a順序1', 'a順序2']);
-    expect(titles).toContain('b順序1');
+    expect(q.rows.filter(r => r.kind === 'to_edit').map(r => r.asset!.title)).toEqual(['a順序1', 'b順序1', 'a順序2']);
+  });
+
+  it('主清單日期一律由近到遠', () => {
+    const demands = [demand('a', day(10, 10)), demand('b', day(10, 12)), demand('a', day(10, 14))];
+    const a2 = asset({ vendorId: 'a', title: 'a順序2', editOrder: 2, editDueDate: '2026-10-01' });
+    const a1 = asset({ vendorId: 'a', title: 'a順序1', editOrder: 1 });
+    const q = buildEditorQueue({ demands, pendingAssets: [a1, a2] });
+    const t = q.rows.map(r => ((r.kind === 'no_material' ? r.date : r.deadline) ?? r.date)!.getTime());
+    expect(t).toEqual([...t].sort((x, y) => x - y));
   });
 });
+

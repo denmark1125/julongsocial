@@ -60,13 +60,14 @@ describe('buildEditorQueue', () => {
     expectConservation(demands, q);
   });
 
-  it('「沒片」排在有片可剪的後面（2026-10-06 老闆看過新畫面改的），仍留在主清單', () => {
+  it('「沒片」也照日期排，不再沉到有片的後面（2026-11-20 使用者：主清單一律照日期）', () => {
     const demands = [demand('yb', day(10, 3)), demand('gx', day(10, 20))];
     const raw = asset({ vendorId: 'gx' });
 
     const q = buildEditorQueue({ demands, pendingAssets: [raw] });
 
-    expect(q.rows.map(r => r.kind)).toEqual(['to_edit', 'no_material']);
+    // 10/03 沒片（顯示上片日 10/03）比 10/20 上片那支的送審日 10/18 早，排前面
+    expect(q.rows.map(r => r.kind)).toEqual(['no_material', 'to_edit']);
     expectConservation(demands, q);
   });
 
