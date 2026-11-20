@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAutoPost, buildTitledPost, isUntouchedAutoPost, movedSchedule } from '../boardPosts';
+import { buildAutoPost, buildTitledPost, isBlankBoardPost, isUntouchedAutoPost, movedSchedule, retitleForAsset } from '../boardPosts';
 
 const vendor = { id: 'v1', postingHabits: [{ daysOfWeek: [1], time: '19:30', contentTypes: ['video'], platforms: ['IG'] }], defaultPlatforms: { video: ['IG', 'TikTok'] } } as any;
 const day = new Date(2026, 9, 24);
@@ -41,8 +41,33 @@ describe('buildTitledPost 預計片名', () => {
     expect(p.assetId).toBe('to_be_added');
     expect(p.scheduledAt).toBe('2026-10-24T19:30');
   });
-  it('親手打的名字：系統不能自動刪或改名', () => {
+  it('親手打的名字：取消排日時系統不能刪', () => {
     expect(p.autoTitle).toBeUndefined();
     expect(isUntouchedAutoPost(p)).toBe(false);
+  });
+});
+
+describe('預計片名／系統貼文還沒寫文案：跟著片走（11-20 廣信 合掌村）', () => {
+  const titled = { ...buildTitledPost('限量12位住進合掌村!', vendor, day, 'u1'), id: 'p1' };
+  const auto = { ...buildAutoPost({ title: '釜山' }, vendor, day, 'u1'), id: 'p2' };
+  it('預計片名、系統貼文都算空的佔位', () => {
+    expect(isBlankBoardPost(titled)).toBe(true);
+    expect(isBlankBoardPost(auto)).toBe(true);
+  });
+  it('寫了文案、掛了片、小編自己建的都不算', () => {
+    expect(isBlankBoardPost({ ...titled, content: '文案' })).toBe(false);
+    expect(isBlankBoardPost({ ...titled, assetId: 'a1' })).toBe(false);
+    expect(isBlankBoardPost({ ...titled, status: 'draft' })).toBe(false);
+    expect(isBlankBoardPost({ ...titled, createdFrom: undefined })).toBe(false);
+  });
+  it('拖帶團領隊上去：藍字改成帶團領隊；預計片名不補 autoTitle', () => {
+    expect(retitleForAsset(titled, '帶團領隊連這件事都包到好？')).toEqual({ title: '帶團領隊連這件事都包到好？' });
+  });
+  it('系統貼文改名連 autoTitle 一起改（才會繼續算沒人動過）', () => {
+    expect(retitleForAsset(auto, '合掌村')).toEqual({ title: '合掌村', autoTitle: '合掌村' });
+  });
+  it('同名或寫過文案就不改', () => {
+    expect(retitleForAsset(auto, '釜山')).toBeNull();
+    expect(retitleForAsset({ ...titled, content: 'x' }, '帶團')).toBeNull();
   });
 });

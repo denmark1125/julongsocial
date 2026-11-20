@@ -5,7 +5,7 @@ import {
 } from 'date-fns';
 import { addDoc, collection, deleteDoc, deleteField, doc, writeBatch } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import { AUTO_POST_SOURCE, buildAutoPost, buildTitledPost, isUntouchedAutoPost, movedSchedule } from '../lib/boardPosts';
+import { AUTO_POST_SOURCE, buildAutoPost, buildTitledPost, isBlankBoardPost, isUntouchedAutoPost, movedSchedule, retitleForAsset } from '../lib/boardPosts';
 import { Asset, DismissedHabit, ExtraSlot, PlannedSlotMove, Post, Vendor, deriveFlowStage } from '../types';
 import { useLiveCollection } from '../lib/liveData';
 import { buildCompanyQueue } from '../lib/companyQueue';
@@ -136,17 +136,22 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
    * 這個月要畫成橘色的日子（固定發片日、挪過來的、手動加的，加上小編的影片貼文日）。
    * 只管顯示；遞補和期限仍然只在 SUPPLY_HORIZON_DAYS 內算，那裡要跟剪輯師畫面一致。
    */
-  /** 這個月畫得出來的發片日：日子 → 那一格（固定發片日的 × 要拿它記「這次不發」） */
+  /**
+   * 這個月畫得出來的發片日：日子 → 那一格（固定發片日的 × 要拿它記「這次不發」）
+   * ⚠️ 用空的 posts 算（跟 insertAt 的 slotDays 同一個口徑）：以前傳真的貼文，前後一天內只要有任何一篇
+   *    （連圖文都算）那格就被當成「已經發了」藏起來，月片數排滿也會藏 —— 橘色忽有忽無、
+   *    按了「＋發片日」也可能不出現（11-20 使用者「完全看心情」）。這裡只回答「這天是不是發片日」。
+   */
   const shownSlots = useMemo(() => {
     const map = new Map<string, PlannedSlot>();
     if (!vendor) return map;
     listPlannedSlots({
-      vendors: slotVendors([vendor]), moves: slotMoves, dismissed: dismissedHabits, extras: extraSlots, posts,
-      rangeStart: gridDays[0], rangeEnd: gridDays[gridDays.length - 1], contentType: 'video', fulfilledWindowDays: 1,
+      vendors: slotVendors([vendor]), moves: slotMoves, dismissed: dismissedHabits, extras: extraSlots, posts: [],
+      rangeStart: gridDays[0], rangeEnd: gridDays[gridDays.length - 1], contentType: 'video',
     }).forEach(s => { if (!map.has(s.toDate)) map.set(s.toDate, s); });
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vendor, slotMoves, dismissedHabits, extraSlots, posts, monthCursor]);
+  }, [vendor, slotMoves, dismissedHabits, extraSlots, monthCursor]);
   /** 這個 IP 手動加的發片日，日子 → extraSlots id（刪除用） */
   const extraByDay = new Map(extraSlots.filter(x => x.vendorId === vendorId).map(x => [x.date, x.id!]));
   // 有合約支數卻沒設固定發片日：只有小編貼文和手動加的日子算發片日，系統不會自己補
@@ -191,7 +196,8 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
       // 小編寫過的貼文要到貼文管理處理，免得把別人的文案一起刪掉
       const p = postById.get(assetId.slice(POST_KEY.length));
       if (!p || !postMovable(p) || isPostLocked(p)) { if (p && isPostLocked(p) && postMovable(p)) toast.error('要撤銷先按「解鎖」'); return; }
-      if (p.createdFrom !== AUTO_POST_SOURCE || (p.content || '').trim() || p.title !== p.autoTitle) { toast('這篇貼文小編已經動過了，要拿下來請到貼文管理'); return; }
+      // 11-20 使用者照舊字跑去貼文管理改，其實要換日子直接拖到別天就好（文案跟著走）
+      if (p.createdFrom !== AUTO_POST_SOURCE || (p.content || '').trim() || p.title !== p.autoTitle) { toast('這篇已經寫了文案，不能拿回左邊（會把文案一起刪掉）。要換日子直接拖到別天就好，文案會跟著搬'); return; }
       if (!window.confirm(`把「${p.title}」退回待排？
 
 這篇系統建的待補貼文會刪掉，片放回左邊。`)) return;
@@ -237,11 +243,13 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
       // 換到別天就搬同一篇；拉回左邊或改綁小編的貼文，就把系統建、沒人動過的那篇刪掉。
       const oldPost = a.plannedPostId ? posts.find(p => p.id === a.plannedPostId) : undefined;
       const oldAuto = isUntouchedAutoPost(oldPost) ? oldPost : undefined;
+      // 還沒寫文案的系統貼文／預計片名：跟著片搬（不然原本那天留一篇空的同名貼文，11-20）
+      const carry = isBlankBoardPost(oldPost) ? oldPost : undefined;
       let createdPost = false;
       if (target && !nextPost && vendor) {
-        if (oldAuto) {
-          batch.update(doc(db, 'posts', oldAuto.id!), movedSchedule(oldAuto, target.date));
-          nextPost = oldAuto.id!;
+        if (carry) {
+          batch.update(doc(db, 'posts', carry.id!), movedSchedule(carry, target.date));
+          nextPost = carry.id!;
         } else {
           const ref = doc(collection(db, 'posts'));
           batch.set(ref, buildAutoPost(a, vendor, target.date, auth.currentUser?.uid || ''));
@@ -259,9 +267,9 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
       });
       const bumped = nextPost ? pending.find(x => x.id !== assetId && x.plannedPostId === nextPost) : undefined;
       if (bumped) batch.update(doc(db, 'assets', bumped.id!), { plannedAirDate: deleteField(), plannedPostId: deleteField(), plannedAirSetAt: deleteField() });
-      // 擠掉別支、而那篇是系統建的：標題換成新這支的片名，不然貼文管理上的標題跟片對不起來
-      const targetAuto = nextPost && !createdPost ? posts.find(p => p.id === nextPost) : undefined;
-      if (bumped && targetAuto && isUntouchedAutoPost(targetAuto)) batch.update(doc(db, 'posts', targetAuto.id!), { title: a.title, autoTitle: a.title });
+      // 綁上的是排上片日建、還沒寫文案的那篇：標題換成這支的片名，不然藍字跟片對不起來（11-20 預計片名也算）
+      const retitle = nextPost && !createdPost ? retitleForAsset(posts.find(p => p.id === nextPost), a.title) : null;
+      if (retitle) batch.update(doc(db, 'posts', nextPost!), retitle);
       await batch.commit();
       if (createdPost) toast.success(`貼文管理已建一篇 ${format(target!.date, 'M/d')} 待補中，成片通過後會自動掛上`);
       if (bumped) toast(`「${bumped.title}」退回左邊（一篇貼文只配一支片）`);
@@ -377,18 +385,23 @@ export default function AirDateBoard({ onClose, embedded = false }: { onClose?: 
         // 插進來的這支：跟 place() 一樣——那天有小編貼文在等片就綁它，否則搬／建一篇系統貼文
         const oldPost = postOf(a);
         const oldAuto = isUntouchedAutoPost(oldPost) ? oldPost : undefined;
+        const carry = isBlankBoardPost(oldPost) ? oldPost : undefined;
         let nextPost = openPost(dayStr)?.id ?? null;
         if (!nextPost) {
-          if (oldAuto) {
-            batch.update(doc(db, 'posts', oldAuto.id!), movedSchedule(oldAuto, d));
-            nextPost = oldAuto.id!;
+          if (carry) {
+            batch.update(doc(db, 'posts', carry.id!), movedSchedule(carry, d));
+            const retitle = retitleForAsset(carry, a.title);
+            if (retitle) batch.update(doc(db, 'posts', carry.id!), retitle);
+            nextPost = carry.id!;
           } else {
             const ref = doc(collection(db, 'posts'));
             batch.set(ref, buildAutoPost(a, vendor, d, auth.currentUser?.uid || ''));
             nextPost = ref.id;
           }
-        } else if (oldAuto) {
-          batch.delete(doc(db, 'posts', oldAuto.id!));
+        } else {
+          if (oldAuto) batch.delete(doc(db, 'posts', oldAuto.id!));
+          const retitle = retitleForAsset(postById.get(nextPost), a.title);
+          if (retitle) batch.update(doc(db, 'posts', nextPost), retitle);
         }
         batch.update(doc(db, 'assets', key), { plannedAirDate: dayStr, plannedPostId: nextPost, plannedAirSetAt: nowIso });
       }
