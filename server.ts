@@ -1336,13 +1336,19 @@ app.post("/api/drive/review-upload-part-urls", async (req, res) => {
 
 // 送審通知剪輯群組（藏鏡人在裡面）拿去給客戶審。2026-10-22 起，見 src/lib/lineReviewNotify.ts。
 // ⚠️ 要 await 完才回應（Vercel 回應後會凍結）；失敗只記 log，不能讓送審失敗。
-async function notifyReviewGroup(editorDocId: string, asset: any, version: number, previewToken: string, host: string, fileId?: string) {
+/**
+ * 給客戶／LINE 的連結一律用正式網域（11-20）：排程（Vercel cron）打進來的 host 是「這次部署專屬網址」，
+ * 那個網址有 Vercel 部署保護，客戶點開只會看到 Vercel 登入頁。所以不能拿 req.get('host') 組連結。
+ */
+const PUBLIC_BASE_URL = (process.env.APP_URL || "https://julongsocial.vercel.app").replace(/\/+$/, "");
+
+async function notifyReviewGroup(editorDocId: string, asset: any, version: number, previewToken: string, _host: string, fileId?: string) {
   try {
     const editor: any = editorDocId ? (await adminDb.collection("editors").doc(editorDocId).get()).data() : null;
     if (editor?.lineGroupId) {
       await notify("editor_review", [{ type: "group", id: editor.lineGroupId, label: `剪輯群組（${editor.name || ''}）` }], [buildReviewNotifyMessage({
         vendorName: asset.vendorName || '', title: asset.title || '', version, editorName: editor.name || '',
-        previewUrl: `https://${host}/v/${previewToken}`, fileId,
+        previewUrl: `${PUBLIC_BASE_URL}/v/${previewToken}`, fileId,
       })], `${asset.vendorName || ''}「${asset.title || ''}」第 ${version} 版送審`);
     }
   } catch (e: any) {
@@ -2216,7 +2222,7 @@ app.post("/api/webhook/line", async (req: any, res) => {
       // 「待審」→ 回清單（2026-10-28：推播額度用完時的備案，回覆不算額度）
       if (event.type === "message" && event.message?.type === "text" && event.replyToken && isPendingQuery(event.message.text)) {
         try {
-          await sendLineReplyMessage(event.replyToken, await buildGroupPendingList(groupId, `https://${req.get('host')}`));
+          await sendLineReplyMessage(event.replyToken, await buildGroupPendingList(groupId, PUBLIC_BASE_URL));
         } catch (e: any) {
           console.error("LINE pending list reply failed", e?.message);
         }
@@ -2331,7 +2337,7 @@ app.post("/api/posts/caption-review/send", async (req, res) => {
     if (!vendor.clientLineGroupId) return res.status(409).json({ error: "這個 IP 還沒綁客戶 LINE 群組，請先到「LINE 串接管理 → 客戶群組」綁定" });
 
     const token = await ensureCaptionToken(vendorId);
-    const base = `https://${req.get('host')}`;
+    const base = PUBLIC_BASE_URL;
     const messages: any[] = buildCaptionReviewMessages(posts.map(p => ({
       postId: p.id, vendorName: vendor.name || '', title: p.title || '', content: p.content || '',
       scheduledAt: p.scheduledAt, platforms: p.platforms, sendCount: (p.captionReview?.sendCount || 0) + 1,
@@ -2380,7 +2386,7 @@ app.post("/api/posts/caption-review/link", async (req, res) => {
     const vendorId = String(req.body?.vendorId || '');
     if (!vendorId || !(await adminDb.collection("vendors").doc(vendorId).get()).exists) return res.status(404).json({ error: "找不到這個 IP" });
     // 一個 IP 永遠同一條、不帶月份（11-18 使用者：要貼在記事本上固定用；打開預設當月，業主自己切月份）
-    return res.json({ url: `https://${req.get('host')}/c/${await ensureCaptionToken(vendorId)}` });
+    return res.json({ url: `${PUBLIC_BASE_URL}/c/${await ensureCaptionToken(vendorId)}` });
   } catch (e: any) {
     if (e?.httpStatus) return sendAuthError(res, e);
     console.error("caption review link failed:", e?.message);
@@ -3238,7 +3244,7 @@ app.get("/api/cron/flow-digest-push", async (req, res) => {
   // 剪輯群組的每 2 天審片提醒（見 src/lib/lineReviewNotify.ts）。跟彙總互不影響，任一邊失敗另一邊照發。
   let reminders: any = null;
   try {
-    reminders = await pushReviewReminders(`https://${req.get('host')}`);
+    reminders = await pushReviewReminders(PUBLIC_BASE_URL);
   } catch (e: any) {
     console.error("review reminders failed", e);
   }
@@ -3273,7 +3279,7 @@ app.post("/api/admin/test-review-notify", async (req, res) => {
       .sort((a: any, b: any) => String(b.reviewFiles.at(-1).uploadedAt).localeCompare(String(a.reviewFiles.at(-1).uploadedAt)))[0];
     if (!sample) return res.status(404).json({ error: "還沒有走系統送審的片可當樣本" });
     const latest = sample.reviewFiles.at(-1);
-    const baseUrl = `https://${req.get('host')}`;
+    const baseUrl = PUBLIC_BASE_URL;
     const vendorEditorId = String((await adminDb.collection("vendors").doc(sample.vendorId).get()).data()?.editorId || '');
     const editorName = String((await adminDb.collection("editors").doc(sample.editorId || vendorEditorId || '_').get()).data()?.name || '');
     const title = `【測試】${sample.title || ''}`;
@@ -3442,7 +3448,7 @@ function publishAuditDeps(extra: { dryRun?: boolean; now?: Date } = {}) {
   if (!metaToken) throw Object.assign(new Error("META_PUBLISH_AUDIT_TOKEN 沒有設定"), { httpStatus: 500 });
   return {
     db: adminDb, metaToken, push: pushPublishAudit,
-    appUrl: process.env.APP_URL || "https://julongsocial.vercel.app", ...extra,
+    appUrl: PUBLIC_BASE_URL, ...extra,
   };
 }
 

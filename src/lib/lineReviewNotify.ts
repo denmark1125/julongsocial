@@ -253,8 +253,11 @@ export function buildReminderMessage(
           slow ? row('送審', `${it.days} 天${it.version && it.version > 1 ? `・第 ${it.version} 版` : ''}`) : row('通過', `${it.days} 天`),
         ],
       },
-      ...(link ? { footer: { type: 'box', layout: 'vertical', paddingAll: '10px', contents: [
+      // 11-20：LINE 電腦版不支援 clipboard 按鈕（只有手機能複製），所以多一顆「開啟預覽頁」——
+      // 電腦版點了會用瀏覽器開，網址列直接複製；也能先自己看一次片。
+      ...(link ? { footer: { type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '10px', contents: [
         { type: 'button', style: 'primary', color: BRAND, height: 'sm', action: { type: 'clipboard', label: '複製客戶連結', clipboardText: link } },
+        { type: 'button', style: 'secondary', height: 'sm', action: { type: 'uri', label: '開啟預覽頁（電腦版用）', uri: link } },
       ] } } : {}),
     };
   };
